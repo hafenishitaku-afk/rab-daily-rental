@@ -152,18 +152,6 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
 # SMS settings
 SMS_ENABLED = False  # Set to True when Twilio is configured
 
-# # =============================================
-# # PRODUCTION DATABASE CONFIGURATION
-# # =============================================
-# if os.environ.get("DATABASE_URL"):
-#     # For Render/PostgreSQL - we'll handle this differently
-#     # Since we're using SQLite for now, just note it
-#     print("Using PostgreSQL - update db() function for production")
-# else:
-#     # For local development - SQLite
-#     print(f"Using SQLite database at: {DB}")
-
-
 
 
 
@@ -4722,6 +4710,32 @@ def end_rental(rental_id):
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+
+# =============================================
+# INITIALIZE DATABASE ON STARTUP
+# =============================================
+# This runs when the app starts on Render
+with app.app_context():
+    try:
+        # Check if tables exist
+        conn = db()
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        table_exists = c.fetchone()
+        conn.close()
+        
+        if not table_exists:
+            print("Database tables not found. Initializing...")
+            init_db()
+            print("Database initialized successfully!")
+        else:
+            print("Database already initialized.")
+    except Exception as e:
+        print(f"Error checking database: {e}")
+        print("Attempting to initialize database...")
+        init_db()
 
 
 if __name__ == "__main__":
