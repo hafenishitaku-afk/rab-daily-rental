@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📊 Revenue Report</h1>
+<p class="sub">View and analyze revenue by day, week, or month.</p>
+
+<!-- Filter Controls -->
+<div class="card">
+    <h2>Filter Report</h2>
+    <form method="get" action="{{ url_for('revenue_report') }}" class="formgrid">
+        <label>
+            Period
+            <select name="period" onchange="this.form.submit()">
+                <option value="daily" {% if period == 'daily' %}selected{% endif %}>Daily</option>
+                <option value="weekly" {% if period == 'weekly' %}selected{% endif %}>Weekly</option>
+                <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>Monthly</option>
+            </select>
+        </label>
+        <label>
+            Date
+            <select name="date" onchange="this.form.submit()">
+                {% if period == 'daily' %}
+                    {% for d in available_dates %}
+                        <option value="{{ d.date }}" {% if date_filter == d.date %}selected{% endif %}>
+                            {{ d.date }}
+                        </option>
+                    {% endfor %}
+                {% elif period == 'weekly' %}
+                    {% for d in available_dates %}
+                        <option value="{{ d.date }}" {% if date_filter == d.date %}selected{% endif %}>
+                            Week {{ d.week }}, {{ d.year }}
+                        </option>
+                    {% endfor %}
+                {% else %}
+                    {% for d in available_dates %}
+                        <option value="{{ d.month }}" {% if date_filter == d.month %}selected{% endif %}>
+                            {{ d.month }}
+                        </option>
+                    {% endfor %}
+                {% endif %}
+            </select>
+        </label>
+    </form>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Revenue</div>
+        <div class="value">
+            N$ {{ "%.2f"|format(
+                daily_summary.total if daily_summary 
+                else weekly_summary.total if weekly_summary 
+                else monthly_summary.total if monthly_summary 
+                else 0
+            ) }}
+        </div>
+    </div>
+    <div class="metric">
+        <div class="label">Transactions</div>
+        <div class="value">
+            {{ daily_summary.transactions if daily_summary 
+               else weekly_summary.transactions if weekly_summary 
+               else monthly_summary.transactions if monthly_summary 
+               else 0 }}
+        </div>
+    </div>
+    <div class="metric">
+        <div class="label">Unique Customers</div>
+        <div class="value">
+            {{ daily_summary.unique_customers if daily_summary 
+               else weekly_summary.unique_customers if weekly_summary 
+               else monthly_summary.unique_customers if monthly_summary 
+               else 0 }}
+        </div>
+    </div>
+    <div class="metric">
+        <div class="label">Average per Transaction</div>
+        <div class="value">
+            N$ {{ "%.2f"|format(
+                (daily_summary.total / daily_summary.transactions) if daily_summary and daily_summary.transactions > 0
+                else (weekly_summary.total / weekly_summary.transactions) if weekly_summary and weekly_summary.transactions > 0
+                else (monthly_summary.total / monthly_summary.transactions) if monthly_summary and monthly_summary.transactions > 0
+                else 0
+            ) }}
+        </div>
+    </div>
+</div>
+
+<!-- Revenue Table -->
+<div class="card">
+    <h2>{{ report_title }}</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Transactions</th>
+                <th>Revenue</th>
+                <th>Customers</th>
+            </tr>
+            {% if daily_revenue %}
+                {% for row in daily_revenue %}
+                <tr>
+                    <td><b>{{ row.date or row.month or row.week }}</b></td>
+                    <td>{{ row.transactions }}</td>
+                    <td><b>N$ {{ "%.2f"|format(row.total) }}</b></td>
+                    <td>{{ row.unique_customers or '—' }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="4">No revenue data available for this period.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<!-- Weekly Trend Chart (if daily) -->
+{% if report_type == 'daily' and weekly_trend %}
+<div class="card">
+    <h2>Last 7 Days Trend</h2>
+    <div style="height:250px;">
+        <canvas id="trendChart"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const trendLabels = [
+        {% for row in weekly_trend %}
+            "{{ row.date }}"{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+    
+    const trendData = [
+        {% for row in weekly_trend %}
+            {{ row.total }}{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+    
+    new Chart(
+        document.getElementById("trendChart"),
+        {
+            type: "line",
+            data: {
+                labels: trendLabels,
+                datasets: [{
+                    label: "Daily Revenue (N$)",
+                    data: trendData,
+                    tension: 0.3,
+                    fill: false,
+                    borderColor: "#0d1f46"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return "N$ " + value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    );
+</script>
+
+
+
+{% endif %}
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('revenue_report') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

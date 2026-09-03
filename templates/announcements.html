@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+        <h1>📢 Announcements</h1>
+        <p class="sub">Stay updated with team communications.</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        {% if unread_count > 0 %}
+        <span class="badge" style="background:#dc3545;color:#fff;padding:8px 15px;font-size:14px;">
+            🔔 {{ unread_count }} unread
+        </span>
+        <a href="{{ url_for('mark_all_read') }}" class="btn small">✅ Mark All Read</a>
+        {% endif %}
+        <a href="{{ url_for('create_announcement') }}" class="btn yellow">+ New Announcement</a>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="grid" style="margin-bottom:20px;">
+    <div class="metric">
+        <div class="label">Total Announcements</div>
+        <div class="value">{{ announcements|length }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Unread</div>
+        <div class="value" style="color:#dc3545;">{{ unread_count }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Pinned</div>
+        <div class="value" style="color:#ffd700;">{{ announcements|selectattr('is_pinned')|list|length }}</div>
+    </div>
+</div>
+
+<!-- Announcements List -->
+<div class="announcements-list">
+    {% if announcements %}
+        {% for a in announcements %}
+        <div class="card" style="margin-bottom:15px;border-left:5px solid 
+            {% if a.priority == 'urgent' %}#dc3545
+            {% elif a.priority == 'important' %}#ffd700
+            {% else %}#0d1f46{% endif %};
+            {% if a.is_pinned %}background:#f8f9fa;{% endif %}">
+            
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+                <div style="flex:1;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        {% if a.is_pinned %}
+                        <span class="badge" style="background:#ffd700;color:#111;">📌 Pinned</span>
+                        {% endif %}
+                        {% if a.priority == 'urgent' %}
+                        <span class="badge" style="background:#dc3545;color:#fff;">🚨 Urgent</span>
+                        {% elif a.priority == 'important' %}
+                        <span class="badge" style="background:#ffd700;color:#111;">⚠️ Important</span>
+                        {% endif %}
+                        {% if not a.is_read %}
+                        <span class="badge" style="background:#0d1f46;color:#fff;">🆕 New</span>
+                        {% endif %}
+                        <span class="badge" style="background:#e4e7ec;">{{ a.category|title }}</span>
+                    </div>
+                    <h3 style="margin:8px 0 4px 0;">
+                        <a href="{{ url_for('view_announcement', announcement_id=a.id) }}" style="color:#111;text-decoration:none;">
+                            {{ a.title }}
+                        </a>
+                    </h3>
+                    <p style="color:#667085;font-size:13px;margin:0;">
+                        {{ a.content[:200] }}{% if a.content|length > 200 %}...{% endif %}
+                    </p>
+                    <div style="display:flex;gap:15px;margin-top:10px;font-size:12px;color:#667085;flex-wrap:wrap;">
+                        <span>👤 {{ a.author_name }} ({{ a.author_role }})</span>
+                        <span>📅 {{ a.created_at[:16] }}</span>
+                        {% if a.updated_at != a.created_at %}
+                        <span>✏️ Updated: {{ a.updated_at[:16] }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                    {% if session.role == 'admin' %}
+                    <form method="post" action="{{ url_for('toggle_pin_announcement', announcement_id=a.id) }}" style="display:inline;">
+                        <button class="btn small" style="background:#ffd700;color:#111;">
+                            {{ '📌 Unpin' if a.is_pinned else '📌 Pin' }}
+                        </button>
+                    </form>
+                    <form method="post" action="{{ url_for('delete_announcement', announcement_id=a.id) }}" 
+                          style="display:inline;" 
+                          onsubmit="return confirm('Delete this announcement?');">
+                        <button class="btn small" style="background:#dc3545;color:#fff;">🗑️</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="card" style="text-align:center;padding:40px;">
+            <div style="font-size:48px;">📭</div>
+            <h3>No Announcements Yet</h3>
+            <p style="color:#667085;">Be the first to create an announcement!</p>
+            <a href="{{ url_for('create_announcement') }}" class="btn yellow" style="margin-top:10px;">+ Create Announcement</a>
+        </div>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "RAB Daily Rental" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="login">
+        <div class="card" style="text-align:center;">
+            <img src="{{ url_for('static', filename='Mylogo.png') }}" 
+                 alt="RAB Rent A Bike" 
+                 style="height:180px; width:390px; margin-bottom:10px;">
+            <h1 style="font-size:28px;color:#0d1f46;">RAB</h1>
+            <p style="color:#667085;margin-bottom:25px;font-size:14px;letter-spacing:2px;">DAILY RENTAL</p>
+            
+            <!-- ✅ Staff / Customer Login Selector -->
+            <div style="display:flex;gap:10px;margin-bottom:20px;">
+                <div style="flex:1;text-align:center;padding:10px;background:#ffe500;border-radius:8px;color:#111;font-weight:bold;">
+                    👔 Staff Login
+                </div>
+                <a href="{{ url_for('customer_login') }}" style="flex:1;text-align:center;padding:10px;background:#f8f9fa;border-radius:8px;color:#667085;text-decoration:none;">
+                    👤 Customer Login
+                </a>
+            </div>
+            
+            <form method="post">
+                <label style="display:block;text-align:left;">
+                    Username
+                    <input type="text" name="username" required>
+                </label>
+                <label style="display:block;text-align:left;margin-top:12px;">
+                    Password
+                    <input type="password" name="password" required>
+                </label>
+                
+                <button class="btn yellow" style="width:100%;margin-top:20px;padding:12px;font-size:16px;">
+                    Sign in
+                </button>
+            </form>
+            
+            {% with msgs = get_flashed_messages(with_categories=true) %}
+                {% for cat, msg in msgs %}
+                    <div class="flash {{ cat }}" style="margin-top:15px;">{{ msg }}</div>
+                {% endfor %}
+            {% endwith %}
+
+            <!-- <p style="margin-top:20px;color:#667085;font-size:12px;">
+                Default Users: admin / admin123 | manager / manager123 | staff / staff123
+            </p> -->
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>➕ Add User</h1>
+<p class="sub">Create a new system user.</p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Username *
+                <input type="text" name="username" required>
+            </label>
+            <label>
+                Password *
+                <input type="password" name="password" required>
+            </label>
+            <label>
+                Full Name
+                <input type="text" name="full_name">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email">
+            </label>
+            <label>
+                Role
+                <select name="role">
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="staff" selected>Staff</option>
+                </select>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">➕ Create User</button>
+            <a href="{{ url_for('users') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

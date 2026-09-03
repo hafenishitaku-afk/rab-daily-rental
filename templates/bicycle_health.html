@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🩺 Bicycle Health Dashboard</h1>
+<p class="sub">Monitor bicycle health, condition, and maintenance status.</p>
+
+<!-- Health Summary -->
+<div class="grid">
+    <div class="metric" style="border-left:4px solid #0d1f46;">
+        <div class="label">Total Bicycles</div>
+        <div class="value">{{ health_summary.total_bicycles or 0 }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Excellent (80-100)</div>
+        <div class="value" style="color:#16834b;">{{ health_summary.excellent or 0 }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #17a2b8;">
+        <div class="label">Good (60-79)</div>
+        <div class="value" style="color:#17a2b8;">{{ health_summary.good or 0 }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #ffd700;">
+        <div class="label">Fair (40-59)</div>
+        <div class="value" style="color:#a66300;">{{ health_summary.fair or 0 }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">Poor (20-39)</div>
+        <div class="value" style="color:#dc3545;">{{ health_summary.poor or 0 }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #8b0000;">
+        <div class="label">Critical (0-19)</div>
+        <div class="value" style="color:#8b0000;">{{ health_summary.critical or 0 }}</div>
+    </div>
+</div>
+
+<div class="card" style="background:#f8f9fa;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div>
+            <span style="color:#667085;">Average Health Score</span>
+            <div style="font-size:28px;font-weight:800;color:#0d1f46;">
+                {{ "%.0f"|format(health_summary.avg_health_score or 0) }}/100
+            </div>
+        </div>
+        <div>
+            <a href="{{ url_for('calculate_all_bicycle_health') }}" class="btn yellow">🔄 Calculate All Scores</a>
+            <a href="{{ url_for('bicycles') }}" class="btn">🚲 Manage Bicycles</a>
+        </div>
+    </div>
+</div>
+
+<!-- Bicycle List -->
+<div class="card">
+    <h2>Bicycle Health Status</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bike</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Health Score</th>
+                <th>Condition</th>
+                <th>Rentals</th>
+                <th>Maintenance</th>
+                <th>Actions</th>
+            </tr>
+            {% for b in bicycles %}
+            <tr>
+                <td>
+                    <b>{{ b.bike_code }}</b>
+                    <br>
+                    <small>{{ b.brand or '' }} {{ b.model or '' }}</small>
+                </td>
+                <td>{{ b.bike_type }}</td>
+                <td>
+                    <span class="badge {% if b.status == 'Available' %}green{% elif b.status == 'Rented' %}blue{% else %}orange{% endif %}">
+                        {{ b.status }}
+                    </span>
+                </td>
+                <td>
+                    {% if b.health_score is not none %}
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="width:60px;height:8px;background:#e4e7ec;border-radius:4px;overflow:hidden;">
+                            <div style="height:100%;width:{{ b.health_score }}%;background:
+                                {% if b.health_score >= 80 %}#16834b
+                                {% elif b.health_score >= 60 %}#17a2b8
+                                {% elif b.health_score >= 40 %}#ffd700
+                                {% elif b.health_score >= 20 %}#dc3545
+                                {% else %}#8b0000{% endif %};
+                                border-radius:4px;">
+                            </div>
+                        </div>
+                        <b>{{ b.health_score }}/100</b>
+                    </div>
+                    {% else %}
+                    <span style="color:#667085;">Not assessed</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if b.condition_rating is not none %}
+                    <span class="badge {% if b.condition_rating == 'Excellent' %}green{% elif b.condition_rating == 'Good' %}blue{% elif b.condition_rating == 'Fair' %}orange{% elif b.condition_rating == 'Poor' %}red{% else %}" style="background:#8b0000;color:#fff;{% endif %}">
+                        {{ b.condition_rating }}
+                    </span>
+                    {% else %}
+                    <span style="color:#667085;">Unknown</span>
+                    {% endif %}
+                </td>
+                <td>{{ b.total_rentals or 0 }}</td>
+                <td>{{ b.maintenance_count or 0 }}</td>
+                <td>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        <a class="btn small" href="{{ url_for('bicycle_health_detail', bicycle_id=b.id) }}">📊 View</a>
+                        <a class="btn small" href="{{ url_for('update_bicycle_health', bicycle_id=b.id) }}">✏️ Update</a>
+                        <a class="btn small" href="{{ url_for('calculate_bicycle_health', bicycle_id=b.id) }}">🔄 Calc</a>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8">No bicycles available.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('bicycle_health_dashboard') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

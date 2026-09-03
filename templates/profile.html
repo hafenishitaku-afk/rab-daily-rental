@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>👤 My Profile</h1>
+<p class="sub">View and update your profile settings.</p>
+
+<div class="card">
+    <div class="grid" style="margin-bottom:20px;">
+        <div class="metric">
+            <div class="label">Username</div>
+            <div class="value" style="font-size:20px;">{{ user.username }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Role</div>
+            <div class="value" style="font-size:20px;">
+                <span class="badge {% if user.role == 'admin' %}green{% elif user.role == 'manager' %}blue{% else %}orange{% endif %}">
+                    {{ user.role }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Update Profile</h2>
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Full Name
+                <input type="text" name="full_name" value="{{ user.full_name or '' }}">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" value="{{ user.email or '' }}">
+            </label>
+            <label>
+                Current Password
+                <input type="password" name="current_password" placeholder="Required to change password">
+            </label>
+            <label>
+                New Password
+                <input type="password" name="new_password" placeholder="Leave blank to keep current">
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Update Profile</button>
+            <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

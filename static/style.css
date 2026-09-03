@@ -1,0 +1,303 @@
+:root {
+    --black: #111;
+    --yellow: #ffe500;
+    --bg: #f5f6f8;
+    --card: #fff;
+    --line: #e4e7ec;
+    --muted: #667085;
+    --green: #16834b;
+    --orange: #a66300;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: #111;
+    font: 15px 'Segoe UI', Arial, sans-serif;
+}
+
+/* ===== TOP HEADER ===== */
+.top {
+    background: #0d1f46;
+    color: #fff;
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    padding: 0 25px;
+    gap: 25px;
+}
+
+.brand {
+    font-size: 19px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.brand img {
+    height: 40px;
+    width: auto;
+    vertical-align: middle;
+}
+
+.brand span {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: #bbb;
+}
+
+.top nav {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.top nav a {
+    color: #fff;
+    text-decoration: none;
+    padding: 10px 14px;
+    border-radius: 7px;
+}
+
+.top nav a:hover {
+    background: #1a2d5a;
+}
+
+/* ===== MAIN WRAP ===== */
+.wrap {
+    max-width: 1250px;
+    margin: auto;
+    padding: 30px 22px 55px;
+    min-height: calc(100vh - 110px);
+}
+
+h1 {
+    font-size: 34px;
+    margin: 0 0 7px;
+}
+
+h2 {
+    margin: 0 0 14px;
+}
+
+.sub {
+    color: var(--muted);
+    margin-top: 0;
+}
+
+/* ===== GRID ===== */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+}
+
+.metric, .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    padding: 18px;
+    box-shadow: 0 3px 14px #00000008;
+}
+
+.metric .label {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.metric .value {
+    font-size: 27px;
+    font-weight: 800;
+    margin-top: 6px;
+}
+
+.card {
+    margin-top: 18px;
+}
+
+/* ===== ACTIONS ===== */
+.actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+
+/* ===== BUTTONS ===== */
+.btn {
+    display: inline-block;
+    border: 0;
+    border-radius: 8px;
+    background: #111;
+    color: #fff;
+    padding: 10px 14px;
+    text-decoration: none;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.btn.yellow {
+    background: var(--yellow);
+    color: #111;
+}
+
+.btn.small {
+    font-size: 12px;
+    padding: 7px 10px;
+}
+
+/* ===== FORMS ===== */
+.formgrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+
+label {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+input, select, textarea {
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #fff;
+    font: inherit;
+}
+
+textarea {
+    min-height: 80px;
+}
+
+/* ===== TABLES ===== */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 11px 9px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.scroll {
+    overflow: auto;
+}
+
+th {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+}
+
+/* ===== BADGES ===== */
+.badge {
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    background: #eee;
+}
+
+.green {
+    background: #e8f7ef;
+    color: var(--green);
+}
+
+.orange {
+    background: #fff2d9;
+    color: var(--orange);
+}
+
+.blue {
+    background: #eaf1ff;
+    color: #2459ad;
+}
+
+/* ===== FLASH MESSAGES ===== */
+.flash {
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.flash.success {
+    background: #e8f7ef;
+    color: #14633b;
+}
+
+.flash.danger {
+    background: #fdeceb;
+    color: #9d2c23;
+}
+
+/* ===== LOGIN PAGE ===== */
+.login {
+    max-width: 430px;
+    margin: 70px auto;
+}
+
+.login .card {
+    margin-top: 0;
+}
+
+/* ===== FOOTER ===== */
+footer {
+    text-align: center;
+    background: #0d1f46;
+    color: #aaa;
+    padding: 16px;
+    font-size: 12px;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 850px) {
+    .grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .top {
+        flex-direction: column;
+        padding: 15px;
+    }
+    .top nav {
+        margin: 0;
+    }
+    .formgrid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 560px) {
+    .grid {
+        grid-template-columns: 1fr;
+    }
+    .wrap {
+        padding: 22px 13px;
+    }
+}
+
+
+/* Delete Button */
+.btn.danger {
+    background: #dc3545;
+    color: #fff;
+}
+.btn.danger:hover {
+    background: #c82333;
+}
+
+/* Action buttons container */
+.action-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}

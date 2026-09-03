@@ -1,0 +1,4729 @@
+# import os
+# from dotenv import load_dotenv
+
+# # Load environment variables
+# load_dotenv()
+
+# # Set secret key from environment
+# app.secret_key = os.environ.get("SECRET_KEY", "default-dev-key-change-me")
+
+# # Production database configuration
+# if os.environ.get("DATABASE_URL"):
+#     # For Render/PostgreSQL
+#     DATABASE_URL = os.environ.get("DATABASE_URL")
+# else:
+#     # For local development
+#     DB = Path(__file__).resolve().parent / "rab.db"
+
+# from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+# import sqlite3
+# from pathlib import Path
+# from functools import wraps
+# from datetime import datetime, date, timedelta
+# from werkzeug.security import generate_password_hash, check_password_hash
+# from werkzeug.utils import secure_filename
+# import os
+
+# import csv
+# from io import StringIO, BytesIO
+# from datetime import datetime
+# from reportlab.lib.pagesizes import A4, landscape
+# from reportlab.lib import colors
+# from reportlab.lib.units import mm
+# from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+# from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+# from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+# from flask import make_response
+
+
+
+# # =============================================
+# # NOTIFICATION CONFIGURATION
+# # =============================================
+
+# # Email configuration (for development, use console logging)
+# import smtplib
+# from email.mime.text import MIMEText
+# from email.mime.multipart import MIMEMultipart
+
+
+# EMAIL_ENABLED = True
+# EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+# EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+# EMAIL_USER = os.environ.get("EMAIL_USER", "your-email@gmail.com")
+# EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "your-app-password")
+# EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
+
+# # SMS settings
+# SMS_ENABLED = False  # Set to True when Twilio is configured
+
+
+
+
+
+# BASE = Path(__file__).resolve().parent
+# DB = BASE / "rab.db"
+
+# app = Flask(__name__)
+# app.secret_key = os.environ.get("SECRET_KEY", "daily-rental-secret-key")
+
+# # Upload folder configuration
+# UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+# os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+# def db():
+#     """Connect to the database with foreign keys enabled."""
+#     conn = sqlite3.connect(DB)
+#     conn.execute("PRAGMA foreign_keys = ON")
+#     conn.row_factory = sqlite3.Row
+#     return conn
+
+
+import os
+import csv
+import sqlite3
+import smtplib
+from io import StringIO, BytesIO
+from pathlib import Path
+from functools import wraps
+from datetime import datetime, date, timedelta
+
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+# =============================================
+# LOAD ENVIRONMENT VARIABLES
+# =============================================
+load_dotenv()
+
+# =============================================
+# BASE PATH
+# =============================================
+BASE = Path(__file__).resolve().parent
+DB = BASE / "rab.db"
+
+# =============================================
+# CREATE APP
+# =============================================
+app = Flask(__name__)
+
+# Secret key - use environment variable in production
+app.secret_key = os.environ.get("SECRET_KEY", "daily-rental-secret-key")
+
+# =============================================
+# UPLOAD FOLDER
+# =============================================
+UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# =============================================
+# DATABASE CONNECTION
+# =============================================
+def db():
+    """Connect to the database with foreign keys enabled."""
+    conn = sqlite3.connect(DB)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# =============================================
+# NOTIFICATION CONFIGURATION
+# =============================================
+EMAIL_ENABLED = True
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_USER = os.environ.get("EMAIL_USER", "your-email@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "your-app-password")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
+
+# SMS settings
+SMS_ENABLED = False  # Set to True when Twilio is configured
+
+# # =============================================
+# # PRODUCTION DATABASE CONFIGURATION
+# # =============================================
+# if os.environ.get("DATABASE_URL"):
+#     # For Render/PostgreSQL - we'll handle this differently
+#     # Since we're using SQLite for now, just note it
+#     print("Using PostgreSQL - update db() function for production")
+# else:
+#     # For local development - SQLite
+#     print(f"Using SQLite database at: {DB}")
+
+
+
+
+
+
+def login_required(f):
+    """Check if user is logged in."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please login to access this page.", "warning")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+
+
+def init_db():
+    """Initialize the database with daily rental tables."""
+    conn = db()
+    c = conn.cursor()
+    
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'staff',
+        full_name TEXT,
+        email TEXT,
+        branch_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS customers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        id_number TEXT,
+        phone TEXT NOT NULL,
+        email TEXT,
+        address TEXT,
+        user_id INTEGER,
+        terms_accepted INTEGER DEFAULT 0,
+        terms_accepted_date TEXT,
+        signature_data TEXT,
+        verification_status TEXT DEFAULT 'Pending',
+        verification_notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS customer_documents(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        document_type TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS bicycles(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bike_code TEXT UNIQUE NOT NULL,
+        brand TEXT,
+        model TEXT,
+        bike_type TEXT DEFAULT 'Standard',
+        hourly_rate REAL DEFAULT 20,
+        daily_cap REAL DEFAULT 120,
+        deposit_amount REAL DEFAULT 50,
+        status TEXT DEFAULT 'Available',
+        branch_id INTEGER,
+        notes TEXT,
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS daily_rentals(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        bicycle_id INTEGER NOT NULL,
+        branch_id INTEGER,
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        actual_return_time TEXT,
+        total_hours REAL,
+        total_cost REAL,
+        hourly_rate REAL,
+        daily_cap REAL,
+        deposit_paid REAL DEFAULT 0,
+        late_fee REAL DEFAULT 0,
+        discount_code_id INTEGER,
+        discount_amount REAL DEFAULT 0,
+        payment_status TEXT DEFAULT 'Pending',
+        payment_method TEXT,
+        status TEXT DEFAULT 'Active',
+        condition_before TEXT,
+        condition_after TEXT,
+        agreement_signed INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (bicycle_id) REFERENCES bicycles(id),
+        FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS daily_rates(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bike_type TEXT,
+        hourly_rate REAL DEFAULT 20,
+        daily_cap REAL DEFAULT 120,
+        deposit REAL DEFAULT 50,
+        is_active INTEGER DEFAULT 1
+    );
+    
+    CREATE TABLE IF NOT EXISTS rental_payments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        daily_rental_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        payment_method TEXT,
+        status TEXT DEFAULT 'Completed',
+        FOREIGN KEY (daily_rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS verification_requests(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        verified_by INTEGER,
+        status TEXT DEFAULT 'Pending',
+        notes TEXT,
+        verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS reminder_logs(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rental_id INTEGER NOT NULL,
+        reminder_type TEXT NOT NULL,
+        sent_to TEXT NOT NULL,
+        sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS discount_codes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        description TEXT,
+        discount_type TEXT NOT NULL,
+        discount_value REAL NOT NULL,
+        min_rental_amount REAL DEFAULT 0,
+        max_uses INTEGER DEFAULT 0,
+        used_count INTEGER DEFAULT 0,
+        start_date TEXT,
+        end_date TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS discount_usage(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discount_code_id INTEGER NOT NULL,
+        rental_id INTEGER NOT NULL,
+        customer_id INTEGER NOT NULL,
+        amount_discounted REAL NOT NULL,
+        used_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
+        FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS loyalty_points(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        points INTEGER DEFAULT 0,
+        total_spent REAL DEFAULT 0,
+        total_rentals INTEGER DEFAULT 0,
+        tier TEXT DEFAULT 'Bronze',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS points_transactions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        points INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL,
+        description TEXT,
+        rental_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS maintenance_records(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bicycle_id INTEGER NOT NULL,
+        maintenance_type TEXT NOT NULL,
+        description TEXT,
+        cost REAL DEFAULT 0,
+        status TEXT DEFAULT 'Scheduled',
+        scheduled_date TEXT,
+        completed_date TEXT,
+        performed_by TEXT,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS bike_conditions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bicycle_id INTEGER NOT NULL,
+        condition_type TEXT NOT NULL,
+        condition_status TEXT NOT NULL,
+        notes TEXT,
+        checked_by INTEGER,
+        checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        rental_id INTEGER,
+        FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE,
+        FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS branches(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        location TEXT,
+        address TEXT,
+        phone TEXT,
+        email TEXT,
+        manager_id INTEGER,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS bicycle_health(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bicycle_id INTEGER NOT NULL,
+        health_score INTEGER DEFAULT 100,
+        condition_rating TEXT DEFAULT 'Excellent',
+        last_maintenance_date TEXT,
+        next_maintenance_due TEXT,
+        total_maintenance_count INTEGER DEFAULT 0,
+        total_repair_cost REAL DEFAULT 0,
+        last_condition_check TEXT,
+        notes TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS bicycle_health_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bicycle_id INTEGER NOT NULL,
+        health_score INTEGER NOT NULL,
+        condition_rating TEXT NOT NULL,
+        reason TEXT,
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS announcements(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        author_id INTEGER NOT NULL,
+        author_name TEXT NOT NULL,
+        author_role TEXT NOT NULL,
+        priority TEXT DEFAULT 'normal',
+        category TEXT DEFAULT 'general',
+        is_pinned INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS announcement_comments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        announcement_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        user_role TEXT NOT NULL,
+        comment TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE IF NOT EXISTS announcement_reads(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        announcement_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        read_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(announcement_id, user_id)
+    );
+    """)
+    
+    # Add default rates
+    c.execute("SELECT COUNT(*) FROM daily_rates")
+    if c.fetchone()[0] == 0:
+        c.executescript("""
+            INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+            VALUES ('Standard', 20, 120, 50);
+            INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+            VALUES ('Electric', 30, 180, 75);
+            INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+            VALUES ('Mountain', 25, 150, 60);
+        """)
+    
+    # ✅ Create default users with INSERT OR IGNORE
+    c.execute("""
+        INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+        VALUES ('admin', ?, 'admin', 'System Administrator')
+    """, (generate_password_hash("admin123"),))
+    
+    c.execute("""
+        INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+        VALUES ('manager', ?, 'manager', 'Store Manager')
+    """, (generate_password_hash("manager123"),))
+    
+    c.execute("""
+        INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+        VALUES ('staff', ?, 'staff', 'Sales Staff')
+    """, (generate_password_hash("staff123"),))
+    
+    conn.commit()
+    conn.close()
+
+
+
+
+
+@app.route("/")
+def home():
+    return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
+
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        conn = db()
+        c = conn.cursor()
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        
+        user = c.execute(
+            "SELECT * FROM users WHERE username = ?", 
+            (username,)
+        ).fetchone()
+        
+        
+        if user and check_password_hash(user["password_hash"], password):
+            # ✅ Check if user is customer - redirect to customer portal
+            if user["role"] == "customer":
+                session["user_id"] = user["id"]
+                session["username"] = user["username"]
+                session["role"] = user["role"]
+                session["full_name"] = user["full_name"]
+                
+                # Get customer ID
+                conn = db()
+                c = conn.cursor()
+                customer = c.execute(
+                    "SELECT id FROM customers WHERE user_id = ?", 
+                    (user["id"],)
+                ).fetchone()
+                conn.close()
+                
+                if customer:
+                    session["customer_id"] = customer["id"]
+                
+                flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
+                return redirect(url_for("customer_portal"))
+            
+            # Staff user
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+            session["full_name"] = user["full_name"]
+            
+            flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
+            return redirect(url_for("dashboard"))
+        
+        flash("Invalid username or password.", "danger")
+    
+    return render_template("login.html", title="Login - Daily Rentals")
+
+
+
+
+@app.route("/customer-login", methods=["GET", "POST"])
+def customer_login():
+    """Customer login page."""
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        
+        conn = db()
+        c = conn.cursor()
+        
+        user = c.execute(
+            "SELECT * FROM users WHERE username = ? AND role = 'customer'", 
+            (username,)
+        ).fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user["password_hash"], password):
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+            session["full_name"] = user["full_name"]
+            
+            # Get customer ID
+            conn = db()
+            c = conn.cursor()
+            customer = c.execute(
+                "SELECT id FROM customers WHERE user_id = ?", 
+                (user["id"],)
+            ).fetchone()
+            conn.close()
+            
+            if customer:
+                session["customer_id"] = customer["id"]
+            
+            flash(f"Welcome back, {user['full_name']}!", "success")
+            return redirect(url_for("customer_portal"))
+        
+        flash("Invalid username or password.", "danger")
+    
+    return render_template("customer_login.html", title="Customer Login")
+
+
+
+#KAMWE OKOHAKA NATANGO NGII MAALA INAKAPWA KAA. TYEKA SHITIIKA DESING NAWA NAWA
+
+
+
+
+
+def role_required(allowed_roles):
+    """Decorator to check if user has required role."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if not session.get("user_id"):
+                flash("Please login to access this page.", "warning")
+                return redirect(url_for("login"))
+            
+            conn = db()
+            c = conn.cursor()
+            user = c.execute(
+                "SELECT role FROM users WHERE id = ?", 
+                (session["user_id"],)
+            ).fetchone()
+            conn.close()
+            
+            if not user:
+                flash("User not found.", "danger")
+                return redirect(url_for("logout"))
+            
+            if user["role"] not in allowed_roles:
+                flash("You don't have permission to access this page.", "danger")
+                return redirect(url_for("dashboard"))
+            
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def admin_required(f):
+    """Admin-only access."""
+    return role_required(['admin'])(f)
+
+def manager_required(f):
+    """Manager and admin access."""
+    return role_required(['admin', 'manager'])(f)
+
+
+
+
+def admin_required(f):
+    """Decorator for admin-only access."""
+    return role_required(['admin'])(f)
+
+def manager_required(f):
+    """Decorator for manager and admin access."""
+    return role_required(['admin', 'manager'])(f)
+
+# def staff_required(f):
+#     """Decorator for all logged-in users."""
+#     return login_required(f)
+
+
+def staff_required(f):
+    """Staff-only access (blocks customers)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please login to access this page.", "warning")
+            return redirect(url_for("login"))
+        
+        if session.get("role") == "customer":
+            flash("Access denied. Staff only.", "danger")
+            return redirect(url_for("customer_portal"))
+        
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ✅ ADD THIS - Customer-only decorator
+def customer_required(f):
+    """Customer-only access (blocks staff)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please login to access this page.", "warning")
+            return redirect(url_for("login"))
+        
+        if session.get("role") != "customer":
+            flash("Access denied. Customers only.", "danger")
+            return redirect(url_for("dashboard"))
+        
+        return f(*args, **kwargs)
+    return wrapper
+
+
+
+
+
+# =============================================
+# USER MANAGEMENT ROUTES
+# =============================================
+
+@app.route("/users")
+@login_required
+@admin_required
+def users():
+    """View all users (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+    
+    users = c.execute("""
+        SELECT id, username, role, full_name, email, created_at
+        FROM users
+        ORDER BY role, username
+    """).fetchall()
+    
+    conn.close()
+    return render_template("users.html", title="User Management", users=users)
+
+
+@app.route("/users/add", methods=["GET", "POST"])
+@login_required
+@admin_required
+def add_user():
+    """Add a new user (Admin only)."""
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        role = request.form.get("role", "staff")
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip()
+        
+        if not username or not password:
+            flash("Username and password are required.", "danger")
+            return redirect(url_for("add_user"))
+        
+        conn = db()
+        c = conn.cursor()
+        
+        try:
+            c.execute("""
+                INSERT INTO users (username, password_hash, role, full_name, email)
+                VALUES (?, ?, ?, ?, ?)
+            """, (username, generate_password_hash(password), role, full_name, email))
+            conn.commit()
+            flash(f"User '{username}' created successfully!", "success")
+        except sqlite3.IntegrityError:
+            flash(f"Username '{username}' already exists.", "danger")
+        finally:
+            conn.close()
+        
+        return redirect(url_for("users"))
+    
+    return render_template("add_user.html", title="Add User")
+
+
+@app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_user(user_id):
+    """Edit a user (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+    
+    user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for("users"))
+    
+    if request.method == "POST":
+        role = request.form.get("role", "staff")
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip()
+        new_password = request.form.get("new_password", "").strip()
+        
+        if new_password:
+            c.execute("""
+                UPDATE users 
+                SET role = ?, full_name = ?, email = ?, password_hash = ?
+                WHERE id = ?
+            """, (role, full_name, email, generate_password_hash(new_password), user_id))
+        else:
+            c.execute("""
+                UPDATE users 
+                SET role = ?, full_name = ?, email = ?
+                WHERE id = ?
+            """, (role, full_name, email, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        flash(f"User '{user['username']}' updated successfully!", "success")
+        return redirect(url_for("users"))
+    
+    conn.close()
+    return render_template("edit_user.html", title="Edit User", user=user)
+
+
+
+
+@app.route("/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_user(user_id):
+    """Delete a user (Admin only)."""
+    if user_id == session["user_id"]:
+        flash("You cannot delete your own account.", "danger")
+        return redirect(url_for("users"))
+    
+    conn = db()
+    c = conn.cursor()
+    
+    # Check if user exists
+    user = c.execute("SELECT username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for("users"))
+    
+    try:
+        # ✅ STEP 1: Get customer ID if exists
+        customer = c.execute("SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+        
+        if customer:
+            customer_id = customer["id"]
+            
+            # ✅ STEP 2: Delete customer documents FIRST
+            c.execute("DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 3: Delete discount usage
+            c.execute("DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 4: Delete loyalty points
+            c.execute("DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 5: Delete points transactions
+            c.execute("DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 6: Delete verification requests
+            c.execute("DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 7: Get all rentals for this customer
+            rentals = c.execute("SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
+            
+            for rental in rentals:
+                rental_id = rental["id"]
+                # Delete rental payments
+                c.execute("DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental_id,))
+                # Delete reminder logs
+                c.execute("DELETE FROM reminder_logs WHERE rental_id = ?", (rental_id,))
+                # Delete bike conditions
+                c.execute("DELETE FROM bike_conditions WHERE rental_id = ?", (rental_id,))
+            
+            # ✅ STEP 8: Delete rentals
+            c.execute("DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
+            
+            # ✅ STEP 9: Finally delete the customer
+            c.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        
+        # ✅ STEP 10: Delete user's announcement comments
+        c.execute("DELETE FROM announcement_comments WHERE user_id = ?", (user_id,))
+        
+        # ✅ STEP 11: Delete user's announcements
+        c.execute("DELETE FROM announcements WHERE author_id = ?", (user_id,))
+        
+        # ✅ STEP 12: Delete verification requests where user is verifier
+        c.execute("DELETE FROM verification_requests WHERE verified_by = ?", (user_id,))
+        
+        # ✅ STEP 13: Delete bike conditions where user is checker
+        c.execute("DELETE FROM bike_conditions WHERE checked_by = ?", (user_id,))
+        
+        # ✅ STEP 14: Finally delete the user
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        
+        conn.commit()
+        flash(f"User '{user['username']}' deleted successfully.", "success")
+        
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        flash(f"Cannot delete user: {str(e)}", "danger")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error deleting user: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("users"))
+
+
+
+
+# =============================================
+# PASSWORD RESET (Admin Only)
+# =============================================
+
+@app.route("/customers/<int:customer_id>/reset-password", methods=["GET", "POST"])
+@login_required
+@admin_required
+def reset_customer_password(customer_id):
+    """Reset a customer's password (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get customer
+    customer = c.execute("""
+        SELECT c.*, u.id AS user_id, u.username 
+        FROM customers c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.id = ?
+    """, (customer_id,)).fetchone()
+    
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    if request.method == "POST":
+        new_password = request.form.get("new_password", "").strip()
+        
+        if not new_password or len(new_password) < 6:
+            flash("Password must be at least 6 characters.", "danger")
+            return redirect(url_for("reset_customer_password", customer_id=customer_id))
+        
+        # Update password
+        c.execute("""
+            UPDATE users 
+            SET password_hash = ? 
+            WHERE id = ?
+        """, (generate_password_hash(new_password), customer["user_id"]))
+        
+        conn.commit()
+        conn.close()
+        
+        flash(f"Password reset successful for {customer['full_name']}!", "success")
+        flash(f"New Password: {new_password} - Please give this to the customer.", "info")
+        return redirect(url_for("customers"))
+    
+    conn.close()
+    return render_template(
+        "reset_customer_password.html",
+        title="Reset Password",
+        customer=customer
+    )
+
+
+
+
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    """View and edit own profile."""
+    conn = db()
+    c = conn.cursor()
+    
+    user = c.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip()
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        
+        if current_password and new_password:
+            if not check_password_hash(user["password_hash"], current_password):
+                flash("Current password is incorrect.", "danger")
+                return redirect(url_for("profile"))
+            
+            c.execute("""
+                UPDATE users 
+                SET full_name = ?, email = ?, password_hash = ?
+                WHERE id = ?
+            """, (full_name, email, generate_password_hash(new_password), session["user_id"]))
+        else:
+            c.execute("""
+                UPDATE users 
+                SET full_name = ?, email = ?
+                WHERE id = ?
+            """, (full_name, email, session["user_id"]))
+        
+        conn.commit()
+        conn.close()
+        
+        flash("Profile updated successfully!", "success")
+        return redirect(url_for("profile"))
+    
+    conn.close()
+    return render_template("profile.html", title="My Profile", user=user)
+
+
+
+
+
+
+@app.route("/customer-rentals")
+@login_required
+@customer_required
+def customer_rentals():
+    """Customer view - only their own rentals."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get customer ID
+    customer = c.execute(
+        "SELECT id FROM customers WHERE user_id = ?", 
+        (session["user_id"],)
+    ).fetchone()
+    
+    if not customer:
+        flash("Customer profile not found.", "danger")
+        return redirect(url_for("customer_portal"))
+    
+    # Get customer's rentals only
+    rentals = c.execute("""
+        SELECT 
+            r.*,
+            b.bike_code,
+            b.brand,
+            b.model
+        FROM daily_rentals r
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.customer_id = ?
+        ORDER BY r.start_time DESC
+    """, (customer["id"],)).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "customer_rentals.html",
+        title="My Rentals",
+        rentals=rentals
+    )
+
+
+@app.route("/customer-rent")
+@login_required
+@customer_required
+def customer_rent():
+    """Customer view - browse available bikes (cannot start rental)."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get available bikes only
+    bikes = c.execute("""
+        SELECT * FROM bicycles 
+        WHERE status = 'Available'
+        ORDER BY bike_code
+    """).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "customer_rent.html",
+        title="Available Bicycles",
+        bikes=bikes
+    )
+
+
+
+
+
+
+
+
+
+@app.route("/dashboard")
+@login_required
+@staff_required
+def dashboard():
+    conn = db()
+    c = conn.cursor()
+
+    # Get user info
+    user = c.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+
+
+    total_bikes = c.execute("SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
+    active_rentals = c.execute("SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
+    total_customers = c.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+    
+    pending_verification = c.execute(
+        "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'"
+    ).fetchone()[0]
+    
+    today_revenue = c.execute("""
+        SELECT COALESCE(SUM(total_cost), 0) 
+        FROM daily_rentals 
+        WHERE date(created_at) = date('now') 
+        AND status = 'Completed'
+    """).fetchone()[0]
+    
+    rentals = c.execute("""
+        SELECT 
+            r.id,
+            c.full_name,
+            b.bike_code,
+            r.start_time,
+            strftime('%H:%M', 'now', 'localtime') AS duration
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.status = 'Active'
+        ORDER BY r.start_time DESC
+    """).fetchall()
+    
+
+    # 👇 ADD THIS: Completed but unpaid rentals
+    unpaid_rentals = c.execute("""
+        SELECT 
+            r.id,
+            c.full_name,
+            b.bike_code,
+            r.total_cost,
+            r.start_time,
+            r.end_time
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.status = 'Completed'
+        AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
+        ORDER BY r.end_time DESC
+    """).fetchall()
+
+
+
+    conn.close()
+    
+    return render_template(
+        "dashboard.html",
+        title="Dashboard - Daily Rentals",
+        user=user,
+        total_bikes=total_bikes,
+        active_rentals=active_rentals,
+        total_customers=total_customers,
+        pending_verification=pending_verification,
+        today_revenue=today_revenue,
+        rentals=rentals,
+        unpaid_rentals=unpaid_rentals 
+    )
+
+
+@app.route("/rentals/start", methods=["GET", "POST"])
+@login_required
+@staff_required
+def start_rental():
+    conn = db()
+    c = conn.cursor()
+    
+    if request.method == "POST":
+        customer_id = request.form.get("customer_id")
+        bicycle_id = request.form.get("bicycle_id")
+        start_time = request.form.get("start_time")
+        
+        # Verify customer is verified
+        customer = c.execute(
+            "SELECT verification_status FROM customers WHERE id = ?",
+            (customer_id,)
+        ).fetchone()
+        
+        if not customer or customer["verification_status"] != "Verified":
+            flash("Customer must be verified before renting.", "danger")
+            return redirect(url_for("start_rental"))
+        
+        bike = c.execute(
+            "SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?",
+            (bicycle_id,)
+        ).fetchone()
+        
+        if not bike:
+            flash("Bicycle not found.", "danger")
+            return redirect(url_for("start_rental"))
+        
+        c.execute("""
+            INSERT INTO daily_rentals (
+                customer_id, bicycle_id, start_time, 
+                hourly_rate, daily_cap, deposit_paid, status,
+                agreement_signed
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
+        """, (
+            customer_id, bicycle_id, start_time,
+            bike["hourly_rate"], bike["daily_cap"], bike["deposit_amount"]
+        ))
+        
+        rental_id = c.lastrowid
+        
+        c.execute("UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        flash(f"Rental started successfully! Rental ID: {rental_id}", "success")
+        return redirect(url_for("dashboard"))
+    
+    customers = c.execute(
+        "SELECT id, full_name, phone FROM customers WHERE verification_status = 'Verified' ORDER BY full_name"
+    ).fetchall()
+    
+    bicycles = c.execute(
+        "SELECT id, bike_code, brand, model, hourly_rate, daily_cap FROM bicycles WHERE status = 'Available'"
+    ).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "start_rental.html",
+        title="Start Rental",
+        customers=customers,
+        bicycles=bicycles,
+        now=datetime.now().strftime("%Y-%m-%dT%H:%M")
+    )
+
+
+
+@app.route("/customers", methods=["GET", "POST"])
+@login_required
+@staff_required
+def customers():
+    conn = db()
+    c = conn.cursor()
+    
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        id_number = request.form.get("id_number", "").strip()
+        email = request.form.get("email", "").strip()
+        address = request.form.get("address", "").strip()
+        id_photo = request.files.get("id_photo") if request.files else None
+        customer_photo = request.files.get("customer_photo") if request.files else None
+        terms_accepted = request.form.get("terms_accepted") == "on"
+        signature_data = request.form.get("signature_data", "").strip()
+        
+        if not full_name or not phone:
+            flash("Name and phone are required.", "danger")
+            return redirect(url_for("customers"))
+        
+        if not terms_accepted:
+            flash("You must accept the Terms & Conditions.", "danger")
+            return redirect(url_for("customers"))
+        
+        # ✅ STEP 1: Create a user account for the customer
+        # Use phone as username (or email if phone exists)
+        username = phone
+        
+        # Check if username already exists
+        existing_user = c.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        if existing_user:
+            # If phone exists, try email
+            if email:
+                username = email
+            else:
+                username = f"cust_{phone}"
+        
+        # Generate a random password (customer can change it later)
+        import secrets
+        import string
+        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+        password_hash = generate_password_hash(temp_password)
+        
+        # Insert user with role 'customer'
+        try:
+            c.execute("""
+                INSERT INTO users (username, password_hash, role, full_name, email)
+                VALUES (?, ?, 'customer', ?, ?)
+            """, (username, password_hash, full_name, email))
+            user_id = c.lastrowid
+        except sqlite3.IntegrityError:
+            flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
+            return redirect(url_for("customers"))
+        
+        # ✅ STEP 2: Insert customer with user_id
+        c.execute("""
+            INSERT INTO customers (
+                full_name, id_number, phone, email, address, user_id,
+                terms_accepted, terms_accepted_date, signature_data, verification_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
+        """, (full_name, id_number, phone, email, address, user_id, 
+              terms_accepted, signature_data))
+        
+        customer_id = c.lastrowid
+        session["customer_id"] = customer_id
+        
+        # Save uploaded files
+        import os
+        from werkzeug.utils import secure_filename
+        
+        UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
+        if id_photo and id_photo.filename:
+            filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+            id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            c.execute("""
+                INSERT INTO customer_documents (customer_id, document_type, file_path)
+                VALUES (?, 'id_copy', ?)
+            """, (customer_id, f"uploads/{filename}"))
+        
+        if customer_photo and customer_photo.filename:
+            filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+            customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            c.execute("""
+                INSERT INTO customer_documents (customer_id, document_type, file_path)
+                VALUES (?, 'customer_photo', ?)
+            """, (customer_id, f"uploads/{filename}"))
+        
+        conn.commit()
+        conn.close()
+        
+        # ✅ STEP 3: Show credentials to staff
+        flash(f"Customer '{full_name}' registered successfully!", "success")
+        flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
+        flash("📌 Please give these credentials to the customer.", "info")
+        
+        return redirect(url_for("customers"))
+    
+    customers = c.execute("SELECT * FROM customers ORDER BY full_name").fetchall()
+    conn.close()
+    
+    return render_template("customers.html", title="Customers", customers=customers)
+
+
+
+
+
+
+
+@app.route("/customers/<int:customer_id>/verify", methods=["GET"])
+@login_required
+def verify_customer_page(customer_id):
+    """Show verification page for a customer."""
+    conn = db()
+    c = conn.cursor()
+    
+    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    conn.close()
+    return render_template("verify_customer.html", title="Verify Customer", customer=customer)
+
+
+
+
+
+@app.route("/customers/<int:customer_id>/verify", methods=["POST"])
+@login_required
+def verify_customer(customer_id):
+    """Verify or reject a customer."""
+    conn = db()
+    c = conn.cursor()
+    
+    # ✅ Check if customer exists
+    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    status = request.form.get("verification_status", "Pending")
+    notes = request.form.get("verification_notes", "").strip()
+    
+    try:
+        # ✅ STEP 1: Update customer verification status
+        c.execute("""
+            UPDATE customers 
+            SET verification_status = ?, verification_notes = ?
+            WHERE id = ?
+        """, (status, notes, customer_id))
+        
+        # ✅ STEP 2: Insert into verification_requests
+        # Make sure the user exists in the users table
+        user = c.execute("SELECT id FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+        
+        if user:
+            c.execute("""
+                INSERT INTO verification_requests (customer_id, verified_by, status, notes)
+                VALUES (?, ?, ?, ?)
+            """, (customer_id, session["user_id"], status, notes))
+        else:
+            # If user doesn't exist, insert with NULL or skip
+            flash("Warning: User not found for verification record.", "warning")
+        
+        conn.commit()
+        flash(f"Customer verification updated to {status}.", "success")
+        
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        flash(f"Error updating verification: {str(e)}", "danger")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error updating verification: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("customers"))
+
+
+@app.route("/customers/<int:customer_id>/documents")
+@login_required
+def view_documents(customer_id):
+    conn = db()
+    c = conn.cursor()
+    
+    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    documents = c.execute("""
+        SELECT * FROM customer_documents 
+        WHERE customer_id = ? 
+        ORDER BY uploaded_at DESC
+    """, (customer_id,)).fetchall()
+    
+    conn.close()
+    
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    return render_template(
+        "documents.html",
+        title="Customer Documents",
+        customer=customer,
+        documents=documents
+    )
+
+
+
+@app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
+@login_required
+def view_document_file(customer_id, doc_id):
+    conn = db()
+    c = conn.cursor()
+    
+    doc = c.execute("""
+        SELECT * FROM customer_documents 
+        WHERE id = ? AND customer_id = ?
+    """, (doc_id, customer_id)).fetchone()
+    conn.close()
+    
+    if not doc:
+        flash("Document not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    return render_template(
+        "view_document.html",
+        title="View Document",
+        doc=doc,
+        customer_id=customer_id
+    )
+
+
+
+
+
+
+@app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
+@login_required
+def record_payment(rental_id):
+    conn = db()
+    c = conn.cursor()
+    
+    rental = c.execute("""
+        SELECT r.*, c.full_name, b.bike_code
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+    
+    if not rental:
+        flash("Rental not found.", "danger")
+        return redirect(url_for("dashboard"))
+    
+    if request.method == "POST":
+        amount = float(request.form.get("amount", 0))
+        payment_method = request.form.get("payment_method", "Cash")
+        
+        if amount <= 0:
+            flash("Payment amount must be greater than zero.", "danger")
+            return redirect(url_for("record_payment", rental_id=rental_id))
+        
+        c.execute("""
+            INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
+            VALUES (?, ?, ?, 'Completed')
+        """, (rental_id, amount, payment_method))
+        
+        c.execute("""
+            UPDATE daily_rentals 
+            SET payment_status = 'Paid'
+            WHERE id = ?
+        """, (rental_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
+        return redirect(url_for("payment_history"))
+    
+    conn.close()
+    
+    return render_template(
+        "record_payment.html",
+        title="Record Payment",
+        rental=rental
+    )
+
+
+
+
+@app.route("/payments")
+@login_required
+@staff_required
+def payment_history():
+    conn = db()
+    c = conn.cursor()
+    
+    payments = c.execute("""
+        SELECT 
+            p.*,
+            r.id AS rental_id,
+            b.bike_code,
+            c.full_name
+        FROM rental_payments p
+        JOIN daily_rentals r ON r.id = p.daily_rental_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        JOIN customers c ON c.id = r.customer_id
+        ORDER BY p.payment_date DESC
+        LIMIT 50
+    """).fetchall()
+    
+    # Get total revenue
+    total_revenue = c.execute("""
+        SELECT COALESCE(SUM(amount), 0) FROM rental_payments
+    """).fetchone()[0]
+    
+    conn.close()
+    
+    return render_template(
+        "payment_history.html",
+        title="Payment History",
+        payments=payments,
+        total_revenue=total_revenue
+    )
+
+
+
+
+@app.route("/reports/revenue")
+@login_required
+@staff_required
+def revenue_report():
+    conn = db()
+    c = conn.cursor()
+    
+    # Get date range from query parameters
+    period = request.args.get("period", "daily")  # daily, weekly, monthly
+    date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    
+    # =============================================
+    # DAILY REVENUE
+    # =============================================
+    if period == "daily":
+        daily_revenue = c.execute("""
+            SELECT 
+                date(r.payment_date) AS date,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(r.amount), 0) AS total,
+                GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
+            FROM rental_payments r
+            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+            JOIN bicycles b ON b.id = dr.bicycle_id
+            WHERE date(r.payment_date) = ?
+            GROUP BY date(r.payment_date)
+            ORDER BY date(r.payment_date) DESC
+        """, (date_filter,)).fetchall()
+        
+        # Get daily summary
+        daily_summary = c.execute("""
+            SELECT 
+                COALESCE(SUM(amount), 0) AS total,
+                COUNT(*) AS transactions,
+                COUNT(DISTINCT dr.customer_id) AS unique_customers
+            FROM rental_payments r
+            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+            WHERE date(r.payment_date) = ?
+        """, (date_filter,)).fetchone()
+        
+        # Get all available dates for dropdown
+        available_dates = c.execute("""
+            SELECT DISTINCT date(payment_date) AS date
+            FROM rental_payments
+            ORDER BY date DESC
+        """).fetchall()
+        
+        # Get last 7 days trend
+        weekly_trend = c.execute("""
+            SELECT 
+                date(r.payment_date) AS date,
+                COALESCE(SUM(r.amount), 0) AS total
+            FROM rental_payments r
+            WHERE date(r.payment_date) >= date('now', '-7 days')
+            GROUP BY date(r.payment_date)
+            ORDER BY date(r.payment_date) ASC
+        """).fetchall()
+        
+        report_title = f"Revenue Report - {date_filter}"
+    
+    # =============================================
+    # WEEKLY REVENUE
+    # =============================================
+    elif period == "weekly":
+        # Get week number and year
+        year = request.args.get("year", datetime.now().strftime("%Y"))
+        week = request.args.get("week", datetime.now().strftime("%W"))
+        
+        weekly_revenue = c.execute("""
+            SELECT 
+                strftime('%W', r.payment_date) AS week,
+                strftime('%Y', r.payment_date) AS year,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(r.amount), 0) AS total
+            FROM rental_payments r
+            WHERE strftime('%W', r.payment_date) = ? 
+            AND strftime('%Y', r.payment_date) = ?
+            GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
+            ORDER BY year DESC, week DESC
+        """, (week, year)).fetchall()
+        
+        weekly_summary = c.execute("""
+            SELECT 
+                COALESCE(SUM(amount), 0) AS total,
+                COUNT(*) AS transactions,
+                COUNT(DISTINCT dr.customer_id) AS unique_customers
+            FROM rental_payments r
+            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+            WHERE strftime('%W', r.payment_date) = ? 
+            AND strftime('%Y', r.payment_date) = ?
+        """, (week, year)).fetchone()
+        
+        available_weeks = c.execute("""
+            SELECT DISTINCT 
+                strftime('%W', payment_date) AS week,
+                strftime('%Y', payment_date) AS year
+            FROM rental_payments
+            ORDER BY year DESC, week DESC
+            LIMIT 20
+        """).fetchall()
+        
+        report_title = f"Weekly Revenue Report - Week {week}, {year}"
+        daily_revenue = weekly_revenue
+        available_dates = available_weeks
+    
+    # =============================================
+    # MONTHLY REVENUE
+    # =============================================
+    else:  # monthly
+        month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
+        
+        monthly_revenue = c.execute("""
+            SELECT 
+                strftime('%Y-%m', r.payment_date) AS month,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(r.amount), 0) AS total,
+                COUNT(DISTINCT dr.customer_id) AS unique_customers
+            FROM rental_payments r
+            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+            WHERE strftime('%Y-%m', r.payment_date) = ?
+            GROUP BY strftime('%Y-%m', r.payment_date)
+            ORDER BY month DESC
+        """, (month_filter,)).fetchall()
+        
+        monthly_summary = c.execute("""
+            SELECT 
+                COALESCE(SUM(amount), 0) AS total,
+                COUNT(*) AS transactions,
+                COUNT(DISTINCT dr.customer_id) AS unique_customers
+            FROM rental_payments r
+            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+            WHERE strftime('%Y-%m', r.payment_date) = ?
+        """, (month_filter,)).fetchone()
+        
+        available_months = c.execute("""
+            SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
+            FROM rental_payments
+            ORDER BY month DESC
+        """).fetchall()
+        
+        report_title = f"Monthly Revenue Report - {month_filter}"
+        daily_revenue = monthly_revenue
+        available_dates = available_months
+    
+    conn.close()
+    
+    return render_template(
+        "revenue_report.html",
+        title="Revenue Report",
+        report_title=report_title,
+        period=period,
+        date_filter=date_filter,
+        daily_revenue=daily_revenue,
+        daily_summary=daily_summary if 'daily_summary' in locals() else None,
+        weekly_summary=weekly_summary if 'weekly_summary' in locals() else None,
+        monthly_summary=monthly_summary if 'monthly_summary' in locals() else None,
+        available_dates=available_dates,
+        weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
+        report_type=period
+    )
+
+@app.route("/rentals/history")
+@login_required
+@staff_required
+def rental_history():
+    conn = db()
+    c = conn.cursor()
+    
+    # Get filter parameters
+    status_filter = request.args.get("status", "")
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    search = request.args.get("search", "").strip()
+    
+    # Build query
+    query = """
+        SELECT 
+            r.id,
+            r.start_time,
+            r.end_time,
+            r.total_hours,
+            r.total_cost,
+            r.payment_status,
+            r.status AS rental_status,
+            c.full_name,
+            c.phone,
+            b.bike_code,
+            b.brand,
+            b.model,
+            (SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = r.id) AS payment_count
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE 1=1
+    """
+    
+    params = []
+    
+    if status_filter:
+        query += " AND r.status = ?"
+        params.append(status_filter)
+    
+    if date_from:
+        query += " AND date(r.start_time) >= ?"
+        params.append(date_from)
+    
+    if date_to:
+        query += " AND date(r.start_time) <= ?"
+        params.append(date_to)
+    
+    if search:
+        query += """ AND (
+            c.full_name LIKE ? OR 
+            b.bike_code LIKE ? OR 
+            c.phone LIKE ?
+        )"""
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term, search_term])
+    
+    query += " ORDER BY r.start_time DESC LIMIT 100"
+    
+    rentals = c.execute(query, params).fetchall()
+    
+    # Get summary stats
+    total_rentals = len(rentals)
+    total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
+    paid_count = sum(1 for r in rentals if r["payment_status"] == "Paid")
+    unpaid_count = sum(1 for r in rentals if r["payment_status"] != "Paid")
+    active_count = sum(1 for r in rentals if r["rental_status"] == "Active")
+    completed_count = sum(1 for r in rentals if r["rental_status"] == "Completed")
+    
+    conn.close()
+    
+    return render_template(
+        "rental_history.html",
+        title="Rental History",
+        rentals=rentals,
+        total_rentals=total_rentals,
+        total_revenue=total_revenue,
+        paid_count=paid_count,
+        unpaid_count=unpaid_count,
+        active_count=active_count,
+        completed_count=completed_count,
+        status_filter=status_filter,
+        date_from=date_from,
+        date_to=date_to,
+        search=search
+    )
+
+
+
+@app.route("/rentals/<int:rental_id>/agreement.pdf")
+@login_required
+def rental_agreement_pdf(rental_id):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+    from io import BytesIO
+    
+    conn = db()
+    c = conn.cursor()
+    
+    rental = c.execute("""
+        SELECT 
+            r.*,
+            c.full_name,
+            c.id_number,
+            c.phone,
+            c.address,
+            c.signature_data,
+            b.bike_code,
+            b.brand,
+            b.model
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+    conn.close()
+    
+    if not rental:
+        flash("Rental not found.", "danger")
+        return redirect(url_for("dashboard"))
+    
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    x = 22*mm
+    y = height - 25*mm
+    
+    # Header
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(x, y, "RAB – DAILY RENTAL AGREEMENT")
+    y -= 10*mm
+    
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x, y, f"Rental ID: #{rental['id']}")
+    pdf.drawString(x + 120*mm, y, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    y -= 8*mm
+    
+    pdf.line(x, y, width-x, y)
+    y -= 10*mm
+    
+    # Customer Details
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(x, y, "CUSTOMER DETAILS")
+    y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    details = [
+        ("Full Name", rental["full_name"]),
+        ("ID / Passport", rental["id_number"] or "Not provided"),
+        ("Phone", rental["phone"]),
+        ("Address", rental["address"] or "Not provided"),
+    ]
+    for label, value in details:
+        pdf.drawString(x + 5*mm, y, f"{label}: {value}")
+        y -= 6*mm
+    
+    y -= 4*mm
+    
+    # Bicycle Details
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(x, y, "BICYCLE DETAILS")
+    y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x + 5*mm, y, f"Bike: {rental['bike_code']} – {rental['brand'] or ''} {rental['model'] or ''}")
+    y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Hourly Rate: N$ {rental['hourly_rate']:.2f}")
+    y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Daily Cap: N$ {rental['daily_cap']:.2f}")
+    y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Deposit: N$ {rental['deposit_paid']:.2f}")
+    
+    y -= 8*mm
+    
+    # Rental Details
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(x, y, "RENTAL DETAILS")
+    y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x + 5*mm, y, f"Start Time: {rental['start_time']}")
+    y -= 6*mm
+    if rental['end_time']:
+        pdf.drawString(x + 5*mm, y, f"End Time: {rental['end_time']}")
+        y -= 6*mm
+        pdf.drawString(x + 5*mm, y, f"Total Hours: {rental['total_hours']:.1f}")
+        y -= 6*mm
+        pdf.drawString(x + 5*mm, y, f"Total Cost: N$ {rental['total_cost']:.2f}")
+    else:
+        pdf.drawString(x + 5*mm, y, "Status: Active (Not yet returned)")
+    
+    y -= 12*mm
+    
+    # Terms & Conditions
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(x, y, "TERMS & CONDITIONS")
+    y -= 7*mm
+    pdf.setFont("Helvetica", 9)
+    terms = [
+        "1. The bicycle remains the property of RAB at all times.",
+        "2. The customer is responsible for the bicycle during the rental period.",
+        "3. The bicycle must be returned by the agreed time.",
+        "4. Late returns will incur additional charges.",
+        "5. Damage or loss must be reported immediately.",
+        "6. The customer agrees to follow all traffic rules and safety guidelines.",
+    ]
+    for term in terms:
+        pdf.drawString(x + 5*mm, y, term)
+        y -= 5.5*mm
+    
+    y -= 8*mm
+    
+    # Signature
+    pdf.line(x, y, x+70*mm, y)
+    pdf.line(x+95*mm, y, width-x, y)
+    y -= 5*mm
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(x, y, "Customer Signature")
+    pdf.drawString(x+95*mm, y, "RAB Representative")
+    y -= 15*mm
+    pdf.line(x, y, x+70*mm, y)
+    pdf.line(x+95*mm, y, width-x, y)
+    y -= 5*mm
+    pdf.drawString(x, y, "Date")
+    pdf.drawString(x+95*mm, y, "Date")
+    
+    pdf.save()
+    buf.seek(0)
+    
+    filename = f"RAB_Agreement_{rental['bike_code']}_{rental['id']}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+
+
+@app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_customer(customer_id):
+    """Edit customer details."""
+    # ✅ Check if user has permission (admin or manager)
+    if session.get("role") not in ['admin', 'manager']:
+        flash("You don't have permission to access this page.", "danger")
+        return redirect(url_for("customers"))
+    
+    conn = db()
+    c = conn.cursor()
+    
+    # Get customer data
+    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        id_number = request.form.get("id_number", "").strip()
+        phone = request.form.get("phone", "").strip()
+        email = request.form.get("email", "").strip()
+        address = request.form.get("address", "").strip()
+        verification_status = request.form.get("verification_status", "Pending")
+        
+        if not full_name or not phone:
+            flash("Name and phone are required.", "danger")
+            return redirect(url_for("edit_customer", customer_id=customer_id))
+        
+        # Handle file uploads
+        id_photo = request.files.get("id_photo") if request.files else None
+        customer_photo = request.files.get("customer_photo") if request.files else None
+        
+        c.execute("""
+            UPDATE customers 
+            SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
+                verification_status = ?
+            WHERE id = ?
+        """, (full_name, id_number, phone, email, address, verification_status, customer_id))
+        
+        # Handle document uploads
+        UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
+        if id_photo and id_photo.filename:
+            filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+            id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            c.execute("""
+                INSERT INTO customer_documents (customer_id, document_type, file_path)
+                VALUES (?, 'id_copy', ?)
+            """, (customer_id, f"uploads/{filename}"))
+        
+        if customer_photo and customer_photo.filename:
+            filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+            customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            c.execute("""
+                INSERT INTO customer_documents (customer_id, document_type, file_path)
+                VALUES (?, 'customer_photo', ?)
+            """, (customer_id, f"uploads/{filename}"))
+        
+        conn.commit()
+        conn.close()
+        
+        flash(f"Customer '{full_name}' updated successfully!", "success")
+        return redirect(url_for("customers"))
+    
+    # Get customer documents
+    documents = c.execute("""
+        SELECT * FROM customer_documents 
+        WHERE customer_id = ? 
+        ORDER BY uploaded_at DESC
+    """, (customer_id,)).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "edit_customer.html",
+        title="Edit Customer",
+        customer=customer,
+        documents=documents
+    )
+
+
+
+
+
+
+# =============================================
+# MAINTENANCE EDIT
+# =============================================
+
+@app.route("/maintenance/<int:record_id>/edit", methods=["GET", "POST"])
+@login_required
+@manager_required
+def edit_maintenance(record_id):
+    """Edit a maintenance record."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get maintenance record
+    record = c.execute("""
+        SELECT m.*, b.bike_code, b.brand, b.model
+        FROM maintenance_records m
+        JOIN bicycles b ON b.id = m.bicycle_id
+        WHERE m.id = ?
+    """, (record_id,)).fetchone()
+    
+    if not record:
+        flash("Maintenance record not found.", "danger")
+        return redirect(url_for("maintenance_dashboard"))
+    
+    # Get all bicycles for dropdown
+    bicycles = c.execute(
+        "SELECT id, bike_code, brand, model FROM bicycles ORDER BY bike_code"
+    ).fetchall()
+    
+    if request.method == "POST":
+        bicycle_id = request.form.get("bicycle_id")
+        maintenance_type = request.form.get("maintenance_type")
+        description = request.form.get("description", "").strip()
+        cost = float(request.form.get("cost", 0))
+        status = request.form.get("status", "Scheduled")
+        scheduled_date = request.form.get("scheduled_date")
+        completed_date = request.form.get("completed_date")
+        performed_by = request.form.get("performed_by", "").strip()
+        notes = request.form.get("notes", "").strip()
+        
+        if not bicycle_id or not maintenance_type:
+            flash("Bicycle and maintenance type are required.", "danger")
+            return redirect(url_for("edit_maintenance", record_id=record_id))
+        
+        try:
+            # Update maintenance record
+            c.execute("""
+                UPDATE maintenance_records 
+                SET bicycle_id = ?, maintenance_type = ?, description = ?, cost = ?,
+                    status = ?, scheduled_date = ?, completed_date = ?, 
+                    performed_by = ?, notes = ?
+                WHERE id = ?
+            """, (bicycle_id, maintenance_type, description, cost, status, 
+                  scheduled_date, completed_date, performed_by, notes, record_id))
+            
+            # Update bicycle status based on maintenance status
+            if status == "Completed":
+                c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (bicycle_id,))
+            elif status in ["Scheduled", "In Progress"]:
+                c.execute("UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
+            
+            conn.commit()
+            flash("Maintenance record updated successfully!", "success")
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error updating maintenance record: {str(e)}", "danger")
+        finally:
+            conn.close()
+        
+        return redirect(url_for("maintenance_dashboard"))
+    
+    conn.close()
+    
+    return render_template(
+        "edit_maintenance.html",
+        title="Edit Maintenance",
+        record=record,
+        bicycles=bicycles
+    )
+
+
+@app.route("/maintenance/<int:record_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_maintenance(record_id):
+    """Delete a maintenance record."""
+    conn = db()
+    c = conn.cursor()
+    
+    record = c.execute(
+        "SELECT bicycle_id FROM maintenance_records WHERE id = ?", 
+        (record_id,)
+    ).fetchone()
+    
+    if not record:
+        flash("Maintenance record not found.", "danger")
+        return redirect(url_for("maintenance_dashboard"))
+    
+    try:
+        c.execute("DELETE FROM maintenance_records WHERE id = ?", (record_id,))
+        # Update bicycle status back to Available
+        c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
+        conn.commit()
+        flash("Maintenance record deleted successfully.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error deleting maintenance record: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("maintenance_dashboard"))
+
+
+
+
+
+
+@app.route("/customers/<int:customer_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_customer(customer_id):
+    """Delete a customer and all associated data."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Check if customer exists
+    customer = c.execute("SELECT full_name, user_id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+    
+    try:
+        # ✅ STEP 1: Check if customer has active rentals
+        active_rental = c.execute(
+            "SELECT id FROM daily_rentals WHERE customer_id = ? AND status = 'Active'", 
+            (customer_id,)
+        ).fetchone()
+        
+        if active_rental:
+            flash("Cannot delete customer with active rentals. Please end all rentals first.", "danger")
+            return redirect(url_for("customers"))
+        
+        # ✅ STEP 2: Get all rental IDs for this customer
+        rentals = c.execute("SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
+        
+        # ✅ STEP 3: Delete rental payments (child of rentals)
+        for rental in rentals:
+            c.execute("DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental["id"],))
+        
+        # ✅ STEP 4: Delete reminder logs (child of rentals)
+        for rental in rentals:
+            c.execute("DELETE FROM reminder_logs WHERE rental_id = ?", (rental["id"],))
+        
+        # ✅ STEP 5: Delete bike conditions (child of rentals)
+        for rental in rentals:
+            c.execute("DELETE FROM bike_conditions WHERE rental_id = ?", (rental["id"],))
+        
+        # ✅ STEP 6: Delete rentals
+        c.execute("DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 7: Delete customer documents
+        c.execute("DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 8: Delete discount usage
+        c.execute("DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 9: Delete loyalty points
+        c.execute("DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 10: Delete points transactions
+        c.execute("DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 11: Delete verification requests
+        c.execute("DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
+        
+        # ✅ STEP 12: Delete the customer
+        c.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        
+        # ✅ STEP 13: Delete the associated user (if exists)
+        if customer["user_id"]:
+            # Check if user has any other customers linked (shouldn't, but just in case)
+            other_customers = c.execute(
+                "SELECT id FROM customers WHERE user_id = ? AND id != ?", 
+                (customer["user_id"], customer_id)
+            ).fetchone()
+            
+            if not other_customers:
+                # Delete user's other records
+                c.execute("DELETE FROM announcement_comments WHERE user_id = ?", (customer["user_id"],))
+                c.execute("DELETE FROM announcements WHERE author_id = ?", (customer["user_id"],))
+                c.execute("DELETE FROM verification_requests WHERE verified_by = ?", (customer["user_id"],))
+                c.execute("DELETE FROM bike_conditions WHERE checked_by = ?", (customer["user_id"],))
+                
+                # Delete the user
+                c.execute("DELETE FROM users WHERE id = ?", (customer["user_id"],))
+        
+        conn.commit()
+        flash(f"Customer '{customer['full_name']}' deleted successfully.", "success")
+        
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        flash(f"Error deleting customer: {str(e)}", "danger")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error deleting customer: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("customers"))
+
+
+
+
+# =============================================
+# BICYCLE HEALTH TRACKING
+# =============================================
+
+@app.route("/bicycle-health")
+@login_required
+@manager_required
+def bicycle_health_dashboard():
+    """View all bicycles health status."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get all bicycles with health data
+    bicycles = c.execute("""
+        SELECT 
+            b.*,
+            bh.health_score,
+            bh.condition_rating,
+            bh.last_maintenance_date,
+            bh.next_maintenance_due,
+            bh.total_maintenance_count,
+            bh.total_repair_cost,
+            bh.notes AS health_notes,
+            (SELECT COUNT(*) FROM daily_rentals WHERE bicycle_id = b.id) AS total_rentals,
+            (SELECT COUNT(*) FROM maintenance_records WHERE bicycle_id = b.id) AS maintenance_count
+        FROM bicycles b
+        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+        ORDER BY bh.health_score ASC, b.bike_code
+    """).fetchall()
+    
+    # Health summary
+    health_summary = c.execute("""
+        SELECT 
+            COUNT(*) AS total_bicycles,
+            SUM(CASE WHEN bh.health_score >= 80 THEN 1 ELSE 0 END) AS excellent,
+            SUM(CASE WHEN bh.health_score >= 60 AND bh.health_score < 80 THEN 1 ELSE 0 END) AS good,
+            SUM(CASE WHEN bh.health_score >= 40 AND bh.health_score < 60 THEN 1 ELSE 0 END) AS fair,
+            SUM(CASE WHEN bh.health_score >= 20 AND bh.health_score < 40 THEN 1 ELSE 0 END) AS poor,
+            SUM(CASE WHEN bh.health_score < 20 THEN 1 ELSE 0 END) AS critical,
+            AVG(bh.health_score) AS avg_health_score
+        FROM bicycles b
+        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+    """).fetchone()
+    
+    conn.close()
+    
+    return render_template(
+        "bicycle_health.html",
+        title="Bicycle Health",
+        bicycles=bicycles,
+        health_summary=health_summary
+    )
+
+
+@app.route("/bicycle-health/<int:bicycle_id>")
+@login_required
+@manager_required
+def bicycle_health_detail(bicycle_id):
+    """View detailed health information for a specific bicycle."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get bicycle with health data
+    bicycle = c.execute("""
+        SELECT 
+            b.*,
+            bh.health_score,
+            bh.condition_rating,
+            bh.last_maintenance_date,
+            bh.next_maintenance_due,
+            bh.total_maintenance_count,
+            bh.total_repair_cost,
+            bh.notes AS health_notes,
+            (SELECT COUNT(*) FROM daily_rentals WHERE bicycle_id = b.id) AS total_rentals,
+            (SELECT COALESCE(AVG(total_hours), 0) FROM daily_rentals WHERE bicycle_id = b.id) AS avg_hours
+        FROM bicycles b
+        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+        WHERE b.id = ?
+    """, (bicycle_id,)).fetchone()
+    
+    if not bicycle:
+        flash("Bicycle not found.", "danger")
+        return redirect(url_for("bicycle_health_dashboard"))
+    
+    # Get health history
+    health_history = c.execute("""
+        SELECT * FROM bicycle_health_history
+        WHERE bicycle_id = ?
+        ORDER BY recorded_at DESC
+        LIMIT 20
+    """, (bicycle_id,)).fetchall()
+    
+    # Get maintenance records
+    maintenance = c.execute("""
+        SELECT * FROM maintenance_records
+        WHERE bicycle_id = ?
+        ORDER BY created_at DESC
+        LIMIT 10
+    """, (bicycle_id,)).fetchall()
+    
+    # Get rental history
+    rentals = c.execute("""
+        SELECT 
+            r.*,
+            c.full_name
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        WHERE r.bicycle_id = ?
+        ORDER BY r.start_time DESC
+        LIMIT 10
+    """, (bicycle_id,)).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "bicycle_health_detail.html",
+        title=f"Health: {bicycle['bike_code']}",
+        bicycle=bicycle,
+        health_history=health_history,
+        maintenance=maintenance,
+        rentals=rentals
+    )
+
+
+@app.route("/bicycle-health/<int:bicycle_id>/update", methods=["GET", "POST"])
+@login_required
+@manager_required
+def update_bicycle_health(bicycle_id):
+    """Update bicycle health status."""
+    conn = db()
+    c = conn.cursor()
+    
+    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    if not bicycle:
+        flash("Bicycle not found.", "danger")
+        return redirect(url_for("bicycle_health_dashboard"))
+    
+    # Get current health
+    health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    
+    if request.method == "POST":
+        health_score = int(request.form.get("health_score", 100))
+        condition_rating = request.form.get("condition_rating", "Good")
+        notes = request.form.get("notes", "").strip()
+        
+        # Validate health score
+        if health_score < 0 or health_score > 100:
+            flash("Health score must be between 0 and 100.", "danger")
+            return redirect(url_for("update_bicycle_health", bicycle_id=bicycle_id))
+        
+        try:
+            if health:
+                # Update existing health record
+                c.execute("""
+                    UPDATE bicycle_health 
+                    SET health_score = ?, condition_rating = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE bicycle_id = ?
+                """, (health_score, condition_rating, notes, bicycle_id))
+            else:
+                # Create new health record
+                c.execute("""
+                    INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, notes)
+                    VALUES (?, ?, ?, ?)
+                """, (bicycle_id, health_score, condition_rating, notes))
+            
+            # Record health history
+            c.execute("""
+                INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
+                VALUES (?, ?, ?, ?)
+            """, (bicycle_id, health_score, condition_rating, notes or "Manual update"))
+            
+            conn.commit()
+            flash("Bicycle health updated successfully!", "success")
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error updating health: {str(e)}", "danger")
+        finally:
+            conn.close()
+        
+        return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
+    
+    conn.close()
+    
+    return render_template(
+        "update_bicycle_health.html",
+        title="Update Health",
+        bicycle=bicycle,
+        health=health
+    )
+
+
+
+
+@app.route("/bicycle-health/<int:bicycle_id>/calculate")
+@login_required
+@admin_required
+def calculate_bicycle_health(bicycle_id):
+    """Auto-calculate bicycle health score based on maintenance and usage."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get bicycle data
+    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    if not bicycle:
+        flash("Bicycle not found.", "danger")
+        return redirect(url_for("bicycle_health_dashboard"))
+    
+    # Get maintenance data
+    maintenance = c.execute("""
+        SELECT 
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+            COALESCE(SUM(cost), 0) AS total_cost,
+            COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+        FROM maintenance_records
+        WHERE bicycle_id = ?
+    """, (bicycle_id,)).fetchone()
+    
+    # Get rental data
+    rentals = c.execute("""
+        SELECT 
+            COUNT(*) AS total,
+            COALESCE(SUM(total_hours), 0) AS total_hours,
+            COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+        FROM daily_rentals
+        WHERE bicycle_id = ? AND status = 'Completed'
+    """, (bicycle_id,)).fetchone()
+    
+    # Calculate health score (0-100)
+    health_score = 100
+    
+    # Get values with defaults (handle None)
+    total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
+    completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
+    recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
+    recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
+    
+    # Deduct for high usage (more than 100 hours)
+    if total_hours > 100:
+        health_score -= min(20, (total_hours - 100) / 10)
+    
+    # Deduct for lack of maintenance
+    if completed_maintenance == 0:
+        health_score -= 30
+    elif completed_maintenance < 5:
+        health_score -= 10
+    
+    # Deduct for recent rentals without maintenance
+    if recent_rentals > 5 and recent_maintenance == 0:
+        health_score -= 15
+    
+    # Add points for recent maintenance
+    if recent_maintenance > 0:
+        health_score += min(10, recent_maintenance * 2)
+    
+    # Ensure score is between 0 and 100
+    health_score = max(0, min(100, int(health_score)))
+    
+    # Determine condition rating
+    if health_score >= 80:
+        condition_rating = "Excellent"
+    elif health_score >= 60:
+        condition_rating = "Good"
+    elif health_score >= 40:
+        condition_rating = "Fair"
+    elif health_score >= 20:
+        condition_rating = "Poor"
+    else:
+        condition_rating = "Critical"
+    
+    # Update health record
+    health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    
+    try:
+        if health:
+            c.execute("""
+                UPDATE bicycle_health 
+                SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
+                    total_maintenance_count = ?, total_repair_cost = ?
+                WHERE bicycle_id = ?
+            """, (health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0, bicycle_id))
+        else:
+            c.execute("""
+                INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
+                    total_maintenance_count, total_repair_cost)
+                VALUES (?, ?, ?, ?, ?)
+            """, (bicycle_id, health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0))
+        
+        # Record health history
+        c.execute("""
+            INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
+            VALUES (?, ?, ?, ?)
+        """, (bicycle_id, health_score, condition_rating, "Auto-calculated based on usage and maintenance"))
+        
+        conn.commit()
+        flash(f"Health score calculated: {health_score}/100 ({condition_rating})", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error calculating health: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
+
+
+
+
+
+@app.route("/bicycle-health/calculate-all")
+@login_required
+@admin_required
+def calculate_all_bicycle_health():
+    """Calculate health scores for all bicycles."""
+    conn = db()
+    c = conn.cursor()
+    
+    bicycles = c.execute("SELECT id FROM bicycles").fetchall()
+    
+    count = 0
+    
+    for bicycle in bicycles:
+        bike_id = bicycle["id"]
+        
+        # Maintenance data
+        maintenance = c.execute("""
+            SELECT 
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                COALESCE(SUM(cost), 0) AS total_cost,
+                COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+            FROM maintenance_records
+            WHERE bicycle_id = ?
+        """, (bike_id,)).fetchone()
+        
+        # Rental data
+        rentals = c.execute("""
+            SELECT 
+                COUNT(*) AS total,
+                COALESCE(SUM(total_hours), 0) AS total_hours,
+                COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+            FROM daily_rentals
+            WHERE bicycle_id = ? AND status = 'Completed'
+        """, (bike_id,)).fetchone()
+        
+        # =============================================
+        # ✅ FIX: Handle None values HERE - BEFORE calculations
+        # =============================================
+        total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
+        completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
+        recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
+        recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
+        total_cost = maintenance["total_cost"] if maintenance["total_cost"] is not None else 0
+        
+        # =============================================
+        # Now use the cleaned variables in calculations
+        # =============================================
+        health_score = 100
+        
+        # Deduct for high usage (more than 100 hours)
+        if total_hours > 100:
+            health_score -= min(20, (total_hours - 100) / 10)
+        
+        # Deduct for lack of maintenance
+        if completed_maintenance == 0:
+            health_score -= 30
+        elif completed_maintenance < 5:
+            health_score -= 10
+        
+        # Deduct for recent rentals without maintenance
+        if recent_rentals > 5 and recent_maintenance == 0:
+            health_score -= 15
+        
+        # Add points for recent maintenance
+        if recent_maintenance > 0:
+            health_score += min(10, recent_maintenance * 2)
+        
+        # Ensure score is between 0 and 100
+        health_score = max(0, min(100, int(health_score)))
+        
+        # Determine condition rating
+        if health_score >= 80:
+            condition_rating = "Excellent"
+        elif health_score >= 60:
+            condition_rating = "Good"
+        elif health_score >= 40:
+            condition_rating = "Fair"
+        elif health_score >= 20:
+            condition_rating = "Poor"
+        else:
+            condition_rating = "Critical"
+        
+        # Update or insert
+        health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
+        if health:
+            c.execute("""
+                UPDATE bicycle_health 
+                SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
+                    total_maintenance_count = ?, total_repair_cost = ?
+                WHERE bicycle_id = ?
+            """, (health_score, condition_rating, completed_maintenance, total_cost, bike_id))
+        else:
+            c.execute("""
+                INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
+                    total_maintenance_count, total_repair_cost)
+                VALUES (?, ?, ?, ?, ?)
+            """, (bike_id, health_score, condition_rating, completed_maintenance, total_cost))
+        
+        # Record history
+        c.execute("""
+            INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
+            VALUES (?, ?, ?, ?)
+        """, (bike_id, health_score, condition_rating, "Auto-calculated - batch update"))
+        
+        count += 1
+    
+    conn.commit()
+    conn.close()
+    
+    flash(f"Health scores calculated for {count} bicycles!", "success")
+    return redirect(url_for("bicycle_health_dashboard"))
+
+
+
+
+
+# =============================================
+# BICYCLE DELETE
+# =============================================
+
+@app.route("/bicycles/<int:bicycle_id>/delete", methods=["POST"])
+@login_required
+@admin_required  # Only admins can delete bicycles
+def delete_bicycle(bicycle_id):
+    """Delete a bicycle if it's not currently rented."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Check if bicycle exists
+    bike = c.execute("SELECT bike_code, status FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    if not bike:
+        flash("Bicycle not found.", "danger")
+        return redirect(url_for("bicycles"))
+    
+    # Check if bicycle is currently rented
+    if bike["status"] == "Rented":
+        flash(f"Cannot delete bicycle '{bike['bike_code']}' - it is currently rented.", "danger")
+        return redirect(url_for("bicycles"))
+    
+    # Check if bicycle has maintenance records
+    maintenance = c.execute(
+        "SELECT id FROM maintenance_records WHERE bicycle_id = ? AND status != 'Completed'",
+        (bicycle_id,)
+    ).fetchone()
+    
+    if maintenance:
+        flash(f"Cannot delete bicycle '{bike['bike_code']}' - it has pending maintenance.", "danger")
+        return redirect(url_for("bicycles"))
+    
+    try:
+        # Delete bicycle
+        c.execute("DELETE FROM bicycles WHERE id = ?", (bicycle_id,))
+        conn.commit()
+        flash(f"Bicycle '{bike['bike_code']}' deleted successfully.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error deleting bicycle: {str(e)}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("bicycles"))
+
+
+# =============================================
+# ANNOUNCEMENTS / COMMUNICATION
+# =============================================
+
+@app.route("/announcements")
+@login_required
+def announcements():
+    """View all announcements."""
+    conn = db()
+    c = conn.cursor()
+    
+    user_id = session["user_id"]
+    user_role = session.get("role", "staff")
+    
+    # Get all active announcements with read status
+    announcements = c.execute("""
+        SELECT 
+            a.*,
+            CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
+        FROM announcements a
+        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+        WHERE a.is_active = 1
+        ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
+    """, (user_id,)).fetchall()
+    
+    # Get unread count
+    unread_count = c.execute("""
+        SELECT COUNT(*) FROM announcements a
+        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+        WHERE a.is_active = 1 AND ar.id IS NULL
+    """, (user_id,)).fetchone()[0]
+    
+    conn.close()
+    
+    return render_template(
+        "announcements.html",
+        title="Announcements",
+        announcements=announcements,
+        unread_count=unread_count,
+        user_role=user_role
+    )
+
+
+@app.route("/announcements/create", methods=["GET", "POST"])
+@login_required
+def create_announcement():
+    """Create a new announcement."""
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        content = request.form.get("content", "").strip()
+        priority = request.form.get("priority", "normal")
+        category = request.form.get("category", "general")
+        is_pinned = 1 if request.form.get("is_pinned") else 0
+        
+        if not title or not content:
+            flash("Title and content are required.", "danger")
+            return redirect(url_for("create_announcement"))
+        
+        conn = db()
+        c = conn.cursor()
+        
+        c.execute("""
+            INSERT INTO announcements 
+            (title, content, author_id, author_name, author_role, priority, category, is_pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            title, content, 
+            session["user_id"], 
+            session.get("full_name", session["username"]),
+            session.get("role", "staff"),
+            priority, category, is_pinned
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        flash("Announcement created successfully!", "success")
+        return redirect(url_for("announcements"))
+    
+    return render_template("create_announcement.html", title="Create Announcement")
+
+
+@app.route("/announcements/<int:announcement_id>")
+@login_required
+def view_announcement(announcement_id):
+    """View a single announcement with comments."""
+    conn = db()
+    c = conn.cursor()
+    
+    user_id = session["user_id"]
+    
+    # Get announcement
+    announcement = c.execute("""
+        SELECT * FROM announcements WHERE id = ? AND is_active = 1
+    """, (announcement_id,)).fetchone()
+    
+    if not announcement:
+        flash("Announcement not found.", "danger")
+        return redirect(url_for("announcements"))
+    
+    # Mark as read
+    c.execute("""
+        INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+        VALUES (?, ?)
+    """, (announcement_id, user_id))
+    
+    # Get comments
+    comments = c.execute("""
+        SELECT * FROM announcement_comments 
+        WHERE announcement_id = ? 
+        ORDER BY created_at ASC
+    """, (announcement_id,)).fetchall()
+    
+    conn.commit()
+    conn.close()
+    
+    return render_template(
+        "view_announcement.html",
+        title=announcement["title"],
+        announcement=announcement,
+        comments=comments
+    )
+
+
+@app.route("/announcements/<int:announcement_id>/comment", methods=["POST"])
+@login_required
+def add_announcement_comment(announcement_id):
+    """Add a comment to an announcement."""
+    comment = request.form.get("comment", "").strip()
+    
+    if not comment:
+        flash("Comment cannot be empty.", "danger")
+        return redirect(url_for("view_announcement", announcement_id=announcement_id))
+    
+    conn = db()
+    c = conn.cursor()
+    
+    c.execute("""
+        INSERT INTO announcement_comments 
+        (announcement_id, user_id, user_name, user_role, comment)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        announcement_id,
+        session["user_id"],
+        session.get("full_name", session["username"]),
+        session.get("role", "staff"),
+        comment
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    flash("Comment added successfully!", "success")
+    return redirect(url_for("view_announcement", announcement_id=announcement_id))
+
+
+@app.route("/announcements/<int:announcement_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_announcement(announcement_id):
+    """Delete an announcement (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Soft delete - just mark as inactive
+    c.execute("UPDATE announcements SET is_active = 0 WHERE id = ?", (announcement_id,))
+    conn.commit()
+    conn.close()
+    
+    flash("Announcement deleted successfully.", "success")
+    return redirect(url_for("announcements"))
+
+
+@app.route("/announcements/<int:announcement_id>/pin", methods=["POST"])
+@login_required
+@admin_required
+def toggle_pin_announcement(announcement_id):
+    """Toggle pin status of an announcement (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+    
+    announcement = c.execute("SELECT is_pinned FROM announcements WHERE id = ?", (announcement_id,)).fetchone()
+    if announcement:
+        new_status = 0 if announcement["is_pinned"] == 1 else 1
+        c.execute("UPDATE announcements SET is_pinned = ? WHERE id = ?", (new_status, announcement_id))
+        conn.commit()
+        flash("Announcement pin status updated.", "success")
+    else:
+        flash("Announcement not found.", "danger")
+    
+    conn.close()
+    return redirect(url_for("announcements"))
+
+
+@app.route("/announcements/mark-all-read")
+@login_required
+def mark_all_read():
+    """Mark all announcements as read."""
+    conn = db()
+    c = conn.cursor()
+    
+    c.execute("""
+        INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+        SELECT id, ? FROM announcements WHERE is_active = 1
+    """, (session["user_id"],))
+    
+    conn.commit()
+    conn.close()
+    
+    flash("All announcements marked as read.", "success")
+    return redirect(url_for("announcements"))
+
+
+
+
+# =============================================
+# ANALYTICS DASHBOARD
+# =============================================
+
+@app.route("/analytics")
+@login_required
+@staff_required
+@manager_required
+def analytics_dashboard():
+    """Comprehensive analytics dashboard for admin and managers."""
+    from datetime import datetime  # 👈 Add this import at the top of the function
+    conn = db()
+    c = conn.cursor()
+    
+    # =============================================
+    # OVERVIEW METRICS
+    # =============================================
+    
+    # Total Revenue
+    total_revenue = c.execute("""
+        SELECT COALESCE(SUM(amount), 0) FROM rental_payments
+    """).fetchone()[0]
+    
+    # Total Rentals
+    total_rentals = c.execute("""
+        SELECT COUNT(*) FROM daily_rentals
+    """).fetchone()[0]
+    
+    # Active Rentals
+    active_rentals = c.execute("""
+        SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'
+    """).fetchone()[0]
+    
+    # Total Customers
+    total_customers = c.execute("""
+        SELECT COUNT(*) FROM customers
+    """).fetchone()[0]
+    
+    # Verified Customers
+    verified_customers = c.execute("""
+        SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'
+    """).fetchone()[0]
+    
+    # Total Bicycles
+    total_bicycles = c.execute("""
+        SELECT COUNT(*) FROM bicycles
+    """).fetchone()[0]
+    
+    # Available Bicycles
+    available_bicycles = c.execute("""
+        SELECT COUNT(*) FROM bicycles WHERE status = 'Available'
+    """).fetchone()[0]
+    
+    # =============================================
+    # REVENUE TRENDS
+    # =============================================
+    
+    # Daily Revenue (Last 30 days)
+    daily_revenue = c.execute("""
+        SELECT 
+            date(payment_date) AS date,
+            COALESCE(SUM(amount), 0) AS revenue,
+            COUNT(*) AS transactions
+        FROM rental_payments
+        WHERE date(payment_date) >= date('now', '-30 days')
+        GROUP BY date(payment_date)
+        ORDER BY date(payment_date) ASC
+    """).fetchall()
+    
+    # Weekly Revenue (Last 12 weeks)
+    weekly_revenue = c.execute("""
+        SELECT 
+            strftime('%W', payment_date) AS week,
+            strftime('%Y', payment_date) AS year,
+            COALESCE(SUM(amount), 0) AS revenue,
+            COUNT(*) AS transactions
+        FROM rental_payments
+        WHERE date(payment_date) >= date('now', '-84 days')
+        GROUP BY week, year
+        ORDER BY year ASC, week ASC
+    """).fetchall()
+    
+    # Monthly Revenue (Last 12 months)
+    monthly_revenue = c.execute("""
+        SELECT 
+            strftime('%Y-%m', payment_date) AS month,
+            COALESCE(SUM(amount), 0) AS revenue,
+            COUNT(*) AS transactions
+        FROM rental_payments
+        WHERE date(payment_date) >= date('now', '-365 days')
+        GROUP BY month
+        ORDER BY month ASC
+    """).fetchall()
+    
+    # =============================================
+    # BICYCLE ANALYTICS
+    # =============================================
+    
+    # Most Rented Bicycles
+    top_bicycles = c.execute("""
+        SELECT 
+            b.bike_code,
+            b.brand,
+            b.model,
+            b.bike_type,
+            COUNT(r.id) AS rental_count,
+            COALESCE(SUM(r.total_cost), 0) AS total_revenue,
+            COALESCE(SUM(r.total_hours), 0) AS total_hours
+        FROM bicycles b
+        LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+        GROUP BY b.id
+        ORDER BY rental_count DESC
+        LIMIT 10
+    """).fetchall()
+    
+    # Bike Type Performance
+    bike_type_stats = c.execute("""
+        SELECT 
+            b.bike_type,
+            COUNT(b.id) AS bike_count,
+            COUNT(r.id) AS rental_count,
+            COALESCE(SUM(r.total_cost), 0) AS total_revenue,
+            COALESCE(AVG(r.total_cost), 0) AS avg_revenue
+        FROM bicycles b
+        LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+        GROUP BY b.bike_type
+        ORDER BY total_revenue DESC
+    """).fetchall()
+    
+    # =============================================
+    # CUSTOMER ANALYTICS
+    # =============================================
+    
+    # Top Customers
+    top_customers = c.execute("""
+        SELECT 
+            c.id,
+            c.full_name,
+            c.phone,
+            COUNT(r.id) AS rental_count,
+            COALESCE(SUM(r.total_cost), 0) AS total_spent,
+            COALESCE(lp.points, 0) AS points
+        FROM customers c
+        LEFT JOIN daily_rentals r ON r.customer_id = c.id
+        LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
+        GROUP BY c.id
+        ORDER BY total_spent DESC
+        LIMIT 10
+    """).fetchall()
+    
+    # New Customers Over Time (Last 30 days)
+    new_customers = c.execute("""
+        SELECT 
+            date(created_at) AS date,
+            COUNT(*) AS count
+        FROM customers
+        WHERE date(created_at) >= date('now', '-30 days')
+        GROUP BY date(created_at)
+        ORDER BY date(created_at) ASC
+    """).fetchall()
+    
+    # =============================================
+    # PAYMENT ANALYTICS
+    # =============================================
+    
+    # Payment Method Breakdown
+    payment_methods = c.execute("""
+        SELECT 
+            payment_method,
+            COUNT(*) AS count,
+            COALESCE(SUM(amount), 0) AS total
+        FROM rental_payments
+        GROUP BY payment_method
+        ORDER BY total DESC
+    """).fetchall()
+    
+    # Average Rental Duration
+    avg_duration = c.execute("""
+        SELECT 
+            COALESCE(AVG(total_hours), 0) AS avg_hours,
+            MIN(total_hours) AS min_hours,
+            MAX(total_hours) AS max_hours
+        FROM daily_rentals
+        WHERE status = 'Completed' AND total_hours > 0
+    """).fetchone()
+    
+    # Revenue by Day of Week
+    revenue_by_day = c.execute("""
+        SELECT 
+            CASE strftime('%w', payment_date)
+                WHEN '0' THEN 'Sunday'
+                WHEN '1' THEN 'Monday'
+                WHEN '2' THEN 'Tuesday'
+                WHEN '3' THEN 'Wednesday'
+                WHEN '4' THEN 'Thursday'
+                WHEN '5' THEN 'Friday'
+                WHEN '6' THEN 'Saturday'
+            END AS day_name,
+            COALESCE(SUM(amount), 0) AS revenue,
+            COUNT(*) AS transactions
+        FROM rental_payments
+        GROUP BY strftime('%w', payment_date)
+        ORDER BY strftime('%w', payment_date)
+    """).fetchall()
+    
+    # =============================================
+    # MAINTENANCE ANALYTICS
+    # =============================================
+    
+    maintenance_stats = c.execute("""
+        SELECT 
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
+            SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) AS in_progress,
+            SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+            SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+            COALESCE(SUM(cost), 0) AS total_cost
+        FROM maintenance_records
+    """).fetchone()
+    
+    # =============================================
+    # DISCOUNT ANALYTICS
+    # =============================================
+    
+    discount_stats = c.execute("""
+        SELECT 
+            COUNT(*) AS total_used,
+            COALESCE(SUM(amount_discounted), 0) AS total_savings
+        FROM discount_usage
+    """).fetchone()
+    
+    conn.close()
+    
+    # Prepare data for charts
+    chart_data = {
+        "daily_dates": [row["date"] for row in daily_revenue],
+        "daily_revenue": [row["revenue"] for row in daily_revenue],
+        "daily_transactions": [row["transactions"] for row in daily_revenue],
+        "monthly_months": [row["month"] for row in monthly_revenue],
+        "monthly_revenue": [row["revenue"] for row in monthly_revenue],
+        "new_customers_dates": [row["date"] for row in new_customers],
+        "new_customers_count": [row["count"] for row in new_customers],
+        "week_days": [row["day_name"] for row in revenue_by_day],
+        "week_revenue": [row["revenue"] for row in revenue_by_day],
+    }
+    
+    return render_template(
+        "analytics.html",
+        title="Analytics Dashboard",
+        now=datetime.now(),  # 👈 Pass datetime to template
+        total_revenue=total_revenue,
+        total_rentals=total_rentals,
+        active_rentals=active_rentals,
+        total_customers=total_customers,
+        verified_customers=verified_customers,
+        total_bicycles=total_bicycles,
+        available_bicycles=available_bicycles,
+        daily_revenue=daily_revenue,
+        weekly_revenue=weekly_revenue,
+        monthly_revenue=monthly_revenue,
+        top_bicycles=top_bicycles,
+        bike_type_stats=bike_type_stats,
+        top_customers=top_customers,
+        new_customers=new_customers,
+        payment_methods=payment_methods,
+        avg_duration=avg_duration,
+        revenue_by_day=revenue_by_day,
+        maintenance_stats=maintenance_stats,
+        discount_stats=discount_stats,
+        chart_data=chart_data
+    )
+
+
+
+
+
+
+@app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
+@login_required
+@manager_required
+def edit_bicycle(bicycle_id):
+    """Edit a bicycle's details."""
+    conn = db()
+    c = conn.cursor()
+    
+    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    if not bicycle:
+        flash("Bicycle not found.", "danger")
+        return redirect(url_for("bicycles"))
+    
+    if request.method == "POST":
+        bike_code = request.form.get("bike_code", "").strip().upper()
+        brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
+        bike_type = request.form.get("bike_type", "Standard")
+        hourly_rate = float(request.form.get("hourly_rate", 20))
+        daily_cap = float(request.form.get("daily_cap", 120))
+        deposit_amount = float(request.form.get("deposit_amount", 50))
+        notes = request.form.get("notes", "").strip()
+        
+        if not bike_code:
+            flash("Bicycle code is required.", "danger")
+            return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
+        
+        try:
+            c.execute("""
+                UPDATE bicycles 
+                SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
+                    hourly_rate = ?, daily_cap = ?, deposit_amount = ?, notes = ?
+                WHERE id = ?
+            """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes, bicycle_id))
+            conn.commit()
+            flash(f"Bicycle '{bike_code}' updated successfully!", "success")
+        except sqlite3.IntegrityError:
+            flash("Bicycle code already exists.", "danger")
+        finally:
+            conn.close()
+        
+        return redirect(url_for("bicycles"))
+    
+    conn.close()
+    return render_template("edit_bicycle.html", title="Edit Bicycle", bicycle=bicycle)
+
+
+@app.route("/bicycles", methods=["GET", "POST"])
+@login_required
+@staff_required
+def bicycles():
+    conn = db()
+    c = conn.cursor()
+    
+    if request.method == "POST":
+        bike_code = request.form.get("bike_code", "").strip().upper()
+        brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
+        bike_type = request.form.get("bike_type", "Standard")
+        hourly_rate = float(request.form.get("hourly_rate", 20))
+        daily_cap = float(request.form.get("daily_cap", 120))
+        deposit_amount = float(request.form.get("deposit_amount", 50))
+        notes = request.form.get("notes", "").strip()
+        
+        if not bike_code:
+            flash("Bicycle code is required.", "danger")
+            return redirect(url_for("bicycles"))
+        
+        try:
+            c.execute("""
+                INSERT INTO bicycles 
+                (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes))
+            conn.commit()
+            flash(f"Bicycle {bike_code} added successfully.", "success")
+        except sqlite3.IntegrityError:
+            flash("Bicycle code already exists.", "danger")
+        
+        return redirect(url_for("bicycles"))
+    
+    #bicycles = c.execute("SELECT * FROM bicycles ORDER BY bike_code").fetchall()
+
+    # Get bicycles with health data
+    bicycles = c.execute("""
+        SELECT 
+            b.*,
+            bh.health_score,
+            bh.condition_rating
+        FROM bicycles b
+        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+        ORDER BY b.bike_code
+    """).fetchall()
+
+    conn.close()
+    
+    return render_template("bicycles.html", title="Bicycles", bicycles=bicycles)
+
+
+@app.route("/reports/bicycle-utilization")
+@login_required
+def bicycle_utilization():
+    conn = db()
+    c = conn.cursor()
+    
+    # =============================================
+    # BICYCLE UTILIZATION SUMMARY
+    # =============================================
+    
+    bikes = c.execute("""
+        SELECT 
+            b.id,
+            b.bike_code,
+            b.brand,
+            b.model,
+            b.bike_type,
+            b.hourly_rate,
+            b.daily_cap,
+            b.status,
+            COUNT(DISTINCT r.id) AS total_rentals,
+            COALESCE(SUM(r.total_hours), 0) AS total_hours,
+            COALESCE(SUM(r.total_cost), 0) AS total_revenue,
+            COALESCE(AVG(r.total_hours), 0) AS avg_hours_per_rental,
+            COUNT(DISTINCT CASE WHEN r.status = 'Active' THEN r.id END) AS active_rentals
+        FROM bicycles b
+        LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+        GROUP BY b.id, b.bike_code, b.brand, b.model, b.bike_type, b.hourly_rate, b.daily_cap, b.status
+        ORDER BY total_revenue DESC, total_rentals DESC
+    """).fetchall()
+    
+    # =============================================
+    # OVERALL STATISTICS
+    # =============================================
+    
+    total_bikes = len(bikes)
+    total_rentals = sum(b["total_rentals"] for b in bikes)
+    total_revenue = sum(b["total_revenue"] for b in bikes)
+    total_hours = sum(b["total_hours"] for b in bikes)
+    
+    # Most rented bike
+    most_rented = max(bikes, key=lambda x: x["total_rentals"]) if bikes else None
+    
+    # Highest revenue bike
+    highest_revenue = max(bikes, key=lambda x: x["total_revenue"]) if bikes else None
+    
+    # Active rentals count
+    active_rentals = sum(b["active_rentals"] for b in bikes)
+    
+    # Utilization rate (bikes with at least one rental)
+    utilized_bikes = sum(1 for b in bikes if b["total_rentals"] > 0)
+    utilization_rate = (utilized_bikes / total_bikes * 100) if total_bikes > 0 else 0
+    
+    # Average revenue per bike
+    avg_revenue_per_bike = total_revenue / total_bikes if total_bikes > 0 else 0
+    
+    # Bike type breakdown
+    bike_types = c.execute("""
+        SELECT 
+            bike_type,
+            COUNT(*) AS count,
+            COALESCE(SUM(r.total_cost), 0) AS revenue,
+            COALESCE(COUNT(r.id), 0) AS rentals
+        FROM bicycles b
+        LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+        GROUP BY bike_type
+        ORDER BY revenue DESC
+    """).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "bicycle_utilization.html",
+        title="Bicycle Utilization",
+        bikes=bikes,
+        total_bikes=total_bikes,
+        total_rentals=total_rentals,
+        total_revenue=total_revenue,
+        total_hours=total_hours,
+        most_rented=most_rented,
+        highest_revenue=highest_revenue,
+        active_rentals=active_rentals,
+        utilization_rate=utilization_rate,
+        avg_revenue_per_bike=avg_revenue_per_bike,
+        bike_types=bike_types
+    )
+
+
+
+# =============================================
+# NOTIFICATION FUNCTIONS
+# =============================================
+@login_required
+def send_email_notification(to_email, subject, body):
+    """Send email notification (development mode - prints to console)."""
+    if not EMAIL_ENABLED:
+        return False
+    
+    print("\n" + "=" * 60)
+    print("📧 EMAIL NOTIFICATION")
+    print("=" * 60)
+    print(f"To: {to_email}")
+    print(f"Subject: {subject}")
+    print("-" * 60)
+    print(body)
+    print("=" * 60 + "\n")
+    
+    # For production, uncomment this:
+    """
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_FROM
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+    """
+    return True
+
+@login_required
+def send_sms_notification(phone_number, message):
+    """Send SMS notification (development mode - prints to console)."""
+    if not SMS_ENABLED:
+        print("\n" + "=" * 60)
+        print("📱 SMS NOTIFICATION (Simulated)")
+        print("=" * 60)
+        print(f"To: {phone_number}")
+        print("-" * 60)
+        print(message)
+        print("=" * 60 + "\n")
+        return True
+    
+    # For production, uncomment this:
+    """
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=message,
+            from_=TWILIO_PHONE_NUMBER,
+            to=phone_number
+        )
+        return True
+    except Exception as e:
+        print(f"SMS error: {e}")
+        return False
+    """
+    return True
+
+@login_required
+def send_reminder(rental_id):
+    """Send a reminder for a specific rental."""
+    conn = db()
+    c = conn.cursor()
+    
+    rental = c.execute("""
+        SELECT 
+            r.*,
+            c.full_name,
+            c.phone,
+            c.email,
+            b.bike_code,
+            b.brand,
+            b.model
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+    
+    if not rental:
+        conn.close()
+        return False
+    
+    # Calculate time remaining
+    from datetime import datetime, timedelta
+    start_time = datetime.fromisoformat(rental["start_time"])
+    end_time = start_time + timedelta(hours=rental["total_hours"] or 1)
+    now = datetime.now()
+    
+    if now > end_time:
+        # Overdue reminder
+        reminder_type = "overdue"
+        message = f"""
+        ⚠️ OVERDUE REMINDER
+        
+        Dear {rental['full_name']},
+        
+        Your rental of {rental['bike_code']} is now OVERDUE.
+        
+        Rental started: {rental['start_time']}
+        Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
+        
+        Please return the bicycle immediately to avoid additional charges.
+        
+        Thank you,
+        RAB - Rent A Bike
+        """
+        subject = "🚲 OVERDUE: Bicycle Rental - Please Return"
+    else:
+        # Upcoming return reminder
+        time_left = end_time - now
+        hours_left = time_left.total_seconds() / 3600
+        
+        reminder_type = "upcoming"
+        message = f"""
+        🔔 RETURN REMINDER
+        
+        Dear {rental['full_name']},
+        
+        Your rental of {rental['bike_code']} will be due in approximately {hours_left:.1f} hours.
+        
+        Rental started: {rental['start_time']}
+        Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
+        
+        Please return the bicycle on time to avoid late fees.
+        
+        Thank you,
+        RAB - Rent A Bike
+        """
+        subject = "🚲 Return Reminder: Bicycle Due Soon"
+    
+    # Send email
+    if rental["email"]:
+        send_email_notification(rental["email"], subject, message)
+    
+    # Send SMS
+    if rental["phone"]:
+        # Shorten message for SMS
+        sms_message = f"RAB: {rental['full_name']}, your rental of {rental['bike_code']} is due soon. Please return to avoid late fees."
+        send_sms_notification(rental["phone"], sms_message)
+    
+    # Log the reminder
+    c.execute("""
+        INSERT INTO reminder_logs (rental_id, reminder_type, sent_to, sent_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    """, (rental_id, reminder_type, rental["phone"] or rental["email"]))
+    
+    conn.commit()
+    conn.close()
+    
+    return True
+
+
+@app.route("/rentals/<int:rental_id>/send-reminder")
+@login_required
+def send_reminder_route(rental_id):
+    """Manually send a reminder for a rental."""
+    if send_reminder(rental_id):
+        flash("Reminder sent successfully!", "success")
+    else:
+        flash("Failed to send reminder. Rental not found.", "danger")
+    return redirect(url_for("rental_history"))
+
+
+@app.route("/rentals/check-reminders")
+@login_required
+def check_reminders():
+    """Check all active rentals and send reminders if needed."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get active rentals
+    rentals = c.execute("""
+        SELECT id FROM daily_rentals 
+        WHERE status = 'Active'
+        AND end_time IS NOT NULL
+    """).fetchall()
+    
+    sent_count = 0
+    for rental in rentals:
+        if send_reminder(rental["id"]):
+            sent_count += 1
+    
+    conn.close()
+    
+    flash(f"Checked {len(rentals)} active rentals. Sent {sent_count} reminders.", "success")
+    return redirect(url_for("rental_history"))
+
+
+@app.route("/reminders/logs")
+@login_required
+def reminder_logs():
+    """View all sent reminders."""
+    conn = db()
+    c = conn.cursor()
+    
+    logs = c.execute("""
+        SELECT 
+            rl.*,
+            c.full_name,
+            b.bike_code
+        FROM reminder_logs rl
+        JOIN daily_rentals r ON r.id = rl.rental_id
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        ORDER BY rl.sent_at DESC
+        LIMIT 50
+    """).fetchall()
+    
+    conn.close()
+    
+    return render_template(
+        "reminder_logs.html",
+        title="Reminder Logs",
+        logs=logs
+    )
+
+
+# =============================================
+# DISCOUNT CODES
+# =============================================
+
+@app.route("/discounts")
+@login_required
+@admin_required
+def discounts():
+    """View all discount codes."""
+    conn = db()
+    c = conn.cursor()
+    
+    discounts = c.execute("""
+        SELECT * FROM discount_codes 
+        ORDER BY created_at DESC
+    """).fetchall()
+    
+    conn.close()
+    return render_template("discounts.html", title="Discount Codes", discounts=discounts)
+
+
+@app.route("/discounts/add", methods=["GET", "POST"])
+@login_required
+@admin_required
+def add_discount():
+    """Add a new discount code."""
+    if request.method == "POST":
+        code = request.form.get("code", "").strip().upper()
+        description = request.form.get("description", "").strip()
+        discount_type = request.form.get("discount_type", "percentage")
+        discount_value = float(request.form.get("discount_value", 0))
+        min_rental_amount = float(request.form.get("min_rental_amount", 0))
+        max_uses = int(request.form.get("max_uses", 0))
+        start_date = request.form.get("start_date")
+        end_date = request.form.get("end_date")
+        
+        if not code or discount_value <= 0:
+            flash("Code and discount value are required.", "danger")
+            return redirect(url_for("add_discount"))
+        
+        conn = db()
+        c = conn.cursor()
+        
+        try:
+            c.execute("""
+                INSERT INTO discount_codes 
+                (code, description, discount_type, discount_value, min_rental_amount, max_uses, start_date, end_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (code, description, discount_type, discount_value, min_rental_amount, max_uses, start_date, end_date))
+            conn.commit()
+            flash(f"Discount code '{code}' created successfully!", "success")
+        except sqlite3.IntegrityError:
+            flash(f"Discount code '{code}' already exists.", "danger")
+        finally:
+            conn.close()
+        
+        return redirect(url_for("discounts"))
+    
+    return render_template("add_discount.html", title="Add Discount Code")
+
+
+@app.route("/discounts/<int:discount_id>/toggle")
+@login_required
+@admin_required
+def toggle_discount(discount_id):
+    """Enable/disable a discount code."""
+    conn = db()
+    c = conn.cursor()
+    
+    discount = c.execute("SELECT is_active FROM discount_codes WHERE id = ?", (discount_id,)).fetchone()
+    if discount:
+        new_status = 0 if discount["is_active"] == 1 else 1
+        c.execute("UPDATE discount_codes SET is_active = ? WHERE id = ?", (new_status, discount_id))
+        conn.commit()
+        flash("Discount code status updated.", "success")
+    else:
+        flash("Discount code not found.", "danger")
+    
+    conn.close()
+    return redirect(url_for("discounts"))
+
+
+@app.route("/discounts/<int:discount_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_discount(discount_id):
+    """Delete a discount code."""
+    conn = db()
+    c = conn.cursor()
+    c.execute("DELETE FROM discount_codes WHERE id = ?", (discount_id,))
+    conn.commit()
+    conn.close()
+    
+    flash("Discount code deleted.", "success")
+    return redirect(url_for("discounts"))
+
+
+@app.route("/validate-discount", methods=["POST"])
+@login_required
+def validate_discount():
+    """Validate a discount code (AJAX)."""
+    code = request.form.get("code", "").strip().upper()
+    rental_amount = float(request.form.get("rental_amount", 0))
+    
+    conn = db()
+    c = conn.cursor()
+    
+    discount = c.execute("""
+        SELECT * FROM discount_codes 
+        WHERE code = ? AND is_active = 1
+        AND (start_date IS NULL OR date(start_date) <= date('now'))
+        AND (end_date IS NULL OR date(end_date) >= date('now'))
+        AND (max_uses = 0 OR used_count < max_uses)
+    """, (code,)).fetchone()
+    
+    conn.close()
+    
+    if not discount:
+        return jsonify({"valid": False, "message": "Invalid or expired discount code."})
+    
+    if rental_amount < discount["min_rental_amount"]:
+        return jsonify({
+            "valid": False, 
+            "message": f"Minimum rental amount of N${discount['min_rental_amount']:.2f} required."
+        })
+    
+    # Calculate discount
+    if discount["discount_type"] == "percentage":
+        discount_amount = rental_amount * (discount["discount_value"] / 100)
+    else:  # fixed
+        discount_amount = min(discount["discount_value"], rental_amount)
+    
+    return jsonify({
+        "valid": True,
+        "discount_id": discount["id"],
+        "discount_amount": round(discount_amount, 2),
+        "final_amount": round(rental_amount - discount_amount, 2),
+        "message": f"Discount applied: {discount['discount_value']}{'%' if discount['discount_type'] == 'percentage' else ''} off!"
+    })
+
+
+
+
+# =============================================
+# LOYALTY PROGRAM
+# =============================================
+
+@app.route("/loyalty")
+@login_required
+@admin_required
+def loyalty_dashboard():
+    """View loyalty program dashboard."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get all customers with loyalty points
+    customers = c.execute("""
+        SELECT 
+            c.id,
+            c.full_name,
+            c.phone,
+            c.email,
+            lp.points,
+            lp.total_spent,
+            lp.total_rentals,
+            lp.tier
+        FROM customers c
+        LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
+        ORDER BY lp.points DESC
+    """).fetchall()
+    
+    # Summary stats
+    total_points = c.execute("SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
+    total_customers_with_points = c.execute("SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
+    total_redeemed = c.execute("""
+        SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'
+    """).fetchone()[0]
+    
+    conn.close()
+    
+    return render_template(
+        "loyalty.html",
+        title="Loyalty Program",
+        customers=customers,
+        total_points=total_points,
+        total_customers_with_points=total_customers_with_points,
+        total_redeemed=total_redeemed
+    )
+
+
+@app.route("/loyalty/<int:customer_id>")
+@login_required
+def customer_loyalty(customer_id):
+    """View a customer's loyalty details."""
+    conn = db()
+    c = conn.cursor()
+    
+    customer = c.execute("""
+        SELECT c.*, lp.*
+        FROM customers c
+        LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
+        WHERE c.id = ?
+    """, (customer_id,)).fetchone()
+    
+    if not customer:
+        flash("Customer not found.", "danger")
+        return redirect(url_for("loyalty_dashboard"))
+    
+    transactions = c.execute("""
+        SELECT * FROM points_transactions 
+        WHERE customer_id = ? 
+        ORDER BY created_at DESC
+        LIMIT 20
+    """, (customer_id,)).fetchall()
+    
+    conn.close()
+    return render_template(
+        "customer_loyalty.html",
+        title="Customer Loyalty",
+        customer=customer,
+        transactions=transactions
+    )
+
+
+def add_loyalty_points(customer_id, rental_id, amount):
+    """Add loyalty points for a rental."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Calculate points: 1 point per N$10 spent
+    points_earned = int(amount / 10)
+    
+    if points_earned == 0:
+        conn.close()
+        return
+    
+    # Check if loyalty record exists
+    lp = c.execute("SELECT id, points, total_spent, total_rentals FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
+    
+    if lp:
+        new_points = lp["points"] + points_earned
+        new_total_spent = lp["total_spent"] + amount
+        new_total_rentals = lp["total_rentals"] + 1
+        
+        # Determine tier
+        tier = "Bronze"
+        if new_total_spent >= 5000:
+            tier = "Platinum"
+        elif new_total_spent >= 2000:
+            tier = "Gold"
+        elif new_total_spent >= 1000:
+            tier = "Silver"
+        
+        c.execute("""
+            UPDATE loyalty_points 
+            SET points = ?, total_spent = ?, total_rentals = ?, tier = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE customer_id = ?
+        """, (new_points, new_total_spent, new_total_rentals, tier, customer_id))
+    else:
+        tier = "Bronze"
+        c.execute("""
+            INSERT INTO loyalty_points (customer_id, points, total_spent, total_rentals, tier)
+            VALUES (?, ?, ?, ?, ?)
+        """, (customer_id, points_earned, amount, 1, tier))
+    
+    # Record transaction
+    c.execute("""
+        INSERT INTO points_transactions (customer_id, points, transaction_type, description, rental_id)
+        VALUES (?, ?, 'earned', ?, ?)
+    """, (customer_id, points_earned, f"Earned {points_earned} points from rental #{rental_id}", rental_id))
+    
+    conn.commit()
+    conn.close()
+
+
+@app.route("/loyalty/redeem", methods=["POST"])
+@login_required
+def redeem_points():
+    """Redeem loyalty points for discount."""
+    customer_id = request.form.get("customer_id")
+    points_to_redeem = int(request.form.get("points", 0))
+    rental_id = request.form.get("rental_id")
+    
+    conn = db()
+    c = conn.cursor()
+    
+    # Check available points
+    lp = c.execute("SELECT points FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
+    
+    if not lp or lp["points"] < points_to_redeem:
+        flash("Insufficient points.", "danger")
+        return redirect(request.referrer or url_for("loyalty_dashboard"))
+    
+    # Calculate discount: 1 point = N$0.50
+    discount_amount = points_to_redeem * 0.50
+    
+    # Deduct points
+    c.execute("UPDATE loyalty_points SET points = points - ? WHERE customer_id = ?", (points_to_redeem, customer_id))
+    
+    # Record transaction
+    c.execute("""
+        INSERT INTO points_transactions (customer_id, points, transaction_type, description, rental_id)
+        VALUES (?, ?, 'redeemed', ?, ?)
+    """, (customer_id, -points_to_redeem, f"Redeemed {points_to_redeem} points for N${discount_amount:.2f} discount", rental_id))
+    
+    conn.commit()
+    conn.close()
+    
+    flash(f"Successfully redeemed {points_to_redeem} points for N${discount_amount:.2f} discount!", "success")
+    return redirect(request.referrer or url_for("loyalty_dashboard"))
+
+
+
+# =============================================
+# MAINTENANCE TRACKING
+# =============================================
+
+@app.route("/maintenance")
+@login_required
+def maintenance_dashboard():
+    """View all maintenance records."""
+    conn = db()
+    c = conn.cursor()
+    
+    records = c.execute("""
+        SELECT m.*, b.bike_code, b.brand, b.model
+        FROM maintenance_records m
+        JOIN bicycles b ON b.id = m.bicycle_id
+        ORDER BY m.scheduled_date DESC
+        LIMIT 50
+    """).fetchall()
+    
+    # Summary
+    scheduled = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
+    in_progress = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
+    completed = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
+    
+    conn.close()
+    
+    return render_template(
+        "maintenance.html",
+        title="Maintenance",
+        records=records,
+        scheduled=scheduled,
+        in_progress=in_progress,
+        completed=completed
+    )
+
+
+@app.route("/maintenance/add", methods=["GET", "POST"])
+@login_required
+@manager_required
+def add_maintenance():
+    """Schedule maintenance for a bicycle."""
+    conn = db()
+    c = conn.cursor()
+    
+    bicycles = c.execute("SELECT id, bike_code, brand, model FROM bicycles ORDER BY bike_code").fetchall()
+    conn.close()
+    
+    if request.method == "POST":
+        bicycle_id = request.form.get("bicycle_id")
+        maintenance_type = request.form.get("maintenance_type")
+        description = request.form.get("description", "").strip()
+        cost = float(request.form.get("cost", 0))
+        scheduled_date = request.form.get("scheduled_date")
+        performed_by = request.form.get("performed_by", "").strip()
+        notes = request.form.get("notes", "").strip()
+        
+        conn = db()
+        c = conn.cursor()
+        
+        c.execute("""
+            INSERT INTO maintenance_records 
+            (bicycle_id, maintenance_type, description, cost, scheduled_date, performed_by, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (bicycle_id, maintenance_type, description, cost, scheduled_date, performed_by, notes))
+        
+        # Update bicycle status
+        c.execute("UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        flash("Maintenance record created successfully!", "success")
+        return redirect(url_for("maintenance_dashboard"))
+    
+    return render_template("add_maintenance.html", title="Add Maintenance", bicycles=bicycles)
+
+
+@app.route("/maintenance/<int:record_id>/update", methods=["POST"])
+@login_required
+@manager_required
+def update_maintenance(record_id):
+    """Update maintenance status."""
+    status = request.form.get("status")
+    completed_date = request.form.get("completed_date")
+    
+    conn = db()
+    c = conn.cursor()
+    
+    c.execute("""
+        UPDATE maintenance_records 
+        SET status = ?, completed_date = ?
+        WHERE id = ?
+    """, (status, completed_date, record_id))
+    
+    # If completed, update bicycle status back to Available
+    if status == "Completed":
+        record = c.execute("SELECT bicycle_id FROM maintenance_records WHERE id = ?", (record_id,)).fetchone()
+        if record:
+            c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
+    
+    conn.commit()
+    conn.close()
+    
+    flash("Maintenance record updated!", "success")
+    return redirect(url_for("maintenance_dashboard"))
+
+
+
+
+@app.route("/exports")
+@login_required
+@manager_required
+def exports_page():
+    """Export documents and reports page."""
+    from datetime import datetime
+    return render_template(
+        "exports.html", 
+        title="Export Documents",
+        now=datetime.now()
+    )
+
+
+@app.route("/export/rentals/csv")
+@login_required
+@manager_required
+def export_rentals_csv():
+    """Export all rentals to CSV."""
+    conn = db()
+    c = conn.cursor()
+    
+    rentals = c.execute("""
+        SELECT 
+            r.id,
+            c.full_name AS customer,
+            c.phone,
+            b.bike_code,
+            r.start_time,
+            r.end_time,
+            r.total_hours,
+            r.total_cost,
+            r.payment_status,
+            r.status
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        ORDER BY r.start_time DESC
+    """).fetchall()
+    conn.close()
+    
+    # Create CSV
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    # Header
+    writer.writerow(['Rental ID', 'Customer', 'Phone', 'Bike', 'Start Time', 'End Time', 
+                     'Hours', 'Cost (N$)', 'Payment Status', 'Status'])
+    
+    # Data
+    for r in rentals:
+        writer.writerow([
+            r['id'],
+            r['customer'],
+            r['phone'],
+            r['bike_code'],
+            r['start_time'],
+            r['end_time'] or '',
+            f"{r['total_hours']:.1f}" if r['total_hours'] else '0',
+            f"{r['total_cost']:.2f}" if r['total_cost'] else '0.00',
+            r['payment_status'] or 'Pending',
+            r['status']
+        ])
+    
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=rentals_{datetime.now().strftime("%Y%m%d")}.csv'
+    return response
+
+
+
+
+@app.route("/export/revenue/csv")
+@login_required
+@manager_required
+def export_revenue_csv():
+    """Export revenue report to CSV."""
+    period = request.args.get("period", "daily")
+    date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    
+    conn = db()
+    c = conn.cursor()
+    
+    if period == "daily":
+        revenue = c.execute("""
+            SELECT 
+                date(payment_date) AS period_label,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(amount), 0) AS total
+            FROM rental_payments
+            WHERE date(payment_date) = ?
+            GROUP BY date(payment_date)
+        """, (date_filter,)).fetchall()
+        period_label = "Daily"
+        
+    elif period == "weekly":
+        revenue = c.execute("""
+            SELECT 
+                strftime('%W', payment_date) AS period_label,
+                strftime('%Y', payment_date) AS year,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(amount), 0) AS total
+            FROM rental_payments
+            GROUP BY period_label, year
+            ORDER BY year DESC, period_label DESC
+            LIMIT 12
+        """).fetchall()
+        period_label = "Weekly"
+        
+    else:  # monthly
+        revenue = c.execute("""
+            SELECT 
+                strftime('%Y-%m', payment_date) AS period_label,
+                COUNT(*) AS transactions,
+                COALESCE(SUM(amount), 0) AS total
+            FROM rental_payments
+            GROUP BY period_label
+            ORDER BY period_label DESC
+            LIMIT 12
+        """).fetchall()
+        period_label = "Monthly"
+    
+    conn.close()
+    
+    # Create CSV
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    writer.writerow([f'{period_label} Revenue Report', f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}'])
+    writer.writerow([])
+    writer.writerow(['Period', 'Transactions', 'Revenue (N$)'])
+    
+    if revenue:
+        for r in revenue:
+            # Use period_label which exists in all queries
+            label = r['period_label']
+            # For weekly, add the year to make it more readable
+            if period == "weekly" and 'year' in r:
+                label = f"Week {r['period_label']}, {r['year']}"
+            writer.writerow([
+                label,
+                r['transactions'],
+                f"{r['total']:.2f}"
+            ])
+        
+        # Add summary row
+        total_transactions = sum(r['transactions'] for r in revenue)
+        total_revenue = sum(r['total'] for r in revenue)
+        writer.writerow([])
+        writer.writerow(['TOTAL', total_transactions, f"{total_revenue:.2f}"])
+    else:
+        writer.writerow(['No data available for this period.'])
+    
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=revenue_{period}_{datetime.now().strftime("%Y%m%d")}.csv'
+    return response
+
+
+
+
+# =============================================
+# RECEIPT GENERATION
+# =============================================
+
+@app.route("/receipt/<int:payment_id>")
+@login_required
+def generate_receipt(payment_id):
+    """Generate a PDF receipt for a payment."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from io import BytesIO
+    from datetime import datetime
+    
+    conn = db()
+    c = conn.cursor()
+    
+    # Get payment details with customer and rental info
+    payment = c.execute("""
+        SELECT 
+            p.*,
+            r.id AS rental_id,
+            r.start_time,
+            r.end_time,
+            r.total_hours,
+            r.total_cost,
+            r.bicycle_id,
+            c.full_name,
+            c.phone,
+            c.email,
+            c.id_number,
+            b.bike_code,
+            b.brand,
+            b.model
+        FROM rental_payments p
+        JOIN daily_rentals r ON r.id = p.daily_rental_id
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE p.id = ?
+    """, (payment_id,)).fetchone()
+    
+    conn.close()
+    
+    if not payment:
+        flash("Payment not found.", "danger")
+        return redirect(url_for("payment_history"))
+    
+    # Create PDF
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    
+    # Settings
+    x = 25 * mm
+    y = height - 25 * mm
+    
+    # =============================================
+    # HEADER
+    # =============================================
+    pdf.setFont("Helvetica-Bold", 24)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(x, y, "RAB RENT A BIKE")
+    
+    y -= 8 * mm
+    pdf.setFont("Helvetica", 10)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(x, y, "Daily Rental Receipt")
+    
+    y -= 5 * mm
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
+    pdf.drawString(x + 120 * mm, y, f"Date: {payment['payment_date'][:16]}")
+    
+    y -= 8 * mm
+    pdf.line(x, y, width - x, y)
+    y -= 10 * mm
+    
+    # =============================================
+    # CUSTOMER DETAILS
+    # =============================================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(x, y, "Customer Details")
+    y -= 7 * mm
+    
+    pdf.setFont("Helvetica", 10)
+    pdf.setFillColor(colors.HexColor("#111111"))
+    pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
+    
+    y -= 8 * mm
+    
+    # =============================================
+    # RENTAL DETAILS
+    # =============================================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(x, y, "Rental Details")
+    y -= 7 * mm
+    
+    pdf.setFont("Helvetica", 10)
+    pdf.setFillColor(colors.HexColor("#111111"))
+    pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Start: {payment['start_time']}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"End: {payment['end_time'] if payment['end_time'] else 'Active'}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
+    
+    y -= 8 * mm
+    
+    # =============================================
+    # PAYMENT DETAILS
+    # =============================================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(x, y, "Payment Details")
+    y -= 7 * mm
+    
+    pdf.setFont("Helvetica", 10)
+    pdf.setFillColor(colors.HexColor("#111111"))
+    pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment['payment_date']}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
+    
+    y -= 10 * mm
+    
+    # =============================================
+    # SUMMARY BOX
+    # =============================================
+    # Draw a box for the total
+    box_height = 25 * mm
+    box_y = y - box_height
+    
+    pdf.setFillColor(colors.HexColor("#ffe500"))
+    pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
+    
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
+    pdf.setFont("Helvetica-Bold", 24)
+    pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
+    
+    y -= box_height + 15 * mm
+    
+    # =============================================
+    # TERMS & CONDITIONS
+    # =============================================
+    pdf.setFont("Helvetica", 8)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
+    y -= 5 * mm
+    pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
+    
+    # =============================================
+    # FOOTER
+    # =============================================
+    pdf.setFont("Helvetica", 8)
+    pdf.setFillColor(colors.HexColor("#999999"))
+    pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
+    pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+    pdf.save()
+    buf.seek(0)
+    
+    filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+
+@app.route("/export/bicycles/csv")
+@login_required
+@manager_required
+def export_bicycles_csv():
+    """Export bicycle inventory to CSV."""
+    conn = db()
+    c = conn.cursor()
+    
+    bicycles = c.execute("""
+        SELECT 
+            b.bike_code,
+            b.brand,
+            b.model,
+            b.bike_type,
+            b.hourly_rate,
+            b.daily_cap,
+            b.status,
+            bh.health_score,
+            bh.condition_rating,
+            (SELECT COUNT(*) FROM daily_rentals WHERE bicycle_id = b.id) AS rentals
+        FROM bicycles b
+        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+        ORDER BY b.bike_code
+    """).fetchall()
+    conn.close()
+    
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    writer.writerow(['Bike Code', 'Brand', 'Model', 'Type', 'Hourly Rate', 
+                     'Daily Cap', 'Status', 'Health Score', 'Condition', 'Total Rentals'])
+    
+    for b in bicycles:
+        writer.writerow([
+            b['bike_code'],
+            b['brand'] or '',
+            b['model'] or '',
+            b['bike_type'],
+            f"{b['hourly_rate']:.2f}",
+            f"{b['daily_cap']:.2f}",
+            b['status'],
+            b['health_score'] or 'Not assessed',
+            b['condition_rating'] or 'Unknown',
+            b['rentals'] or 0
+        ])
+    
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=bicycles_{datetime.now().strftime("%Y%m%d")}.csv'
+    return response
+
+
+@app.route("/export/customers/csv")
+@login_required
+@admin_required
+def export_customers_csv():
+    """Export customer list to CSV."""
+    conn = db()
+    c = conn.cursor()
+    
+    customers = c.execute("""
+        SELECT 
+            c.full_name,
+            c.phone,
+            c.id_number,
+            c.email,
+            c.address,
+            c.verification_status,
+            (SELECT COUNT(*) FROM daily_rentals WHERE customer_id = c.id) AS rentals,
+            COALESCE(lp.points, 0) AS points,
+            COALESCE(lp.tier, 'Bronze') AS tier
+        FROM customers c
+        LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
+        ORDER BY c.full_name
+    """).fetchall()
+    conn.close()
+    
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    writer.writerow(['Name', 'Phone', 'ID Number', 'Email', 'Address', 
+                     'Verification Status', 'Total Rentals', 'Loyalty Points', 'Tier'])
+    
+    for c in customers:
+        writer.writerow([
+            c['full_name'],
+            c['phone'],
+            c['id_number'] or '',
+            c['email'] or '',
+            c['address'] or '',
+            c['verification_status'] or 'Pending',
+            c['rentals'] or 0,
+            c['points'],
+            c['tier']
+        ])
+    
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=customers_{datetime.now().strftime("%Y%m%d")}.csv'
+    return response
+
+
+@app.route("/export/maintenance/csv")
+@login_required
+@manager_required
+def export_maintenance_csv():
+    """Export maintenance records to CSV."""
+    conn = db()
+    c = conn.cursor()
+    
+    records = c.execute("""
+        SELECT 
+            b.bike_code,
+            m.maintenance_type,
+            m.description,
+            m.cost,
+            m.status,
+            m.scheduled_date,
+            m.completed_date,
+            m.performed_by
+        FROM maintenance_records m
+        JOIN bicycles b ON b.id = m.bicycle_id
+        ORDER BY m.scheduled_date DESC
+    """).fetchall()
+    conn.close()
+    
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    writer.writerow(['Bike', 'Type', 'Description', 'Cost (N$)', 'Status', 
+                     'Scheduled Date', 'Completed Date', 'Performed By'])
+    
+    for r in records:
+        writer.writerow([
+            r['bike_code'],
+            r['maintenance_type'],
+            r['description'] or '',
+            f"{r['cost']:.2f}" if r['cost'] else '0.00',
+            r['status'],
+            r['scheduled_date'] or '',
+            r['completed_date'] or '',
+            r['performed_by'] or ''
+        ])
+    
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=maintenance_{datetime.now().strftime("%Y%m%d")}.csv'
+    return response
+
+
+
+
+
+
+@app.route("/customer-portal")
+@login_required
+@customer_required
+def customer_portal():
+    """Customer self-service portal."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get customer data
+    customer = c.execute(
+        "SELECT * FROM customers WHERE user_id = ?", 
+        (session["user_id"],)
+    ).fetchone()
+    
+    if not customer:
+        flash("Customer profile not found. Please contact staff.", "warning")
+        return redirect(url_for("profile"))
+    
+    # Get rental history
+    rentals = c.execute("""
+        SELECT r.*, b.bike_code, b.brand, b.model
+        FROM daily_rentals r
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.customer_id = ?
+        ORDER BY r.start_time DESC
+        LIMIT 10
+    """, (customer["id"],)).fetchall()
+    
+    # Get loyalty points
+    points = c.execute(
+        "SELECT * FROM loyalty_points WHERE customer_id = ?", 
+        (customer["id"],)
+    ).fetchone()
+    
+    conn.close()
+    
+    return render_template(
+        "customer_portal.html",
+        title="My Account",
+        customer=customer,
+        rentals=rentals,
+        points=points
+    )
+
+
+
+
+# ✅ ADD THIS - Customer-only decorator
+def customer_required(f):
+    """Customer-only access (blocks staff)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please login to access this page.", "warning")
+            return redirect(url_for("login"))
+        
+        if session.get("role") != "customer":
+            flash("Access denied. Customers only.", "danger")
+            return redirect(url_for("dashboard"))
+        
+        return f(*args, **kwargs)
+    return wrapper
+
+
+
+# Add this decorator function
+def staff_required(f):
+    """Decorator to block customers from staff routes."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please login to access this page.", "warning")
+            return redirect(url_for("login"))
+        
+        if session.get("role") == "customer":
+            flash("Access denied. Staff only.", "danger")
+            return redirect(url_for("customer_portal"))
+        
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
+@login_required
+@staff_required
+def end_rental(rental_id):
+    conn = db()
+    c = conn.cursor()
+    
+    rental = c.execute("""
+        SELECT r.*, b.bike_code, c.full_name
+        FROM daily_rentals r
+        JOIN bicycles b ON b.id = r.bicycle_id
+        JOIN customers c ON c.id = r.customer_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+    
+    if not rental:
+        flash("Rental not found.", "danger")
+        return redirect(url_for("dashboard"))
+    
+    if request.method == "POST":
+        end_time = datetime.now()
+        start_time = datetime.fromisoformat(rental["start_time"])
+        total_hours = (end_time - start_time).total_seconds() / 3600
+        total_hours = round(total_hours, 2)
+        
+        hourly_rate = rental["hourly_rate"]
+        daily_cap = rental["daily_cap"]
+        
+        # Calculate cost
+        raw_cost = total_hours * hourly_rate
+        total_cost = min(raw_cost, daily_cap)
+        
+        # Check for late return (after 6pm)
+        late_fee = 0
+        if end_time.hour >= 18:
+            late_fee = 10 * (end_time.hour - 18)
+        
+        total_cost += late_fee
+        
+        # Get condition values
+        condition_before = request.form.get("condition_before", "Good")
+        condition_after = request.form.get("condition_after", "Good")
+        
+        c.execute("""
+            UPDATE daily_rentals 
+            SET end_time = ?,
+                total_hours = ?,
+                total_cost = ?,
+                late_fee = ?,
+                condition_before = ?,
+                condition_after = ?,
+                status = 'Completed'
+            WHERE id = ?
+        """, (end_time.isoformat(), total_hours, total_cost, late_fee, 
+              condition_before, condition_after, rental_id))
+        
+        c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        
+        conn.commit()
+        conn.close()
+        
+    
+        flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+        return redirect(url_for("record_payment", rental_id=rental_id))
+
+
+    conn.close()
+    
+    # Calculate preview for display
+    now = datetime.now()
+    start = datetime.fromisoformat(rental["start_time"])
+    preview_hours = round((now - start).total_seconds() / 3600, 2)
+    
+    hourly_rate = rental["hourly_rate"]
+    daily_cap = rental["daily_cap"]
+    preview_raw = preview_hours * hourly_rate
+    preview_capped = min(preview_raw, daily_cap)
+    preview_late = 10 * (now.hour - 18) if now.hour >= 18 else 0
+    preview_total = preview_capped + preview_late
+    
+    return render_template(
+        "end_rental.html",
+        title="End Rental",
+        rental=rental,
+        preview_hours=preview_hours,
+        hourly_rate=hourly_rate,
+        daily_cap=daily_cap,
+        preview_raw=preview_raw,
+        preview_capped=preview_capped,
+        preview_late=preview_late,
+        preview_total=preview_total
+    )
+
+
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(debug=True, port=5000)

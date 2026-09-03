@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📋 My Rentals</h1>
+<p class="sub">View your rental history and active rentals.</p>
+
+<div class="card">
+    <h2>Your Rentals</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bicycle</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Hours</th>
+                <th>Cost</th>
+                <th>Status</th>
+                <th>Receipt</th>
+            </tr>
+            {% if rentals %}
+                {% for r in rentals %}
+                <tr>
+                    <td>
+                        <b>{{ r.bike_code }}</b>
+                        <br>
+                        <small>{{ r.brand or '' }} {{ r.model or '' }}</small>
+                    </td>
+                    <td>{{ r.start_time[:16] }}</td>
+                    <td>{{ r.end_time[:16] if r.end_time else '—' }}</td>
+                    <td>{{ "%.1f"|format(r.total_hours or 0) }}</td>
+                    <td>N$ {{ "%.2f"|format(r.total_cost or 0) }}</td>
+                    <td>
+                        <span class="badge {% if r.status == 'Active' %}blue{% else %}green{% endif %}">
+                            {{ r.status }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if r.payment_status == 'Paid' %}
+                        <a class="btn small" href="{{ url_for('generate_receipt', payment_id=r.id) }}" target="_blank">📄 Receipt</a>
+                        {% else %}
+                        <span style="color:#667085;font-size:12px;">Not paid</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7">No rentals yet.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('customer_portal') }}" class="btn">← Back to My Account</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit Maintenance Record</h1>
+<p class="sub">Update maintenance details for {{ record.bike_code }}.</p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Bicycle *
+                <select name="bicycle_id" required>
+                    <option value="">Select Bicycle</option>
+                    {% for b in bicycles %}
+                    <option value="{{ b.id }}" {% if b.id == record.bicycle_id %}selected{% endif %}>
+                        {{ b.bike_code }} - {{ b.brand or '' }} {{ b.model or '' }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Maintenance Type *
+                <select name="maintenance_type" required>
+                    <option value="repair" {% if record.maintenance_type == 'repair' %}selected{% endif %}>🔧 Repair</option>
+                    <option value="service" {% if record.maintenance_type == 'service' %}selected{% endif %}>🛠️ Service</option>
+                    <option value="inspection" {% if record.maintenance_type == 'inspection' %}selected{% endif %}>🔍 Inspection</option>
+                    <option value="cleaning" {% if record.maintenance_type == 'cleaning' %}selected{% endif %}>🧹 Cleaning</option>
+                </select>
+            </label>
+            <label>
+                Description *
+                <textarea name="description" required rows="3" placeholder="Describe the maintenance work needed...">{{ record.description or '' }}</textarea>
+            </label>
+            <label>
+                Cost (N$)
+                <input type="number" step="0.01" name="cost" value="{{ record.cost or 0 }}">
+            </label>
+            <label>
+                Status
+                <select name="status">
+                    <option value="Scheduled" {% if record.status == 'Scheduled' %}selected{% endif %}>Scheduled</option>
+                    <option value="In Progress" {% if record.status == 'In Progress' %}selected{% endif %}>In Progress</option>
+                    <option value="Completed" {% if record.status == 'Completed' %}selected{% endif %}>Completed</option>
+                    <option value="Cancelled" {% if record.status == 'Cancelled' %}selected{% endif %}>Cancelled</option>
+                </select>
+            </label>
+            <label>
+                Scheduled Date *
+                <input type="date" name="scheduled_date" required value="{{ record.scheduled_date[:10] if record.scheduled_date else '' }}">
+            </label>
+            <label>
+                Completed Date *
+                <input type="date" name="completed_date" required value="{{ record.completed_date[:10] if record.completed_date else '' }}">
+            </label>
+            <label>
+                Performed By *
+                <input type="text" name="performed_by" required value="{{ record.performed_by or '' }}" placeholder="Mechanic name">
+            </label>
+            <label>
+                Notes
+                <textarea name="notes" rows="3" placeholder="Additional notes...">{{ record.notes or '' }}</textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Update Maintenance</button>
+            <a href="{{ url_for('maintenance_dashboard') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<!-- Current Record Info -->
+<div class="card" style="background:#f8f9fa;">
+    <h3>📋 Record Information</h3>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Created</div>
+            <div class="value" style="font-size:16px;">{{ record.created_at[:16] }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Bicycle</div>
+            <div class="value" style="font-size:16px;">{{ record.bike_code }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Current Status</div>
+            <div class="value" style="font-size:16px;">
+                <span class="badge {% if record.status == 'Completed' %}green{% elif record.status == 'In Progress' %}blue{% elif record.status == 'Scheduled' %}orange{% else %}red{% endif %}">
+                    {{ record.status }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('maintenance_dashboard') }}" class="btn">← Back to Maintenance</a>
+</div>
+
+{% endblock %}

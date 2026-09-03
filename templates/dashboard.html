@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Daily Rental Dashboard</h1>
+<p class="sub">RAB – Rent A Bike daily rental overview and monitoring.</p>
+
+<div class="grid">
+    <div class="metric">
+        <div class="label">Available Bikes</div>
+        <div class="value">{{ total_bikes }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Active Rentals</div>
+        <div class="value">{{ active_rentals }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Customers</div>
+        <div class="value">{{ total_customers }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Today's Revenue</div>
+        <div class="value">N$ {{ "%.2f"|format(today_revenue) }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Active Rentals</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Customer</th>
+                <th>Bike</th>
+                <th>Start Time</th>
+                <th>Duration</th>
+                <th>Action</th>
+            </tr>
+            {% if rentals %}
+                {% for rental in rentals %}
+                <tr>
+                    <td><b>{{ rental.full_name }}</b></td>
+                    <td>{{ rental.bike_code }}</td>
+                    <td>{{ rental.start_time }}</td>
+                    <td>{{ rental.duration }}</td>
+                    <td>
+                        <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
+                        <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">📄 Agreement</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5">No active rentals.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Quick Actions</h2>
+    <div class="actions">
+        <a class="btn yellow" href="{{ url_for('start_rental') }}">+ Start Rental</a>
+        <a class="btn" href="{{ url_for('customers') }}">+ Customer</a>
+        <a class="btn" href="{{ url_for('bicycles') }}">+ Bicycle</a>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Completed Rentals (Unpaid)</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Customer</th>
+                <th>Bike</th>
+                <th>Total Cost</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+            {% if unpaid_rentals %}
+                {% for r in unpaid_rentals %}
+                <tr>
+                    <td><b>{{ r.full_name }}</b></td>
+                    <td>{{ r.bike_code }}</td>
+                    <td>N$ {{ "%.2f"|format(r.total_cost) }}</td>
+                    <td>
+                        <span class="badge orange">Unpaid</span>
+                    </td>
+                    <td>
+                        <a class="btn small yellow" href="{{ url_for('record_payment', rental_id=r.id) }}">
+                            💰 Record Payment
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5">All completed rentals have been paid.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+
+{% endblock %}

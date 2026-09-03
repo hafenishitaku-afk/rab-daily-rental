@@ -1,0 +1,193 @@
+
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+    <div>
+        <h1>🩺 {{ bicycle.bike_code }}</h1>
+        <p class="sub">{{ bicycle.brand or '' }} {{ bicycle.model or '' }} - {{ bicycle.bike_type }}</p>
+    </div>
+    <div style="display:flex;gap:10px;">
+        <a href="{{ url_for('update_bicycle_health', bicycle_id=bicycle.id) }}" class="btn yellow">✏️ Update Health</a>
+        <a href="{{ url_for('calculate_bicycle_health', bicycle_id=bicycle.id) }}" class="btn">🔄 Calculate Score</a>
+        <a href="{{ url_for('bicycle_health_dashboard') }}" class="btn">← Back</a>
+    </div>
+</div>
+
+<!-- Health Overview -->
+<div class="card" style="background:#f8f9fa;">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Health Score</div>
+            <div class="value" style="font-size:32px;color:
+                {% if bicycle.health_score is not none %}
+                    {% if bicycle.health_score >= 80 %}#16834b
+                    {% elif bicycle.health_score >= 60 %}#17a2b8
+                    {% elif bicycle.health_score >= 40 %}#ffd700
+                    {% elif bicycle.health_score >= 20 %}#dc3545
+                    {% else %}#8b0000{% endif %}
+                {% else %}#667085{% endif %};">
+                {% if bicycle.health_score is not none %}
+                    {{ bicycle.health_score }}/100
+                {% else %}
+                    Not assessed
+                {% endif %}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Condition</div>
+            <div class="value" style="font-size:24px;">
+                {% if bicycle.condition_rating is not none %}
+                <span class="badge {% if bicycle.condition_rating == 'Excellent' %}green{% elif bicycle.condition_rating == 'Good' %}blue{% elif bicycle.condition_rating == 'Fair' %}orange{% elif bicycle.condition_rating == 'Poor' %}red{% else %}" style="background:#8b0000;color:#fff;{% endif %}" style="font-size:18px;padding:8px 20px;">
+                    {{ bicycle.condition_rating }}
+                </span>
+                {% else %}
+                <span style="color:#667085;">Unknown</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Status</div>
+            <div class="value" style="font-size:20px;">
+                <span class="badge {% if bicycle.status == 'Available' %}green{% elif bicycle.status == 'Rented' %}blue{% else %}orange{% endif %}">
+                    {{ bicycle.status }}
+                </span>
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Rentals</div>
+            <div class="value">{{ bicycle.total_rentals or 0 }}</div>
+            <div style="font-size:12px;color:#667085;">Avg: {{ "%.1f"|format(bicycle.avg_hours or 0) }} hrs</div>
+        </div>
+    </div>
+</div>
+
+<!-- Health Stats -->
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Last Maintenance</div>
+            <div class="value" style="font-size:18px;">{{ bicycle.last_maintenance_date[:10] if bicycle.last_maintenance_date else 'Never' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Next Maintenance Due</div>
+            <div class="value" style="font-size:18px;color:{% if bicycle.next_maintenance_due and bicycle.next_maintenance_due <= now %} #dc3545 {% else %} #0d1f46 {% endif %};">
+                {{ bicycle.next_maintenance_due[:10] if bicycle.next_maintenance_due else 'Not scheduled' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Maintenance</div>
+            <div class="value">{{ bicycle.total_maintenance_count or 0 }}</div>
+            <div style="font-size:12px;color:#667085;">Total Cost: N$ {{ "%.2f"|format(bicycle.total_repair_cost or 0) }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Health History -->
+<div class="card">
+    <h2>📈 Health History</h2>
+    <div class="scroll" style="max-height:300px;">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Score</th>
+                <th>Condition</th>
+                <th>Reason</th>
+            </tr>
+            {% for h in health_history %}
+            <tr>
+                <td>{{ h.recorded_at[:16] }}</td>
+                <td>
+                    <span style="color:{% if h.health_score >= 80 %}#16834b{% elif h.health_score >= 60 %}#17a2b8{% elif h.health_score >= 40 %}#ffd700{% elif h.health_score >= 20 %}#dc3545{% else %}#8b0000{% endif %};font-weight:bold;">
+                        {{ h.health_score }}/100
+                    </span>
+                </td>
+                <td>
+                    <span class="badge {% if h.condition_rating == 'Excellent' %}green{% elif h.condition_rating == 'Good' %}blue{% elif h.condition_rating == 'Fair' %}orange{% elif h.condition_rating == 'Poor' %}red{% else %}" style="background:#8b0000;color:#fff;{% endif %}">
+                        {{ h.condition_rating }}
+                    </span>
+                </td>
+                <td>{{ h.reason or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4">No health history available.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<!-- Maintenance Records -->
+<div class="card">
+    <h2>🔧 Recent Maintenance</h2>
+    <div class="scroll" style="max-height:300px;">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Description</th>
+                <th>Cost</th>
+                <th>Status</th>
+            </tr>
+            {% for m in maintenance %}
+            <tr>
+                <td>{{ m.created_at[:10] }}</td>
+                <td><span class="badge blue">{{ m.maintenance_type }}</span></td>
+                <td>{{ m.description or '—' }}</td>
+                <td>N$ {{ "%.2f"|format(m.cost or 0) }}</td>
+                <td>
+                    <span class="badge {% if m.status == 'Completed' %}green{% elif m.status == 'In Progress' %}blue{% else %}orange{% endif %}">
+                        {{ m.status }}
+                    </span>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5">No maintenance records.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<!-- Recent Rentals -->
+<div class="card">
+    <h2>📋 Recent Rentals</h2>
+    <div class="scroll" style="max-height:300px;">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Hours</th>
+                <th>Cost</th>
+                <th>Status</th>
+            </tr>
+            {% for r in rentals %}
+            <tr>
+                <td>{{ r.start_time[:16] }}</td>
+                <td>{{ r.full_name }}</td>
+                <td>{{ "%.1f"|format(r.total_hours or 0) }}</td>
+                <td>N$ {{ "%.2f"|format(r.total_cost or 0) }}</td>
+                <td>
+                    <span class="badge {% if r.status == 'Active' %}blue{% else %}green{% endif %}">
+                        {{ r.status }}
+                    </span>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5">No rental history.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('bicycle_health_dashboard') }}" class="btn">← Back to Health Dashboard</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🔧 Schedule Maintenance</h1>
+<p class="sub">Schedule maintenance for a bicycle.</p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Bicycle *
+                <select name="bicycle_id" required>
+                    <option value="">Select Bicycle</option>
+                    {% for b in bicycles %}
+                    <option value="{{ b.id }}">
+                        {{ b.bike_code }} - {{ b.brand or '' }} {{ b.model or '' }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Maintenance Type *
+                <select name="maintenance_type" required>
+                    <option value="repair">🔧 Repair</option>
+                    <option value="service">🛠️ Service</option>
+                    <option value="inspection">🔍 Inspection</option>
+                    <option value="cleaning">🧹 Cleaning</option>
+                </select>
+            </label>
+            <label>
+                Description
+                <textarea name="description" rows="3" placeholder="Describe the maintenance work needed..."></textarea>
+            </label>
+            <label>
+                Cost (N$)
+                <input type="number" step="0.01" name="cost" value="0">
+            </label>
+            <label>
+                Scheduled Date *
+                <input type="date" name="scheduled_date" required>
+            </label>
+            <label>
+                Performed By
+                <input type="text" name="performed_by" placeholder="Mechanic name">
+            </label>
+            <label>
+                Notes
+                <textarea name="notes" rows="3" placeholder="Additional notes..."></textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Schedule Maintenance</button>
+            <a href="{{ url_for('maintenance_dashboard') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

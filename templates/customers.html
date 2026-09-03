@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Customers</h1>
+<p class="sub">Register customers and complete verification before renting.</p>
+
+<div class="card">
+    <h2>Register Customer</h2>
+    <form method="post" enctype="multipart/form-data">
+        <div class="formgrid">
+            <label>
+                Full Name *
+                <input type="text" name="full_name" required>
+            </label>
+            <label>
+                Phone *
+                <input type="text" name="phone" required>
+            </label>
+            <label>
+                ID / Passport Number
+                <input type="text" name="id_number">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email">
+            </label>
+            <label>
+                Address
+                <input type="text" name="address">
+            </label>
+            <label>
+                ID / Passport Copy
+                <input type="file" name="id_photo" accept="image/*,.pdf">
+            </label>
+            <label>
+                Customer Photo
+                <input type="file" name="customer_photo" accept="image/*">
+            </label>
+        </div>
+        
+        <!-- Terms & Conditions -->
+        <div class="terms-agreement" style="margin-top:20px;padding:15px;border:1px solid #e4e7ec;border-radius:8px;">
+            <h3>Terms & Conditions</h3>
+            <div style="height:150px;overflow:auto;border:1px solid #ddd;padding:10px;margin-bottom:10px;font-size:13px;">
+                <p><strong>1. Rental Agreement</strong><br>
+                By renting a bicycle from RAB, you agree to these terms and conditions.</p>
+                
+                <p><strong>2. Responsibility</strong><br>
+                The customer is responsible for the bicycle during the rental period.</p>
+                
+                <p><strong>3. Damage & Loss</strong><br>
+                Any damage or loss must be reported immediately. The customer may be liable for repair or replacement costs.</p>
+                
+                <p><strong>4. Return Policy</strong><br>
+                The bicycle must be returned by the agreed time. Late returns will incur additional charges.</p>
+                
+                <p><strong>5. Safety</strong><br>
+                The customer agrees to wear a helmet and follow all traffic rules.</p>
+                
+                <p><strong>6. Data Protection</strong><br>
+                Customer information will be stored securely and used only for rental purposes.</p>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" name="terms_accepted" required>
+                I agree to the Terms & Conditions
+            </label>
+        </div>
+        
+        <!-- Signature Pad -->
+        <div class="signature-pad" style="margin-top:20px;">
+            <label>Digital Signature</label>
+            <p style="color:#667085;font-size:12px;">Sign below using your mouse or touch</p>
+            <canvas id="signatureCanvas" style="border:1px solid #ddd;width:100%;height:150px;border-radius:8px;touch-action:none;"></canvas>
+            <br>
+            <button type="button" class="btn small" onclick="clearSignature()">Clear Signature</button>
+            <input type="hidden" name="signature_data" id="signatureData">
+        </div>
+        
+        <button class="btn yellow" style="margin-top:16px">Register Customer</button>
+    </form>
+</div>
+
+<!-- <div class="card">
+    <h2>Customer List</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Verification</th>
+                <th>Documents</th>
+                <th>Action</th>
+            </tr>
+            {% for c in customers %}
+            <tr>
+                <td><b>{{ c.full_name }}</b></td>
+                <td>{{ c.phone }}</td>
+                <td>{{ c.id_number or '—' }}</td>
+                <td>{{ c.email or '—' }}</td>
+                <td>
+                    <span class="badge {% if c.verification_status == 'Verified' %}green{% elif c.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
+                        {{ c.verification_status or 'Pending' }}
+                    </span>
+                </td>
+
+                <td>
+                    <a class="btn small" href="{{ url_for('view_documents', customer_id=c.id) }}">📄 View</a>
+                </td>
+
+                <td>
+                    <a class="btn small" href="{{ url_for('verify_customer', customer_id=c.id) }}">Verify</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6">No customers yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div> -->
+
+<!-- <div class="card">
+    <h2>Customer List</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Verification</th>
+                <th>Documents</th>
+                <th>Action</th>
+            </tr>
+            {% for c in customers %}
+            <tr>
+                <td><b>{{ c.full_name }}</b></td>
+                <td>{{ c.phone }}</td>
+                <td>{{ c.id_number or '—' }}</td>
+                <td>{{ c.email or '—' }}</td>
+                <td>
+                    <span class="badge {% if c.verification_status == 'Verified' %}green{% elif c.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
+                        {{ c.verification_status or 'Pending' }}
+                    </span>
+                </td>
+                <td>
+                    <a class="btn small" href="{{ url_for('view_documents', customer_id=c.id) }}">📄 View</a>
+                </td>
+                <td>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        <a class="btn small" href="{{ url_for('verify_customer_page', customer_id=c.id) }}">✅ Verify</a>
+                        {% if session.role == 'admin' %}
+                        <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
+                              style="display:inline;" 
+                              onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
+                            <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7">No customers yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div> -->
+
+
+<div class="card">
+    <h2>Customer List</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Verification</th>
+                <th>Documents</th>
+                <th>Actions</th>
+            </tr>
+            {% for c in customers %}
+            <tr>
+                <td><b>{{ c.full_name }}</b></td>
+                <td>{{ c.phone }}</td>
+                <td>{{ c.id_number or '—' }}</td>
+                <td>{{ c.email or '—' }}</td>
+                <td>
+                    <span class="badge {% if c.verification_status == 'Verified' %}green{% elif c.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
+                        {{ c.verification_status or 'Pending' }}
+                    </span>
+                </td>
+                <td>
+                    <a class="btn small" href="{{ url_for('view_documents', customer_id=c.id) }}">📄 View</a>
+                </td>
+                <td>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <a class="btn small" href="{{ url_for('edit_customer', customer_id=c.id) }}">✏️ Edit</a>
+                        {% endif %}
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <a class="btn small" href="{{ url_for('verify_customer_page', customer_id=c.id) }}">✅ Verify</a>
+                        {% endif %}
+
+                        
+                        {% if session.role == 'admin' %}
+
+                        <a class="btn small" href="{{ url_for('reset_customer_password', customer_id=c.id) }}" style="background:#ffd700;color:#111;">🔑 Reset Password</a>
+                        <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
+                            style="display:inline;" 
+                            onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
+
+                        <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
+                              style="display:inline;" 
+                              onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
+                            <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7">No customers yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+
+
+
+
+
+<script>
+// Signature Pad JavaScript
+var canvas = document.getElementById('signatureCanvas');
+var ctx = canvas.getContext('2d');
+var drawing = false;
+
+// Set canvas size
+canvas.width = canvas.offsetWidth;
+canvas.height = 150;
+
+ctx.strokeStyle = '#111';
+ctx.lineWidth = 2;
+ctx.lineCap = 'round';
+ctx.lineJoin = 'round';
+
+// Mouse events
+canvas.addEventListener('mousedown', function(e) {
+    drawing = true;
+    var rect = canvas.getBoundingClientRect();
+    ctx.beginPath();
+    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    if (drawing) {
+        var rect = canvas.getBoundingClientRect();
+        ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+        ctx.stroke();
+    }
+});
+
+canvas.addEventListener('mouseup', function() {
+    drawing = false;
+    document.getElementById('signatureData').value = canvas.toDataURL();
+});
+
+// Touch events for mobile
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    drawing = true;
+    var rect = canvas.getBoundingClientRect();
+    var touch = e.touches[0];
+    ctx.beginPath();
+    ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+});
+
+canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (drawing) {
+        var rect = canvas.getBoundingClientRect();
+        var touch = e.touches[0];
+        ctx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+        ctx.stroke();
+    }
+});
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    drawing = false;
+    document.getElementById('signatureData').value = canvas.toDataURL();
+});
+
+function clearSignature() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    document.getElementById('signatureData').value = '';
+}
+</script>
+
+{% endblock %}

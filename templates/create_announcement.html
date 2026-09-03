@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Create Announcement</h1>
+<p class="sub">Share important information with your team.</p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Title *
+                <input type="text" name="title" placeholder="Announcement title..." required>
+            </label>
+            <label>
+                Priority
+                <select name="priority">
+                    <option value="normal">Normal</option>
+                    <option value="important">Important</option>
+                    <option value="urgent">Urgent</option>
+                </select>
+            </label>
+            <label>
+                Category
+                <select name="category">
+                    <option value="general">General</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="operations">Operations</option>
+                    <option value="staff">Staff</option>
+                </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;padding-top:10px;">
+                <input type="checkbox" name="is_pinned">
+                📌 Pin this announcement (stays at top)
+            </label>
+            <label style="grid-column: span 2;">
+                Content *
+                <textarea name="content" rows="6" placeholder="Write your announcement here..." required></textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">📢 Publish Announcement</button>
+            <a href="{{ url_for('announcements') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="background:#f8f9fa;">
+    <h4>💡 Tips for Effective Announcements</h4>
+    <ul style="color:#667085;line-height:1.8;">
+        <li><strong>Be clear</strong> - Use simple, direct language</li>
+        <li><strong>Be specific</strong> - Include dates, times, and actionable items</li>
+        <li><strong>Use priorities wisely</strong> - Only mark truly urgent items as urgent</li>
+        <li><strong>Pin important updates</strong> - Pin announcements that need attention</li>
+    </ul>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('announcements') }}" class="btn">← Back to Announcements</a>
+</div>
+
+{% endblock %}

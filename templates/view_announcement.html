@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+    <div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+            {% if announcement.is_pinned %}
+            <span class="badge" style="background:#ffd700;color:#111;">📌 Pinned</span>
+            {% endif %}
+            {% if announcement.priority == 'urgent' %}
+            <span class="badge" style="background:#dc3545;color:#fff;">🚨 Urgent</span>
+            {% elif announcement.priority == 'important' %}
+            <span class="badge" style="background:#ffd700;color:#111;">⚠️ Important</span>
+            {% endif %}
+            <span class="badge" style="background:#e4e7ec;">{{ announcement.category|title }}</span>
+        </div>
+        <h1 style="margin:0;">{{ announcement.title }}</h1>
+        <p style="color:#667085;font-size:14px;margin:5px 0 0 0;">
+            Posted by <b>{{ announcement.author_name }}</b> ({{ announcement.author_role }}) 
+            on {{ announcement.created_at[:16] }}
+            {% if announcement.updated_at != announcement.created_at %}
+            · Updated: {{ announcement.updated_at[:16] }}
+            {% endif %}
+        </p>
+    </div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;">
+        {% if session.role == 'admin' %}
+        <form method="post" action="{{ url_for('toggle_pin_announcement', announcement_id=announcement.id) }}" style="display:inline;">
+            <button class="btn small" style="background:#ffd700;color:#111;">
+                {{ '📌 Unpin' if announcement.is_pinned else '📌 Pin' }}
+            </button>
+        </form>
+        <form method="post" action="{{ url_for('delete_announcement', announcement_id=announcement.id) }}" 
+              style="display:inline;" 
+              onsubmit="return confirm('Delete this announcement?');">
+            <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Announcement Content -->
+<div class="card" style="white-space:pre-wrap;line-height:1.8;">
+    {{ announcement.content }}
+</div>
+
+<!-- Comments Section -->
+<div class="card">
+    <h3>💬 Comments ({{ comments|length }})</h3>
+    
+    <!-- Comment Form -->
+    <form method="post" action="{{ url_for('add_announcement_comment', announcement_id=announcement.id) }}" style="margin-bottom:20px;">
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+            <textarea name="comment" rows="2" placeholder="Write a comment..." style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;font-family:inherit;" required></textarea>
+            <button class="btn yellow" type="submit" style="padding:10px 20px;">💬 Post</button>
+        </div>
+    </form>
+    
+    <!-- Comments List -->
+    {% if comments %}
+        {% for c in comments %}
+        <div style="border-bottom:1px solid #e4e7ec;padding:12px 0;{% if loop.last %}border-bottom:none;{% endif %}">
+            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:5px;">
+                <div>
+                    <b>{{ c.user_name }}</b>
+                    <span style="color:#667085;font-size:12px;">({{ c.user_role }})</span>
+                </div>
+                <span style="color:#667085;font-size:12px;">{{ c.created_at[:16] }}</span>
+            </div>
+            <p style="margin:5px 0 0 0;white-space:pre-wrap;">{{ c.comment }}</p>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color:#667085;text-align:center;padding:20px;">No comments yet. Be the first to comment!</p>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('announcements') }}" class="btn">← Back to Announcements</a>
+</div>
+
+{% endblock %}

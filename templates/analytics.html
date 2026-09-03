@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📊 Analytics Dashboard</h1>
+<p class="sub">Comprehensive business insights and performance metrics.</p>
+
+<!-- Overview Cards -->
+<div class="grid">
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">💰 Total Revenue</div>
+        <div class="value">N$ {{ "%.2f"|format(total_revenue) }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #0d1f46;">
+        <div class="label">🚲 Total Rentals</div>
+        <div class="value">{{ total_rentals }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #ffd700;">
+        <div class="label">📋 Active Rentals</div>
+        <div class="value">{{ active_rentals }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">👥 Total Customers</div>
+        <div class="value">{{ total_customers }}</div>
+        <div style="font-size:12px;color:#667085;">{{ verified_customers }} verified</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #17a2b8;">
+        <div class="label">🚲 Total Bicycles</div>
+        <div class="value">{{ total_bicycles }}</div>
+        <div style="font-size:12px;color:#667085;">{{ available_bicycles }} available</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #6f42c1;">
+        <div class="label">📊 Utilization Rate</div>
+        <div class="value">{{ "%.1f"|format((total_rentals / total_bicycles * 100) if total_bicycles > 0 else 0) }}%</div>
+        <div style="font-size:12px;color:#667085;">Rentals per bike</div>
+    </div>
+</div>
+
+<!-- Revenue Charts -->
+<div class="card">
+    <h2>📈 Revenue Trends</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div>
+            <h4>Last 30 Days</h4>
+            <canvas id="dailyRevenueChart" height="200"></canvas>
+        </div>
+        <div>
+            <h4>Last 12 Months</h4>
+            <canvas id="monthlyRevenueChart" height="200"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- New Customers Trend -->
+<div class="card">
+    <h2>👤 New Customers (Last 30 Days)</h2>
+    <canvas id="newCustomersChart" height="150"></canvas>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <!-- Top Bicycles -->
+    <div class="card">
+        <h2>🚲 Top Performing Bicycles</h2>
+        <div class="scroll" style="max-height:300px;">
+            <table>
+                <tr>
+                    <th>Bike</th>
+                    <th>Type</th>
+                    <th>Rentals</th>
+                    <th>Revenue</th>
+                </tr>
+                {% for b in top_bicycles %}
+                <tr>
+                    <td><b>{{ b.bike_code }}</b></td>
+                    <td>{{ b.bike_type }}</td>
+                    <td>{{ b.rental_count }}</td>
+                    <td>N$ {{ "%.2f"|format(b.total_revenue) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4">No data available.</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+
+    <!-- Bike Type Performance -->
+    <div class="card">
+        <h2>📊 Bike Type Performance</h2>
+        <div class="scroll" style="max-height:300px;">
+            <table>
+                <tr>
+                    <th>Type</th>
+                    <th>Bikes</th>
+                    <th>Rentals</th>
+                    <th>Revenue</th>
+                    <th>Avg/Rental</th>
+                </tr>
+                {% for b in bike_type_stats %}
+                <tr>
+                    <td><b>{{ b.bike_type }}</b></td>
+                    <td>{{ b.bike_count }}</td>
+                    <td>{{ b.rental_count }}</td>
+                    <td>N$ {{ "%.2f"|format(b.total_revenue) }}</td>
+                    <td>N$ {{ "%.2f"|format(b.avg_revenue) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5">No data available.</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <!-- Top Customers -->
+    <div class="card">
+        <h2>🏆 Top Customers</h2>
+        <div class="scroll" style="max-height:300px;">
+            <table>
+                <tr>
+                    <th>Customer</th>
+                    <th>Rentals</th>
+                    <th>Spent</th>
+                    <th>Points</th>
+                </tr>
+                {% for c in top_customers %}
+                <tr>
+                    <td><b>{{ c.full_name }}</b></td>
+                    <td>{{ c.rental_count }}</td>
+                    <td>N$ {{ "%.2f"|format(c.total_spent) }}</td>
+                    <td>{{ c.points }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4">No data available.</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+
+    <!-- Payment Methods -->
+    <div class="card">
+        <h2>💳 Payment Methods</h2>
+        <div class="scroll" style="max-height:300px;">
+            <table>
+                <tr>
+                    <th>Method</th>
+                    <th>Count</th>
+                    <th>Total</th>
+                    <th>%</th>
+                </tr>
+                {% for p in payment_methods %}
+                <tr>
+                    <td><b>{{ p.payment_method or 'Unknown' }}</b></td>
+                    <td>{{ p.count }}</td>
+                    <td>N$ {{ "%.2f"|format(p.total) }}</td>
+                    <td>{{ "%.1f"|format((p.total / total_revenue * 100) if total_revenue > 0 else 0) }}%</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4">No data available.</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Revenue by Day of Week -->
+<div class="card">
+    <h2>📅 Revenue by Day of Week</h2>
+    <canvas id="weekRevenueChart" height="150"></canvas>
+</div>
+
+<!-- Additional Stats -->
+<div class="card">
+    <h2>📋 Additional Statistics</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;">
+        <div class="metric">
+            <div class="label">Average Rental Duration</div>
+            <div class="value" style="font-size:20px;">{{ "%.1f"|format(avg_duration.avg_hours or 0) }} hrs</div>
+            <div style="font-size:12px;color:#667085;">Min: {{ "%.1f"|format(avg_duration.min_hours or 0) }}hrs | Max: {{ "%.1f"|format(avg_duration.max_hours or 0) }}hrs</div>
+        </div>
+        <div class="metric">
+            <div class="label">🔧 Maintenance</div>
+            <div class="value" style="font-size:20px;">{{ maintenance_stats.total or 0 }}</div>
+            <div style="font-size:12px;color:#667085;">
+                Scheduled: {{ maintenance_stats.scheduled or 0 }} | 
+                In Progress: {{ maintenance_stats.in_progress or 0 }} | 
+                Completed: {{ maintenance_stats.completed or 0 }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">🏷️ Discount Usage</div>
+            <div class="value" style="font-size:20px;">{{ discount_stats.total_used or 0 }}</div>
+            <div style="font-size:12px;color:#667085;">Total Savings: N$ {{ "%.2f"|format(discount_stats.total_savings or 0) }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('analytics_dashboard') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+
+
+<div class="actions" style="margin-bottom:20px;">
+    
+    <a href="{{ url_for('export_revenue_csv', period='daily', date=now.strftime('%Y-%m-%d')) }}" class="btn">📥 Export Daily Revenue</a>
+    <a href="{{ url_for('export_rentals_csv') }}" class="btn">📥 Export Rentals</a>
+    <a href="{{ url_for('export_bicycles_csv') }}" class="btn">📥 Export Bicycles</a>
+    {% if session.role == 'admin' %}
+    <a href="{{ url_for('export_customers_csv') }}" class="btn">📥 Export Customers</a>
+    {% endif %}
+</div>
+
+
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Daily Revenue Chart
+const dailyCtx = document.getElementById('dailyRevenueChart').getContext('2d');
+new Chart(dailyCtx, {
+    type: 'bar',
+    data: {
+        labels: {{ chart_data.daily_dates|safe }},
+        datasets: [{
+            label: 'Revenue (N$)',
+            data: {{ chart_data.daily_revenue|safe }},
+            backgroundColor: 'rgba(13, 31, 70, 0.7)',
+            borderColor: '#0d1f46',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) { return 'N$ ' + value; }
+                }
+            }
+        }
+    }
+});
+
+// Monthly Revenue Chart
+const monthlyCtx = document.getElementById('monthlyRevenueChart').getContext('2d');
+new Chart(monthlyCtx, {
+    type: 'line',
+    data: {
+        labels: {{ chart_data.monthly_months|safe }},
+        datasets: [{
+            label: 'Revenue (N$)',
+            data: {{ chart_data.monthly_revenue|safe }},
+            fill: true,
+            tension: 0.4,
+            backgroundColor: 'rgba(255, 229, 0, 0.3)',
+            borderColor: '#ffe500',
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) { return 'N$ ' + value; }
+                }
+            }
+        }
+    }
+});
+
+// New Customers Chart
+const customerCtx = document.getElementById('newCustomersChart').getContext('2d');
+new Chart(customerCtx, {
+    type: 'line',
+    data: {
+        labels: {{ chart_data.new_customers_dates|safe }},
+        datasets: [{
+            label: 'New Customers',
+            data: {{ chart_data.new_customers_count|safe }},
+            fill: true,
+            tension: 0.4,
+            backgroundColor: 'rgba(23, 162, 184, 0.3)',
+            borderColor: '#17a2b8',
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1 }
+            }
+        }
+    }
+});
+
+// Week Revenue Chart
+const weekCtx = document.getElementById('weekRevenueChart').getContext('2d');
+new Chart(weekCtx, {
+    type: 'bar',
+    data: {
+        labels: {{ chart_data.week_days|safe }},
+        datasets: [{
+            label: 'Revenue (N$)',
+            data: {{ chart_data.week_revenue|safe }},
+            backgroundColor: [
+                'rgba(13, 31, 70, 0.7)',
+                'rgba(13, 31, 70, 0.7)',
+                'rgba(13, 31, 70, 0.7)',
+                'rgba(13, 31, 70, 0.7)',
+                'rgba(13, 31, 70, 0.7)',
+                'rgba(255, 229, 0, 0.8)',
+                'rgba(13, 31, 70, 0.7)'
+            ],
+            borderColor: '#0d1f46',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) { return 'N$ ' + value; }
+                }
+            }
+        }
+    }
+});
+</script>
+
+{% endblock %}

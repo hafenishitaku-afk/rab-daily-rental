@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Verify Customer</h1>
+<p class="sub">Review customer information and approve or reject verification.</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Name</div>
+            <div class="value" style="font-size:20px;">{{ customer.full_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Phone</div>
+            <div class="value" style="font-size:20px;">{{ customer.phone }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">ID Number</div>
+            <div class="value" style="font-size:20px;">{{ customer.id_number or 'Not provided' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Status</div>
+            <div class="value" style="font-size:20px;">
+                <span class="badge {% if customer.verification_status == 'Verified' %}green{% elif customer.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
+                    {{ customer.verification_status or 'Pending' }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Verification Decision</h2>
+    <form method="post" action="{{ url_for('verify_customer', customer_id=customer.id) }}">
+        <div class="formgrid">
+            <label>
+                Status
+                <select name="verification_status">
+                    <option value="Pending">Pending</option>
+                    <option value="Verified">✅ Verified</option>
+                    <option value="Rejected">❌ Rejected</option>
+                </select>
+            </label>
+            <label>
+                Notes
+                <textarea name="verification_notes" rows="3" placeholder="Add verification notes..."></textarea>
+            </label>
+        </div>
+        <button class="btn yellow" type="submit">Update Verification</button>
+        <a href="{{ url_for('customers') }}" class="btn">Back to Customers</a>
+    </form>
+</div>
+
+{% endblock %}

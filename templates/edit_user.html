@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit User</h1>
+<p class="sub">Edit user: <b>{{ user.username }}</b></p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Full Name
+                <input type="text" name="full_name" value="{{ user.full_name or '' }}">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" value="{{ user.email or '' }}">
+            </label>
+            <label>
+                Role
+                <select name="role">
+                    <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+                    <option value="manager" {% if user.role == 'manager' %}selected{% endif %}>Manager</option>
+                    <option value="staff" {% if user.role == 'staff' %}selected{% endif %}>Staff</option>
+                </select>
+            </label>
+            <label>
+                New Password
+                <input type="password" name="new_password" placeholder="Leave blank to keep current">
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Save Changes</button>
+            <a href="{{ url_for('users') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

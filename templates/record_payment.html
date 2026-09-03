@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Record Payment</h1>
+<p class="sub">Record payment for the completed rental.</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Customer</div>
+            <div class="value" style="font-size:20px;">{{ rental.full_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Bicycle</div>
+            <div class="value" style="font-size:20px;">{{ rental.bike_code }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Amount Due</div>
+            <div class="value" style="font-size:24px;color:#0d1f46;">
+                N$ {{ "%.2f"|format(rental.total_cost) }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Status</div>
+            <div class="value" style="font-size:20px;">
+                <span class="badge {% if rental.payment_status == 'Paid' %}green{% else %}orange{% endif %}">
+                    {{ rental.payment_status or 'Pending' }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Payment Details</h2>
+    
+    {% if rental.payment_status == 'Paid' %}
+        <div style="text-align:center;padding:30px;">
+            <div style="font-size:48px;">✅</div>
+            <h3>Payment Already Recorded</h3>
+            <p style="color:#667085;">This rental has already been paid.</p>
+            <a href="{{ url_for('dashboard') }}" class="btn">Back to Dashboard</a>
+        </div>
+    {% else %}
+        <form method="post">
+            <div class="formgrid">
+                <label>
+                    Amount (N$)
+                    <input type="number" step="0.01" name="amount" 
+                           value="{{ "%.2f"|format(rental.total_cost) }}" required>
+                </label>
+                <label>
+                    Payment Method
+                    <select name="payment_method">
+                        <option value="Cash">💵 Cash</option>
+                        <option value="Card">💳 Card</option>
+                        <option value="Mobile Money">📱 Mobile Money</option>
+                        <option value="Bank Transfer">🏦 Bank Transfer</option>
+                    </select>
+                </label>
+            </div>
+            
+            <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn yellow" type="submit">✅ Record Payment</button>
+                <a href="{{ url_for('dashboard') }}" class="btn">Cancel</a>
+            </div>
+        </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Payment Summary</h2>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Hours Used</div>
+            <div class="value">{{ "%.1f"|format(rental.total_hours) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Hourly Rate</div>
+            <div class="value">N$ {{ "%.2f"|format(rental.hourly_rate) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Late Fee</div>
+            <div class="value">N$ {{ "%.2f"|format(rental.late_fee or 0) }}</div>
+        </div>
+        <div class="metric" style="background:#ffe500;">
+            <div class="label">Total Due</div>
+            <div class="value">N$ {{ "%.2f"|format(rental.total_cost) }}</div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

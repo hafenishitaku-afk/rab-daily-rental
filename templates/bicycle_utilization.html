@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🚲 Bicycle Utilization Report</h1>
+<p class="sub">Analyze bicycle performance, revenue, and usage patterns.</p>
+
+<!-- Summary Cards -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Bicycles</div>
+        <div class="value">{{ total_bikes }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Total Rentals</div>
+        <div class="value">{{ total_rentals }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Total Revenue</div>
+        <div class="value">N$ {{ "%.2f"|format(total_revenue) }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Utilization Rate</div>
+        <div class="value">{{ "%.1f"|format(utilization_rate) }}%</div>
+    </div>
+</div>
+
+<!-- Additional Stats -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Active Rentals</div>
+        <div class="value">{{ active_rentals }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Avg Revenue / Bike</div>
+        <div class="value">N$ {{ "%.2f"|format(avg_revenue_per_bike) }}</div>
+    </div>
+    <div class="metric" style="background:#e8f7ef;">
+        <div class="label">🏆 Most Rented</div>
+        <div class="value" style="font-size:20px;">
+            {% if most_rented %}
+                {{ most_rented.bike_code }}
+                <small style="font-size:14px;color:#667085;">({{ most_rented.total_rentals }} rentals)</small>
+            {% else %}
+                —
+            {% endif %}
+        </div>
+    </div>
+    <div class="metric" style="background:#ffe500;">
+        <div class="label">💰 Highest Revenue</div>
+        <div class="value" style="font-size:20px;">
+            {% if highest_revenue %}
+                {{ highest_revenue.bike_code }}
+                <small style="font-size:14px;color:#667085;">N$ {{ "%.2f"|format(highest_revenue.total_revenue) }}</small>
+            {% else %}
+                —
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Bike Type Breakdown -->
+<div class="card">
+    <h2>Bike Type Breakdown</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bike Type</th>
+                <th>Bicycles</th>
+                <th>Rentals</th>
+                <th>Revenue</th>
+                <th>Avg per Bike</th>
+            </tr>
+            {% for type in bike_types %}
+            <tr>
+                <td><b>{{ type.bike_type }}</b></td>
+                <td>{{ type.count }}</td>
+                <td>{{ type.rentals }}</td>
+                <td>N$ {{ "%.2f"|format(type.revenue) }}</td>
+                <td>
+                    N$ {{ "%.2f"|format(type.revenue / type.count if type.count > 0 else 0) }}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5">No bike types available.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<!-- Bicycle Table -->
+<div class="card">
+    <h2>Bicycle Performance</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bike</th>
+                <th>Type</th>
+                <th>Rentals</th>
+                <th>Hours</th>
+                <th>Revenue</th>
+                <th>Avg Hours</th>
+                <th>Status</th>
+            </tr>
+            {% for bike in bikes %}
+            <tr>
+                <td>
+                    <b>{{ bike.bike_code }}</b>
+                    <br>
+                    <small>{{ bike.brand or '' }} {{ bike.model or '' }}</small>
+                </td>
+                <td>{{ bike.bike_type }}</td>
+                <td>{{ bike.total_rentals }}</td>
+                <td>{{ "%.1f"|format(bike.total_hours) }}</td>
+                <td><b>N$ {{ "%.2f"|format(bike.total_revenue) }}</b></td>
+                <td>{{ "%.1f"|format(bike.avg_hours_per_rental) }}</td>
+                <td>
+                    <span class="badge {% if bike.status == 'Available' %}green{% elif bike.status == 'Rented' %}blue{% else %}orange{% endif %}">
+                        {{ bike.status }}
+                    </span>
+                    {% if bike.active_rentals > 0 %}
+                        <br>
+                        <small style="color:#667085;">{{ bike.active_rentals }} active</small>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7">No bicycles available.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('bicycle_utilization') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

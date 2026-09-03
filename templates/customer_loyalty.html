@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>⭐ Customer Loyalty Details</h1>
+<p class="sub">{{ customer.full_name }} - {{ customer.phone }}</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Points Balance</div>
+            <div class="value" style="font-size:28px;">{{ customer.points or 0 }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Spent</div>
+            <div class="value" style="font-size:28px;">N$ {{ "%.2f"|format(customer.total_spent or 0) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Rentals</div>
+            <div class="value" style="font-size:28px;">{{ customer.total_rentals or 0 }}</div>
+        </div>
+        <div class="metric" style="background:#ffe500;">
+            <div class="label">Tier</div>
+            <div class="value" style="font-size:28px;">{{ customer.tier or 'Bronze' }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Points History</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Points</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+            {% if transactions %}
+                {% for t in transactions %}
+                <tr>
+                    <td>{{ t.created_at[:16] }}</td>
+                    <td>
+                        <b style="color:{% if t.points > 0 %}#16834b{% else %}#dc3545{% endif %};">
+                            {{ t.points }}
+                        </b>
+                    </td>
+                    <td>
+                        <span class="badge {% if t.transaction_type == 'earned' %}green{% elif t.transaction_type == 'redeemed' %}orange{% else %}blue{% endif %}">
+                            {{ t.transaction_type }}
+                        </span>
+                    </td>
+                    <td>{{ t.description or '—' }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="4">No transactions yet.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('loyalty_dashboard') }}" class="btn">← Back to Loyalty</a>
+    <a href="{{ url_for('customers') }}" class="btn">← Back to Customers</a>
+</div>
+
+{% endblock %}

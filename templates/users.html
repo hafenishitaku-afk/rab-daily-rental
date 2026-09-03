@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>👥 User Management</h1>
+<p class="sub">Manage system users and their roles.</p>
+
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+        <h2>All Users</h2>
+        <a href="{{ url_for('add_user') }}" class="btn yellow">+ Add User</a>
+    </div>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Username</th>
+                <th>Full Name</th>
+                <th>Role</th>
+                <th>Email</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+            {% for u in users %}
+            <tr>
+                <td><b>{{ u.username }}</b></td>
+                <td>{{ u.full_name or '—' }}</td>
+                <td>
+                    <span class="badge {% if u.role == 'admin' %}green{% elif u.role == 'manager' %}blue{% else %}orange{% endif %}">
+                        {{ u.role }}
+                    </span>
+                </td>
+                <td>{{ u.email or '—' }}</td>
+                <td>{{ u.created_at[:10] }}</td>
+                <td>
+                    <a class="btn small" href="{{ url_for('edit_user', user_id=u.id) }}">✏️ Edit</a>
+                    {% if u.id != session.user_id %}
+                    <form method="post" action="{{ url_for('delete_user', user_id=u.id) }}" style="display:inline;">
+                        <button class="btn small" style="background:#dc3545;" onclick="return confirm('Delete this user?')">🗑️ Delete</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

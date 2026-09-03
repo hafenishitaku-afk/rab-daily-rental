@@ -1,0 +1,87 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "RAB Daily Rental" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    {% if session.get('user_id') %}
+    <header class="top">
+        <div class="brand">
+            <img src="{{ url_for('static', filename='Mylogo.png') }}" 
+                 alt="RAB" 
+                 style="height:80px; width:180px; vertical-align:middle;">
+            <span>DAILY RENTAL</span>
+        </div>
+        
+     
+        
+
+
+        <nav>
+            <!-- ✅ STAFF ONLY - Hide from customers -->
+            {% if session.role != 'customer' %}
+                <!-- Core Operations -->
+                <a href="{{ url_for('dashboard') }}" style="color:#ffe500;">Dashboard</a>
+                <a href="{{ url_for('start_rental') }}" style="color:#ffe500;">Start Rental</a>
+                <a href="{{ url_for('customers') }}" style="color:#ffe500;">Customers</a>
+                <a href="{{ url_for('bicycles') }}" style="color:#ffe500;">Bicycles</a>
+                <a href="{{ url_for('rental_history') }}" style="color:#ffe500;">Rentals</a>
+                <a href="{{ url_for('payment_history') }}" style="color:#ffe500;">💸 Payments</a>
+                <a href="{{ url_for('announcements') }}" style="color:#ffe500;">📢 Announcements</a>
+                <a href="{{ url_for('reminder_logs') }}" style="color:#ffe500;">🔔 Reminders</a>
+                
+                <!-- Reports & Analytics (Manager+) -->
+                {% if session.role == 'admin' or session.role == 'manager' %}
+                <a href="{{ url_for('analytics_dashboard') }}" style="color:#ffe500;">📊 Analytics</a>
+                <a href="{{ url_for('revenue_report') }}" style="color:#ffe500;">📃 Reports</a>
+                <a href="{{ url_for('bicycle_utilization') }}" style="color:#ffe500;">Utilization</a>
+                <a href="{{ url_for('bicycle_health_dashboard') }}" style="color:#ffe500;">🩺 Health</a>
+                <a href="{{ url_for('maintenance_dashboard') }}" style="color:#ffe500;">🔧 Maintenance</a>
+                <a href="{{ url_for('exports_page') }}" style="color:#ffe500;">📄 Exports</a>
+                {% endif %}
+                
+                <!-- Admin Only -->
+                {% if session.role == 'admin' %}
+                <a href="{{ url_for('discounts') }}" style="color:#00ff80;">🏷️ Discounts</a>
+                <a href="{{ url_for('loyalty_dashboard') }}" style="color:#00ff80;">⭐ Loyalty</a>
+                <a href="{{ url_for('users') }}" style="color:#00ff80;">👥 Users</a>
+                {% endif %}
+            {% endif %}
+            
+            <!-- ✅ CUSTOMER ONLY -->
+            {% if session.role == 'customer' %}
+                <a href="{{ url_for('customer_portal') }}" style="color:#00ff80;font-weight:bold;">👤 My Account</a>
+                <a href="{{ url_for('customer_rent') }}" style="color:#ffe500;">🚲 Rent a Bike</a>
+                <a href="{{ url_for('customer_rentals') }}" style="color:#ffe500;">📋 My Rentals</a>
+            {% endif %}
+            
+            <!-- ✅ EVERYONE (Staff and Customers) -->
+            <a href="{{ url_for('profile') }}" style="color:#ffe500;">👤 Profile</a>
+            <a href="{{ url_for('logout') }}" style="color:#ffe500;">🔒 Logout</a>
+        </nav>        
+
+
+        <!-- User Info -->
+        <div style="color:#aaa;font-size:12px;margin-left:15px;">
+            {{ session.full_name or session.username }} 
+            <span style="color:#ffe500;">({{ session.role }})</span>
+        </div>
+    </header>
+    {% endif %}
+    
+    <main class="wrap">
+        {% with msgs = get_flashed_messages(with_categories=true) %}
+            {% for cat, msg in msgs %}
+                <div class="flash {{ cat }}">{{ msg }}</div>
+            {% endfor %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer>RAB - Daily Rental System</footer>
+</body>
+</html>

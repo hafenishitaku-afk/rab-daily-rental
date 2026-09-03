@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Bicycles</h1>
+<p class="sub">Manage your daily rental fleet.</p>
+
+<div class="card">
+    <h2>Add Bicycle</h2>
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Bike Code *
+                <input type="text" name="bike_code" placeholder="RAB-001" required>
+            </label>
+            <label>
+                Bike Type
+                <select name="bike_type" id="bike_type" onchange="updateRates()">
+                    <option value="Standard">Standard</option>
+                    <option value="Electric">Electric</option>
+                    <option value="Mountain">Mountain</option>
+                </select>
+            </label>
+            <label>
+                Brand
+                <input type="text" name="brand" placeholder="SCORPIO">
+            </label>
+            <label>
+                Model
+                <input type="text" name="model" placeholder="Hybrid">
+            </label>
+            <label>
+                Hourly Rate (N$)
+                <input type="number" step="0.01" name="hourly_rate" id="hourly_rate" value="20">
+            </label>
+            <label>
+                Daily Cap (N$)
+                <input type="number" step="0.01" name="daily_cap" id="daily_cap" value="120">
+            </label>
+            <label>
+                Deposit (N$)
+                <input type="number" step="0.01" name="deposit_amount" id="deposit_amount" value="50">
+            </label>
+            <label>
+                Notes
+                <input type="text" name="notes" placeholder="Any notes about this bike">
+            </label>
+        </div>
+        <button class="btn yellow" style="margin-top:16px">Add Bicycle</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Fleet</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Code</th>
+                <th>Type</th>
+                <th>Brand / Model</th>
+                <th>Hourly</th>
+                <th>Daily Cap</th>
+                <th>Status</th>
+                <th>Health</th>
+                <th>Actions</th>
+            </tr>
+            {% for b in bicycles %}
+            <tr>
+                <td><b>{{ b.bike_code }}</b></td>
+                <td>{{ b.bike_type }}</td>
+                <td>{{ b.brand or '' }} {{ b.model or '' }}</td>
+                <td>N$ {{ "%.2f"|format(b.hourly_rate) }}</td>
+                <td>N$ {{ "%.2f"|format(b.daily_cap) }}</td>
+                <td>
+                    <span class="badge {% if b.status == 'Available' %}green{% elif b.status == 'Rented' %}blue{% else %}orange{% endif %}">
+                        {{ b.status }}
+                    </span>
+                </td>
+                <td>
+                    {% if b.health_score is not none %}
+                    <div style="display:flex;align-items:center;gap:5px;">
+                        <div style="width:40px;height:6px;background:#e4e7ec;border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:{{ b.health_score }}%;background:
+                                {% if b.health_score >= 80 %}#16834b
+                                {% elif b.health_score >= 60 %}#17a2b8
+                                {% elif b.health_score >= 40 %}#ffd700
+                                {% elif b.health_score >= 20 %}#dc3545
+                                {% else %}#8b0000{% endif %};">
+                            </div>
+                        </div>
+                        <span style="font-size:12px;">{{ b.health_score }}/100</span>
+                    </div>
+                    {% else %}
+                    <span style="color:#667085;font-size:12px;">Not assessed</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <a class="btn small" href="{{ url_for('edit_bicycle', bicycle_id=b.id) }}">✏️ Edit</a>
+                        {% endif %}
+                        {% if session.role == 'admin' and b.status != 'Rented' %}
+                        <form method="post" action="{{ url_for('delete_bicycle', bicycle_id=b.id) }}" 
+                              style="display:inline;" 
+                              onsubmit="return confirm('Are you sure you want to delete bicycle {{ b.bike_code }}? This action cannot be undone.');">
+                            <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+                        </form>
+                        {% endif %}
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <a class="btn small" href="{{ url_for('bicycle_health_detail', bicycle_id=b.id) }}">🩺 Health</a>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8">No bicycles yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<script>
+function updateRates() {
+    var bikeType = document.getElementById("bike_type").value;
+    var rates = {
+        "Standard": { hourly: 20, daily: 120, deposit: 50 },
+        "Electric": { hourly: 30, daily: 180, deposit: 75 },
+        "Mountain": { hourly: 25, daily: 150, deposit: 60 }
+    };
+    
+    if (rates[bikeType]) {
+        document.getElementById("hourly_rate").value = rates[bikeType].hourly;
+        document.getElementById("daily_cap").value = rates[bikeType].daily;
+        document.getElementById("deposit_amount").value = rates[bikeType].deposit;
+    }
+}
+</script>
+
+{% endblock %}

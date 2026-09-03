@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📋 Reminder Logs</h1>
+<p class="sub">History of all sent reminders.</p>
+
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Bicycle</th>
+                <th>Type</th>
+                <th>Sent To</th>
+            </tr>
+            {% if logs %}
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.sent_at[:16] }}</td>
+                    <td><b>{{ log.full_name }}</b></td>
+                    <td>{{ log.bike_code }}</td>
+                    <td>
+                        <span class="badge {% if log.reminder_type == 'overdue' %}orange{% else %}blue{% endif %}">
+                            {{ log.reminder_type }}
+                        </span>
+                    </td>
+                    <td>{{ log.sent_to }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5">No reminders sent yet.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('check_reminders') }}" class="btn yellow">📨 Check & Send Reminders</a>
+    <a href="{{ url_for('reminder_logs') }}" class="btn">⟳ Refresh</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Customer Documents</h1>
+<p class="sub">{{ customer.full_name }} - {{ customer.phone }}</p>
+
+<div class="card">
+    <h2>Uploaded Documents</h2>
+    
+    {% if documents %}
+        <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+            {% for doc in documents %}
+            <div class="card" style="margin-top:0;text-align:center;">
+                <div style="font-size:48px;margin-bottom:10px;">
+                    {% if doc.document_type == 'id_copy' %}
+                        🪪
+                    {% elif doc.document_type == 'customer_photo' %}
+                        📸
+                    {% else %}
+                        📄
+                    {% endif %}
+                </div>
+                <div style="font-weight:bold;">{{ doc.document_type.replace('_', ' ').title() }}</div>
+                <div style="color:#667085;font-size:12px;">{{ doc.uploaded_at }}</div>
+                <br>
+                <a href="{{ url_for('view_document_file', customer_id=customer.id, doc_id=doc.id) }}" class="btn small">
+                    📄 View Document
+                </a>
+
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>No documents uploaded for this customer.</p>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('customers') }}" class="btn">← Back to Customers</a>
+</div>
+
+{% endblock %}

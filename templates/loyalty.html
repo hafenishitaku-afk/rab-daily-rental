@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>⭐ Loyalty Program</h1>
+<p class="sub">Track customer loyalty points and rewards.</p>
+
+<!-- Summary Cards -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Points Issued</div>
+        <div class="value">{{ total_points }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Customers with Points</div>
+        <div class="value">{{ total_customers_with_points }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Points Redeemed</div>
+        <div class="value">{{ total_redeemed }}</div>
+    </div>
+    <div class="metric" style="background:#ffe500;">
+        <div class="label">Available Points</div>
+        <div class="value">{{ total_points - total_redeemed }}</div>
+    </div>
+</div>
+
+<!-- Tier Info -->
+<div class="card">
+    <h2>🎯 Loyalty Tiers</h2>
+    <div class="grid">
+        <div class="metric" style="background:#cd7f32;color:#fff;">
+            <div class="label" style="color:#fff;">Bronze</div>
+            <div class="value">0-999 pts</div>
+            <div style="font-size:12px;">5% discount</div>
+        </div>
+        <div class="metric" style="background:#c0c0c0;">
+            <div class="label">Silver</div>
+            <div class="value">1,000-1,999 pts</div>
+            <div style="font-size:12px;">10% discount</div>
+        </div>
+        <div class="metric" style="background:#ffd700;">
+            <div class="label">Gold</div>
+            <div class="value">2,000-4,999 pts</div>
+            <div style="font-size:12px;">15% discount</div>
+        </div>
+        <div class="metric" style="background:#e5e4e2;border:2px solid #ffd700;">
+            <div class="label">Platinum</div>
+            <div class="value">5,000+ pts</div>
+            <div style="font-size:12px;">20% discount</div>
+        </div>
+    </div>
+    <p style="color:#667085;font-size:12px;margin-top:10px;">
+        💡 Customers earn 1 point for every N$10 spent.
+    </p>
+</div>
+
+<!-- Customer List -->
+<div class="card">
+    <h2>Customers</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Customer</th>
+                <th>Phone</th>
+                <th>Points</th>
+                <th>Total Spent</th>
+                <th>Rentals</th>
+                <th>Tier</th>
+                <th>Action</th>
+            </tr>
+            {% if customers %}
+                {% for c in customers %}
+                <tr>
+                    <td><b>{{ c.full_name }}</b></td>
+                    <td>{{ c.phone }}</td>
+                    <td>{{ c.points or 0 }}</td>
+                    <td>N$ {{ "%.2f"|format(c.total_spent or 0) }}</td>
+                    <td>{{ c.total_rentals or 0 }}</td>
+                    <td>
+                        <span class="badge {% if c.tier == 'Platinum' %}" style="background:#e5e4e2;border:2px solid #ffd700;{% elif c.tier == 'Gold' %}gold{% elif c.tier == 'Silver' %}silver{% else %}" style="background:#cd7f32;color:#fff;{% endif %}">
+                            {{ c.tier or 'Bronze' }}
+                        </span>
+                    </td>
+                    <td>
+                        <a class="btn small" href="{{ url_for('customer_loyalty', customer_id=c.id) }}">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7">No customers with loyalty points yet.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

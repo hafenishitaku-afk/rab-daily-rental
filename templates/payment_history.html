@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>💳 Payment History</h1>
+<p class="sub">Record of all payments received.</p>
+
+<div class="card" style="background:#f8f9fa;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;">
+        <div>
+            <span style="color:#667085;">Total Revenue</span>
+            <div style="font-size:32px;font-weight:800;color:#0d1f46;">
+                N$ {{ "%.2f"|format(total_revenue) }}
+            </div>
+        </div>
+        <div>
+            <span style="color:#667085;">Total Transactions</span>
+            <div style="font-size:32px;font-weight:800;color:#0d1f46;">
+                {{ payments|length }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Bicycle</th>
+                <th>Method</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Receipt</th>  <!-- 👈 ADD THIS COLUMN -->
+            </tr>
+            {% for p in payments %}
+            <tr>
+                <td>{{ p.payment_date[:16] }}</td>
+                <td><b>{{ p.full_name }}</b></td>
+                <td>{{ p.bike_code }}</td>
+                <td>{{ p.payment_method or 'Cash' }}</td>
+                <td><b>N$ {{ "%.2f"|format(p.amount) }}</b></td>
+                <td>
+                    <span class="badge green">{{ p.status }}</span>
+                </td>
+                <td>
+                    <a class="btn small" href="{{ url_for('generate_receipt', payment_id=p.id) }}" target="_blank">
+                        📄 Receipt
+                    </a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7">No payments recorded yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('payment_history') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

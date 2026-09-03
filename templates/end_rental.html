@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>End Rental</h1>
+<p class="sub">Complete the rental process and calculate the total cost.</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Customer</div>
+            <div class="value" style="font-size:20px;">{{ rental.full_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Bicycle</div>
+            <div class="value" style="font-size:20px;">{{ rental.bike_code }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Start Time</div>
+            <div class="value" style="font-size:20px;">{{ rental.start_time }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Hourly Rate</div>
+            <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(rental.hourly_rate) }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Cost Preview Card -->
+<div class="card" style="background:#f8f9fa;">
+    <h2>Cost Preview</h2>
+    <div class="grid">
+        <div class="metric" style="background:white;">
+            <div class="label">Hours Used</div>
+            <div class="value" style="font-size:24px;">{{ "%.1f"|format(preview_hours) }}</div>
+        </div>
+        <div class="metric" style="background:white;">
+            <div class="label">Raw Cost</div>
+            <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_raw) }}</div>
+        </div>
+        <div class="metric" style="background:white;">
+            <div class="label">Daily Cap Applied</div>
+            <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_capped) }}</div>
+        </div>
+        <div class="metric" style="background:white;">
+            <div class="label">Late Fee</div>
+            <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_late) }}</div>
+        </div>
+        <div class="metric" style="background:#ffe500;grid-column: span 2;">
+            <div class="label">Total Cost</div>
+            <div class="value" style="font-size:32px;">N$ {{ "%.2f"|format(preview_total) }}</div>
+        </div>
+    </div>
+    <p style="color:#667085;font-size:12px;margin-top:10px;">
+        ⏱️ Cost is calculated based on the current time. 
+        {% if preview_late > 0 %}
+            <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
+        {% endif %}
+    </p>
+</div>
+
+<div class="card">
+    <h2>Complete Return</h2>
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Condition Before
+                <select name="condition_before">
+                    <option value="Excellent">Excellent</option>
+                    <option value="Good" selected>Good</option>
+                    <option value="Fair">Fair</option>
+                    <option value="Poor">Poor</option>
+                    <option value="Damaged">Damaged</option>
+                </select>
+            </label>
+            <label>
+                Condition After
+                <select name="condition_after">
+                    <option value="Excellent">Excellent</option>
+                    <option value="Good" selected>Good</option>
+                    <option value="Fair">Fair</option>
+                    <option value="Poor">Poor</option>
+                    <option value="Damaged">Damaged</option>
+                </select>
+            </label>
+        </div>
+        <button class="btn yellow" type="submit">✅ Complete Rental</button>
+        <a href="{{ url_for('dashboard') }}" class="btn">Cancel</a>
+    </form>
+</div>
+
+{% endblock %}

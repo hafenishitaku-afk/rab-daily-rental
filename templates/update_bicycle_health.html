@@ -1,0 +1,85 @@
+
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Update Bicycle Health</h1>
+<p class="sub">{{ bicycle.bike_code }} - {{ bicycle.brand or '' }} {{ bicycle.model or '' }}</p>
+
+<div class="card">
+    <form method="post">
+        <div class="formgrid">
+            <label>
+                Health Score (0-100)
+                <input type="number" name="health_score" min="0" max="100" 
+                       value="{{ health.health_score if health and health.health_score is not none else 100 }}" required>
+            </label>
+            <label>
+                Condition Rating
+                <select name="condition_rating">
+                    <option value="Excellent" {% if health and health.condition_rating == 'Excellent' %}selected{% endif %}>Excellent</option>
+                    <option value="Good" {% if health and health.condition_rating == 'Good' %}selected{% endif %}>Good</option>
+                    <option value="Fair" {% if health and health.condition_rating == 'Fair' %}selected{% endif %}>Fair</option>
+                    <option value="Poor" {% if health and health.condition_rating == 'Poor' %}selected{% endif %}>Poor</option>
+                    <option value="Critical" {% if health and health.condition_rating == 'Critical' %}selected{% endif %}>Critical</option>
+                </select>
+            </label>
+            <label style="grid-column: span 2;">
+                Notes
+                <textarea name="notes" rows="3" placeholder="Additional health notes...">{{ health.notes if health else '' }}</textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn yellow" type="submit">💾 Update Health</button>
+            <a href="{{ url_for('bicycle_health_detail', bicycle_id=bicycle.id) }}" class="btn">Cancel</a>
+            <a href="{{ url_for('calculate_bicycle_health', bicycle_id=bicycle.id) }}" class="btn">🔄 Auto-Calculate</a>
+        </div>
+    </form>
+</div>
+
+<!-- Current Health Info -->
+<div class="card" style="background:#f8f9fa;">
+    <h3>📊 Current Health Status</h3>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Current Score</div>
+            <div class="value" style="font-size:24px;color:
+                {% if health and health.health_score is not none %}
+                    {% if health.health_score >= 80 %}#16834b
+                    {% elif health.health_score >= 60 %}#17a2b8
+                    {% elif health.health_score >= 40 %}#ffd700
+                    {% elif health.health_score >= 20 %}#dc3545
+                    {% else %}#8b0000{% endif %}
+                {% else %}#667085{% endif %};">
+                {% if health and health.health_score is not none %}
+                    {{ health.health_score }}/100
+                {% else %}
+                    Not assessed
+                {% endif %}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Current Condition</div>
+            <div class="value" style="font-size:24px;">
+                {% if health and health.condition_rating is not none %}
+                <span class="badge {% if health.condition_rating == 'Excellent' %}green{% elif health.condition_rating == 'Good' %}blue{% elif health.condition_rating == 'Fair' %}orange{% elif health.condition_rating == 'Poor' %}red{% else %}" style="background:#8b0000;color:#fff;{% endif %}" style="font-size:18px;padding:8px 20px;">
+                    {{ health.condition_rating }}
+                </span>
+                {% else %}
+                <span style="color:#667085;">Unknown</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Last Updated</div>
+            <div class="value" style="font-size:18px;">{{ health.updated_at[:16] if health and health.updated_at else 'Never' }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('bicycle_health_detail', bicycle_id=bicycle.id) }}" class="btn">← Back to Health Details</a>
+</div>
+
+{% endblock %}

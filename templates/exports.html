@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📄 Export Documents</h1>
+<p class="sub">Download reports and data from the system.</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-bottom:20px;">
+    
+    <!-- Rental Exports -->
+    <div class="card">
+        <h2>📋 Rentals</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('export_rentals_csv') }}" class="btn" style="text-align:center;">📥 All Rentals (CSV)</a>
+            <a href="{{ url_for('rental_history') }}" class="btn" style="text-align:center;background:#17a2b8;">📊 View Rentals</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            Export all rental records with customer and bicycle details.
+        </p>
+    </div>
+    
+    <!-- Financial Exports -->
+    <div class="card">
+        <h2>💰 Financial</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('export_revenue_csv', period='daily', date=now.strftime('%Y-%m-%d')) }}" class="btn" style="text-align:center;">📥 Daily Revenue (CSV)</a>
+            <a href="{{ url_for('export_revenue_csv', period='weekly') }}" class="btn" style="text-align:center;">📥 Weekly Revenue (CSV)</a>
+            <a href="{{ url_for('export_revenue_csv', period='monthly') }}" class="btn" style="text-align:center;">📥 Monthly Revenue (CSV)</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            Export revenue reports by day, week, or month.
+        </p>
+    </div>
+    
+    <!-- Bicycle Exports -->
+    <div class="card">
+        <h2>🚲 Bicycles</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('export_bicycles_csv') }}" class="btn" style="text-align:center;">📥 Inventory (CSV)</a>
+            <a href="{{ url_for('export_maintenance_csv') }}" class="btn" style="text-align:center;">📥 Maintenance (CSV)</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            Export bicycle inventory and maintenance records.
+        </p>
+    </div>
+    
+    <!-- Customer Exports (Admin Only) -->
+    {% if session.role == 'admin' %}
+    <div class="card">
+        <h2>👤 Customers</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('export_customers_csv') }}" class="btn" style="text-align:center;">📥 All Customers (CSV)</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            Export complete customer list with loyalty points.
+        </p>
+    </div>
+    {% endif %}
+    
+    <!-- Payment Exports
+    <div class="card">
+        <h2>💳 Payments</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('payment_history') }}" class="btn" style="text-align:center;background:#17a2b8;">📊 View Payments</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            View all payment history and transaction details.
+        </p>
+    </div> -->
+
+    <!-- Payment Exports -->
+    <div class="card">
+        <h2>💳 Payments & Receipts</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('payment_history') }}" class="btn" style="text-align:center;background:#17a2b8;">📊 View Payments</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            View all payment history and <strong>generate individual receipts</strong> for each payment.
+        </p>
+    </div>
+
+
+    
+    <!-- Health Exports -->
+    {% if session.role == 'admin' or session.role == 'manager' %}
+    <div class="card">
+        <h2>🩺 Bicycle Health</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a href="{{ url_for('bicycle_health_dashboard') }}" class="btn" style="text-align:center;background:#17a2b8;">📊 View Health</a>
+        </div>
+        <p style="color:#667085;font-size:12px;margin-top:10px;">
+            View bicycle health scores and condition ratings.
+        </p>
+    </div>
+    {% endif %}
+    
+</div>
+
+<!-- Quick Actions -->
+<div class="card" style="background:#f8f9fa;">
+    <h3>📌 Quick Export Tips</h3>
+    <ul style="color:#667085;line-height:2;">
+        <li><strong>CSV files</strong> can be opened in Excel, Google Sheets, or any spreadsheet software</li>
+        <li><strong>Rental Agreements</strong> are available as PDF from the Rental History page</li>
+        <li><strong>Individual receipts</strong> can be generated from the Payment History page</li>
+        <li><strong>All exports</strong> include date and time in the filename</li>
+    </ul>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('exports_page') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

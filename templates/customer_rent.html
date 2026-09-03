@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🚲 Available Bicycles</h1>
+<p class="sub">Browse our available bicycles. Visit our store to start a rental.</p>
+
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bike</th>
+                <th>Type</th>
+                <th>Hourly Rate</th>
+                <th>Daily Cap</th>
+                <th>Status</th>
+            </tr>
+            {% if bikes %}
+                {% for b in bikes %}
+                <tr>
+                    <td>
+                        <b>{{ b.bike_code }}</b>
+                        <br>
+                        <small>{{ b.brand or '' }} {{ b.model or '' }}</small>
+                    </td>
+                    <td>{{ b.bike_type }}</td>
+                    <td>N$ {{ "%.2f"|format(b.hourly_rate) }}</td>
+                    <td>N$ {{ "%.2f"|format(b.daily_cap) }}</td>
+                    <td>
+                        <span class="badge green">Available</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5">No bicycles available at the moment.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="card" style="background:#f8f9fa;">
+    <h3>📌 How to Rent</h3>
+    <p style="color:#667085;">
+        To rent a bicycle, please visit our store and our staff will assist you with the rental process.
+    </p>
+    <ul style="color:#667085;line-height:1.8;">
+        <li>✅ Choose your preferred bicycle from the list above</li>
+        <li>✅ Visit our store with your ID</li>
+        <li>✅ Our staff will complete the rental process</li>
+        <li>✅ You'll receive a confirmation and rental agreement</li>
+    </ul>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('customer_portal') }}" class="btn">← Back to My Account</a>
+</div>
+
+{% endblock %}

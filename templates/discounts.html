@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🏷️ Discount Codes</h1>
+<p class="sub">Create and manage promotional discount codes.</p>
+
+<div class="actions" style="margin-bottom:20px;">
+    <a href="{{ url_for('add_discount') }}" class="btn yellow">+ Add Discount Code</a>
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Code</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>Value</th>
+                <th>Min. Amount</th>
+                <th>Uses</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            {% for d in discounts %}
+            <tr>
+                <td><b>{{ d.code }}</b></td>
+                <td>{{ d.description or '—' }}</td>
+                <td>{{ d.discount_type }}</td>
+                <td>{{ d.discount_value }}{% if d.discount_type == 'percentage' %}%{% else %} N${% endif %}</td>
+                <td>N$ {{ "%.2f"|format(d.min_rental_amount) }}</td>
+                <td>{{ d.used_count }}/{{ d.max_uses or '∞' }}</td>
+                <td>
+                    <span class="badge {% if d.is_active %}green{% else %}orange{% endif %}">
+                        {{ 'Active' if d.is_active else 'Inactive' }}
+                    </span>
+                </td>
+                <td>
+                    <a class="btn small" href="{{ url_for('toggle_discount', discount_id=d.id) }}">
+                        {{ 'Disable' if d.is_active else 'Enable' }}
+                    </a>
+                    <form method="post" action="{{ url_for('delete_discount', discount_id=d.id) }}" style="display:inline;">
+                        <button class="btn small" style="background:#dc3545;" onclick="return confirm('Delete this discount?')">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8">No discount codes created yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+{% endblock %}

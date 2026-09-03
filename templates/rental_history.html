@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📜 Rental History</h1>
+<p class="sub">View and manage all past and active rentals.</p>
+
+<!-- Summary Cards -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Rentals</div>
+        <div class="value">{{ total_rentals }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Total Revenue</div>
+        <div class="value">N$ {{ "%.2f"|format(total_revenue) }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Paid</div>
+        <div class="value" style="color:#16834b;">{{ paid_count }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Unpaid</div>
+        <div class="value" style="color:#dc3545;">{{ unpaid_count }}</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filter Rentals</h2>
+    <form method="get" action="{{ url_for('rental_history') }}" class="formgrid">
+        <label>
+            Status
+            <select name="status">
+                <option value="">All Statuses</option>
+                <option value="Active" {% if status_filter == 'Active' %}selected{% endif %}>Active</option>
+                <option value="Completed" {% if status_filter == 'Completed' %}selected{% endif %}>Completed</option>
+            </select>
+        </label>
+        <label>
+            Search
+            <input type="text" name="search" placeholder="Customer, Bike, or Phone..." value="{{ search or '' }}">
+        </label>
+        <label>
+            Date From
+            <input type="date" name="date_from" value="{{ date_from or '' }}">
+        </label>
+        <label>
+            Date To
+            <input type="date" name="date_to" value="{{ date_to or '' }}">
+        </label>
+        <div style="display:flex;gap:10px;align-items:end;">
+            <button class="btn yellow" type="submit">🔍 Filter</button>
+            <a href="{{ url_for('rental_history') }}" class="btn">Clear</a>
+        </div>
+    </form>
+</div>
+
+<!-- Rental Table -->
+<div class="card">
+    <h2>Rental Records</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Bicycle</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Hours</th>
+                <th>Cost</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>Action</th>
+            </tr>
+            {% if rentals %}
+                {% for rental in rentals %}
+                <tr>
+                    <td><b>#{{ rental.id }}</b></td>
+                    <td>
+                        <b>{{ rental.full_name }}</b>
+                        <br>
+                        <small>{{ rental.phone }}</small>
+                    </td>
+                    <td>
+                        {{ rental.bike_code }}
+                        <br>
+                        <small>{{ rental.brand or '' }} {{ rental.model or '' }}</small>
+                    </td>
+                    <td>{{ rental.start_time[:16] }}</td>
+                    <td>{{ rental.end_time[:16] if rental.end_time else '—' }}</td>
+                    <td>{{ "%.1f"|format(rental.total_hours or 0) }}</td>
+                    <td><b>N$ {{ "%.2f"|format(rental.total_cost or 0) }}</b></td>
+                    <td>
+                        <span class="badge {% if rental.rental_status == 'Active' %}blue{% else %}orange{% endif %}">
+                            {{ rental.rental_status }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="badge {% if rental.payment_status == 'Paid' %}green{% else %}orange{% endif %}">
+                            {{ rental.payment_status or 'Unpaid' }}
+                        </span>
+                        <br>
+                        <small>{{ rental.payment_count }} payments</small>
+                    </td>
+                    <td>
+                        {% if rental.rental_status == 'Active' %}
+                            <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End</a>
+                            <a class="btn small" href="{{ url_for('send_reminder_route', rental_id=rental.id) }}">🔔 Remind</a>
+                        {% endif %}
+                        {% if rental.payment_status != 'Paid' and rental.rental_status == 'Completed' %}
+                            <a class="btn small yellow" href="{{ url_for('record_payment', rental_id=rental.id) }}">Pay</a>
+                        {% endif %}
+                        <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">PDF</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="10">No rentals found.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<!-- Actions -->
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('rental_history') }}" class="btn yellow">⟳ Refresh</a>
+    <a href="{{ url_for('check_reminders') }}" class="btn">📨 Check & Send Reminders</a>
+</div>
+
+{% endblock %}
+

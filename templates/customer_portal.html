@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>👤 My Account</h1>
+<p class="sub">Welcome back, {{ customer.full_name }}!</p>
+
+<!-- Profile Overview -->
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Full Name</div>
+            <div class="value" style="font-size:20px;">{{ customer.full_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Phone</div>
+            <div class="value" style="font-size:20px;">{{ customer.phone }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Email</div>
+            <div class="value" style="font-size:20px;">{{ customer.email or 'Not set' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Verification Status</div>
+            <div class="value" style="font-size:20px;">
+                <span class="badge {% if customer.verification_status == 'Verified' %}green{% else %}orange{% endif %}">
+                    {{ customer.verification_status or 'Pending' }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loyalty Points -->
+<div class="card" style="background:#f8f9fa;">
+    <h2>⭐ Loyalty Rewards</h2>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Points Balance</div>
+            <div class="value" style="font-size:28px;color:#0d1f46;">{{ points.points or 0 }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Tier</div>
+            <div class="value" style="font-size:24px;">
+                <span class="badge {% if points.tier == 'Platinum' %}" style="background:#e5e4e2;border:2px solid #ffd700;{% elif points.tier == 'Gold' %}gold{% elif points.tier == 'Silver' %}silver{% else %}" style="background:#cd7f32;color:#fff;{% endif %}">
+                    {{ points.tier or 'Bronze' }}
+                </span>
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Spent</div>
+            <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(points.total_spent or 0) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Rentals</div>
+            <div class="value" style="font-size:20px;">{{ points.total_rentals or 0 }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Rental History -->
+<div class="card">
+    <h2>📋 My Rentals</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bicycle</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Hours</th>
+                <th>Cost</th>
+                <th>Status</th>
+                <th>Receipt</th>
+            </tr>
+            {% if rentals %}
+                {% for r in rentals %}
+                <tr>
+                    <td>
+                        <b>{{ r.bike_code }}</b>
+                        <br>
+                        <small>{{ r.brand or '' }} {{ r.model or '' }}</small>
+                    </td>
+                    <td>{{ r.start_time[:16] }}</td>
+                    <td>{{ r.end_time[:16] if r.end_time else '—' }}</td>
+                    <td>{{ "%.1f"|format(r.total_hours or 0) }}</td>
+                    <td>N$ {{ "%.2f"|format(r.total_cost or 0) }}</td>
+                    <td>
+                        <span class="badge {% if r.status == 'Active' %}blue{% else %}green{% endif %}">
+                            {{ r.status }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if r.payment_status == 'Paid' %}
+                        <a class="btn small" href="{{ url_for('generate_receipt', payment_id=r.id) }}" target="_blank">📄 Receipt</a>
+                        {% else %}
+                        <span style="color:#667085;font-size:12px;">Not paid</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7">No rentals yet.</td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <h2>🔧 Quick Actions</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <a href="{{ url_for('customer_rent') }}" class="btn yellow">🚲 Rent a Bike</a>
+        <a href="{{ url_for('profile') }}" class="btn">👤 Edit Profile</a>
+        <a href="{{ url_for('payment_history') }}" class="btn">💳 Payment History</a>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

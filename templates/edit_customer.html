@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit Customer</h1>
+<p class="sub">Update customer details and documents.</p>
+
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        <div class="formgrid">
+            <label>
+                Full Name *
+                <input type="text" name="full_name" value="{{ customer.full_name }}" required>
+            </label>
+            <label>
+                Phone *
+                <input type="text" name="phone" value="{{ customer.phone }}" required>
+            </label>
+            <label>
+                ID / Passport Number
+                <input type="text" name="id_number" value="{{ customer.id_number or '' }}">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" value="{{ customer.email or '' }}">
+            </label>
+            <label>
+                Address
+                <input type="text" name="address" value="{{ customer.address or '' }}">
+            </label>
+            <label>
+                Verification Status
+                <select name="verification_status">
+                    <option value="Pending" {% if customer.verification_status == 'Pending' %}selected{% endif %}>Pending</option>
+                    <option value="Verified" {% if customer.verification_status == 'Verified' %}selected{% endif %}>Verified</option>
+                    <option value="Rejected" {% if customer.verification_status == 'Rejected' %}selected{% endif %}>Rejected</option>
+                </select>
+            </label>
+            <label>
+                ID / Passport Copy
+                <input type="file" name="id_photo" accept="image/*,.pdf">
+                <small style="color:#667085;">Leave empty to keep existing</small>
+            </label>
+            <label>
+                Customer Photo
+                <input type="file" name="customer_photo" accept="image/*">
+                <small style="color:#667085;">Leave empty to keep existing</small>
+            </label>
+        </div>
+        
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Update Customer</button>
+            <a href="{{ url_for('customers') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<!-- Existing Documents -->
+{% if documents %}
+<div class="card">
+    <h2>📄 Existing Documents</h2>
+    <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+        {% for doc in documents %}
+        <div class="metric" style="text-align:center;">
+            <div style="font-size:48px;margin-bottom:10px;">
+                {% if doc.document_type == 'id_copy' %}🪪{% else %}📸{% endif %}
+            </div>
+            <div style="font-weight:bold;">{{ doc.document_type.replace('_', ' ').title() }}</div>
+            <div style="color:#667085;font-size:12px;">{{ doc.uploaded_at[:16] }}</div>
+            <br>
+            <a href="{{ url_for('static', filename=doc.file_path) }}" target="_blank" class="btn small">View Document</a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="actions">
+    <a href="{{ url_for('customers') }}" class="btn">← Back to Customers</a>
+</div>
+
+{% endblock %}
