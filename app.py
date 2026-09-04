@@ -2418,21 +2418,37 @@ def dashboard():
     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
     
-    # Active rentals
-    rentals = execute_query(c, """
+    # # Active rentals
+    # rentals = execute_query(c, """
+    #     SELECT 
+    #         r.id,
+    #         c.full_name,
+    #         b.bike_code,
+    #         r.start_time,
+    #         strftime('%H:%M', 'now', 'localtime') AS duration
+    #     FROM daily_rentals r
+    #     JOIN customers c ON c.id = r.customer_id
+    #     JOIN bicycles b ON b.id = r.bicycle_id
+    #     WHERE r.status = 'Active'
+    #     ORDER BY r.start_time DESC
+    # """).fetchall()
+        
+    duration_sql = get_duration_sql()
+    rentals = execute_query(c, f"""
         SELECT 
             r.id,
             c.full_name,
             b.bike_code,
             r.start_time,
-            strftime('%H:%M', 'now', 'localtime') AS duration
+            {duration_sql}
         FROM daily_rentals r
         JOIN customers c ON c.id = r.customer_id
         JOIN bicycles b ON b.id = r.bicycle_id
         WHERE r.status = 'Active'
         ORDER BY r.start_time DESC
     """).fetchall()
-    
+
+
     # Unpaid rentals
     unpaid_rentals = execute_query(c, """
         SELECT 
