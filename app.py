@@ -199,8 +199,22 @@ def db():
         conn.row_factory = sqlite3.Row
         return conn
 
+# def execute_query(cursor, query, params=None):
+#     """Execute a query with proper parameter handling for both SQLite and PostgreSQL."""
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     if is_postgres:
+#         # Replace ? with %s for PostgreSQL
+#         query = query.replace("?", "%s")
+    
+#     if params:
+#         return cursor.execute(query, params)
+#     else:
+#         return cursor.execute(query)
+
 def execute_query(cursor, query, params=None):
     """Execute a query with proper parameter handling for both SQLite and PostgreSQL."""
+    import os
     is_postgres = os.environ.get("DATABASE_URL") is not None
     
     if is_postgres:
@@ -208,11 +222,12 @@ def execute_query(cursor, query, params=None):
         query = query.replace("?", "%s")
     
     if params:
-        return cursor.execute(query, params)
+        cursor.execute(query, params)
     else:
-        return cursor.execute(query)
-
-
+        cursor.execute(query)
+    
+    # ✅ Return the cursor so you can use .fetchone() or .fetchall()
+    return cursor
 
 # =============================================
 # NOTIFICATION CONFIGURATION
