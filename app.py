@@ -117,6 +117,17 @@ def get_single_value(cursor, query, params=None):
         return result[0] if result else 0
 
 
+def format_date(date_value, format_str="%Y-%m-%d"):
+    """Format a date value for display (handles both string and datetime)."""
+    if date_value is None:
+        return ""
+    if isinstance(date_value, datetime):
+        return date_value.strftime(format_str)
+    if isinstance(date_value, str):
+        return date_value[:10]
+    return str(date_value)
+
+
 def get_duration_sql():
     """Return the correct duration SQL for the database."""
     if os.environ.get("DATABASE_URL"):
@@ -171,1004 +182,6 @@ def login_required(f):
 
 
 
-# def init_db():
-#     """Initialize the database with daily rental tables."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     c.executescript("""
-#     CREATE TABLE IF NOT EXISTS users(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         username TEXT UNIQUE NOT NULL,
-#         password_hash TEXT NOT NULL,
-#         role TEXT DEFAULT 'staff',
-#         full_name TEXT,
-#         email TEXT,
-#         branch_id INTEGER,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS customers(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         full_name TEXT NOT NULL,
-#         id_number TEXT,
-#         phone TEXT NOT NULL,
-#         email TEXT,
-#         address TEXT,
-#         user_id INTEGER,
-#         terms_accepted INTEGER DEFAULT 0,
-#         terms_accepted_date TEXT,
-#         signature_data TEXT,
-#         verification_status TEXT DEFAULT 'Pending',
-#         verification_notes TEXT,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS customer_documents(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         customer_id INTEGER NOT NULL,
-#         document_type TEXT NOT NULL,
-#         file_path TEXT NOT NULL,
-#         uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS bicycles(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bike_code TEXT UNIQUE NOT NULL,
-#         brand TEXT,
-#         model TEXT,
-#         bike_type TEXT DEFAULT 'Standard',
-#         hourly_rate REAL DEFAULT 20,
-#         daily_cap REAL DEFAULT 120,
-#         deposit_amount REAL DEFAULT 50,
-#         status TEXT DEFAULT 'Available',
-#         branch_id INTEGER,
-#         notes TEXT,
-#         FOREIGN KEY (branch_id) REFERENCES branches(id)
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS daily_rentals(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         customer_id INTEGER NOT NULL,
-#         bicycle_id INTEGER NOT NULL,
-#         branch_id INTEGER,
-#         start_time TEXT NOT NULL,
-#         end_time TEXT,
-#         actual_return_time TEXT,
-#         total_hours REAL,
-#         total_cost REAL,
-#         hourly_rate REAL,
-#         daily_cap REAL,
-#         deposit_paid REAL DEFAULT 0,
-#         late_fee REAL DEFAULT 0,
-#         discount_code_id INTEGER,
-#         discount_amount REAL DEFAULT 0,
-#         payment_status TEXT DEFAULT 'Pending',
-#         payment_method TEXT,
-#         status TEXT DEFAULT 'Active',
-#         condition_before TEXT,
-#         condition_after TEXT,
-#         agreement_signed INTEGER DEFAULT 0,
-#         notes TEXT,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id),
-#         FOREIGN KEY (bicycle_id) REFERENCES bicycles(id),
-#         FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
-#         FOREIGN KEY (branch_id) REFERENCES branches(id)
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS daily_rates(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bike_type TEXT,
-#         hourly_rate REAL DEFAULT 20,
-#         daily_cap REAL DEFAULT 120,
-#         deposit REAL DEFAULT 50,
-#         is_active INTEGER DEFAULT 1
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS rental_payments(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         daily_rental_id INTEGER NOT NULL,
-#         amount REAL NOT NULL,
-#         payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
-#         payment_method TEXT,
-#         status TEXT DEFAULT 'Completed',
-#         FOREIGN KEY (daily_rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS verification_requests(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         customer_id INTEGER NOT NULL,
-#         verified_by INTEGER,
-#         status TEXT DEFAULT 'Pending',
-#         notes TEXT,
-#         verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-#         FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS reminder_logs(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         rental_id INTEGER NOT NULL,
-#         reminder_type TEXT NOT NULL,
-#         sent_to TEXT NOT NULL,
-#         sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS discount_codes(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         code TEXT UNIQUE NOT NULL,
-#         description TEXT,
-#         discount_type TEXT NOT NULL,
-#         discount_value REAL NOT NULL,
-#         min_rental_amount REAL DEFAULT 0,
-#         max_uses INTEGER DEFAULT 0,
-#         used_count INTEGER DEFAULT 0,
-#         start_date TEXT,
-#         end_date TEXT,
-#         is_active INTEGER DEFAULT 1,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS discount_usage(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         discount_code_id INTEGER NOT NULL,
-#         rental_id INTEGER NOT NULL,
-#         customer_id INTEGER NOT NULL,
-#         amount_discounted REAL NOT NULL,
-#         used_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
-#         FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS loyalty_points(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         customer_id INTEGER NOT NULL,
-#         points INTEGER DEFAULT 0,
-#         total_spent REAL DEFAULT 0,
-#         total_rentals INTEGER DEFAULT 0,
-#         tier TEXT DEFAULT 'Bronze',
-#         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS points_transactions(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         customer_id INTEGER NOT NULL,
-#         points INTEGER NOT NULL,
-#         transaction_type TEXT NOT NULL,
-#         description TEXT,
-#         rental_id INTEGER,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-#         FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS maintenance_records(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bicycle_id INTEGER NOT NULL,
-#         maintenance_type TEXT NOT NULL,
-#         description TEXT,
-#         cost REAL DEFAULT 0,
-#         status TEXT DEFAULT 'Scheduled',
-#         scheduled_date TEXT,
-#         completed_date TEXT,
-#         performed_by TEXT,
-#         notes TEXT,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS bike_conditions(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bicycle_id INTEGER NOT NULL,
-#         condition_type TEXT NOT NULL,
-#         condition_status TEXT NOT NULL,
-#         notes TEXT,
-#         checked_by INTEGER,
-#         checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         rental_id INTEGER,
-#         FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE,
-#         FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
-#         FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS branches(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         name TEXT NOT NULL,
-#         location TEXT,
-#         address TEXT,
-#         phone TEXT,
-#         email TEXT,
-#         manager_id INTEGER,
-#         is_active INTEGER DEFAULT 1,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS bicycle_health(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bicycle_id INTEGER NOT NULL,
-#         health_score INTEGER DEFAULT 100,
-#         condition_rating TEXT DEFAULT 'Excellent',
-#         last_maintenance_date TEXT,
-#         next_maintenance_due TEXT,
-#         total_maintenance_count INTEGER DEFAULT 0,
-#         total_repair_cost REAL DEFAULT 0,
-#         last_condition_check TEXT,
-#         notes TEXT,
-#         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS bicycle_health_history(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         bicycle_id INTEGER NOT NULL,
-#         health_score INTEGER NOT NULL,
-#         condition_rating TEXT NOT NULL,
-#         reason TEXT,
-#         recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS announcements(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         title TEXT NOT NULL,
-#         content TEXT NOT NULL,
-#         author_id INTEGER NOT NULL,
-#         author_name TEXT NOT NULL,
-#         author_role TEXT NOT NULL,
-#         priority TEXT DEFAULT 'normal',
-#         category TEXT DEFAULT 'general',
-#         is_pinned INTEGER DEFAULT 0,
-#         is_active INTEGER DEFAULT 1,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS announcement_comments(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         announcement_id INTEGER NOT NULL,
-#         user_id INTEGER NOT NULL,
-#         user_name TEXT NOT NULL,
-#         user_role TEXT NOT NULL,
-#         comment TEXT NOT NULL,
-#         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
-#         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-#     );
-    
-#     CREATE TABLE IF NOT EXISTS announcement_reads(
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         announcement_id INTEGER NOT NULL,
-#         user_id INTEGER NOT NULL,
-#         read_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#         FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
-#         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-#         UNIQUE(announcement_id, user_id)
-#     );
-#     """)
-    
-#     # Add default rates
-#     execute_query(c,"SELECT COUNT(*) FROM daily_rates")
-#     if c.fetchone()[0] == 0:
-#         c.executescript("""
-#             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#             VALUES ('Standard', 20, 120, 50);
-#             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#             VALUES ('Electric', 30, 180, 75);
-#             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#             VALUES ('Mountain', 25, 150, 60);
-#         """)
-    
-#     # ✅ Create default users with INSERT OR IGNORE
-#     execute_query(c,"""
-#         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#         VALUES ('admin', ?, 'admin', 'System Administrator')
-#     """, (generate_password_hash("admin123"),))
-    
-#     execute_query(c,"""
-#         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#         VALUES ('manager', ?, 'manager', 'Store Manager')
-#     """, (generate_password_hash("manager123"),))
-    
-#     execute_query(c,"""
-#         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#         VALUES ('staff', ?, 'staff', 'Sales Staff')
-#     """, (generate_password_hash("staff123"),))
-    
-#     conn.commit()
-#     conn.close()
-
-# def init_db():
-#     """Initialize the database with daily rental tables."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     if is_postgres:
-#         # =============================================
-#         # POSTGRESQL SYNTAX (Production on Render)
-#         # =============================================
-        
-#         # Users table
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS users(
-#                 id SERIAL PRIMARY KEY,
-#                 username TEXT UNIQUE NOT NULL,
-#                 password_hash TEXT NOT NULL,
-#                 role TEXT DEFAULT 'staff',
-#                 full_name TEXT,
-#                 email TEXT,
-#                 branch_id INTEGER,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Customers table
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS customers(
-#                 id SERIAL PRIMARY KEY,
-#                 full_name TEXT NOT NULL,
-#                 id_number TEXT,
-#                 phone TEXT NOT NULL,
-#                 email TEXT,
-#                 address TEXT,
-#                 user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-#                 terms_accepted INTEGER DEFAULT 0,
-#                 terms_accepted_date TIMESTAMP,
-#                 signature_data TEXT,
-#                 verification_status TEXT DEFAULT 'Pending',
-#                 verification_notes TEXT,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Customer Documents
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS customer_documents(
-#                 id SERIAL PRIMARY KEY,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-#                 document_type TEXT NOT NULL,
-#                 file_path TEXT NOT NULL,
-#                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Branches
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS branches(
-#                 id SERIAL PRIMARY KEY,
-#                 name TEXT NOT NULL,
-#                 location TEXT,
-#                 address TEXT,
-#                 phone TEXT,
-#                 email TEXT,
-#                 manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-#                 is_active INTEGER DEFAULT 1,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Bicycles
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS bicycles(
-#                 id SERIAL PRIMARY KEY,
-#                 bike_code TEXT UNIQUE NOT NULL,
-#                 brand TEXT,
-#                 model TEXT,
-#                 bike_type TEXT DEFAULT 'Standard',
-#                 hourly_rate REAL DEFAULT 20,
-#                 daily_cap REAL DEFAULT 120,
-#                 deposit_amount REAL DEFAULT 50,
-#                 status TEXT DEFAULT 'Available',
-#                 branch_id INTEGER REFERENCES branches(id),
-#                 notes TEXT
-#             );
-#         """)
-        
-#         # Daily Rentals
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS daily_rentals(
-#                 id SERIAL PRIMARY KEY,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id),
-#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id),
-#                 branch_id INTEGER REFERENCES branches(id),
-#                 start_time TIMESTAMP NOT NULL,
-#                 end_time TIMESTAMP,
-#                 actual_return_time TIMESTAMP,
-#                 total_hours REAL,
-#                 total_cost REAL,
-#                 hourly_rate REAL,
-#                 daily_cap REAL,
-#                 deposit_paid REAL DEFAULT 0,
-#                 late_fee REAL DEFAULT 0,
-#                 discount_code_id INTEGER,
-#                 discount_amount REAL DEFAULT 0,
-#                 payment_status TEXT DEFAULT 'Pending',
-#                 payment_method TEXT,
-#                 status TEXT DEFAULT 'Active',
-#                 condition_before TEXT,
-#                 condition_after TEXT,
-#                 agreement_signed INTEGER DEFAULT 0,
-#                 notes TEXT,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Daily Rates
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS daily_rates(
-#                 id SERIAL PRIMARY KEY,
-#                 bike_type TEXT,
-#                 hourly_rate REAL DEFAULT 20,
-#                 daily_cap REAL DEFAULT 120,
-#                 deposit REAL DEFAULT 50,
-#                 is_active INTEGER DEFAULT 1
-#             );
-#         """)
-        
-#         # Rental Payments
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS rental_payments(
-#                 id SERIAL PRIMARY KEY,
-#                 daily_rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#                 amount REAL NOT NULL,
-#                 payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 payment_method TEXT,
-#                 status TEXT DEFAULT 'Completed'
-#             );
-#         """)
-        
-#         # Verification Requests
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS verification_requests(
-#                 id SERIAL PRIMARY KEY,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-#                 verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-#                 status TEXT DEFAULT 'Pending',
-#                 notes TEXT,
-#                 verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Reminder Logs
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS reminder_logs(
-#                 id SERIAL PRIMARY KEY,
-#                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#                 reminder_type TEXT NOT NULL,
-#                 sent_to TEXT NOT NULL,
-#                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Discount Codes
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS discount_codes(
-#                 id SERIAL PRIMARY KEY,
-#                 code TEXT UNIQUE NOT NULL,
-#                 description TEXT,
-#                 discount_type TEXT NOT NULL,
-#                 discount_value REAL NOT NULL,
-#                 min_rental_amount REAL DEFAULT 0,
-#                 max_uses INTEGER DEFAULT 0,
-#                 used_count INTEGER DEFAULT 0,
-#                 start_date TIMESTAMP,
-#                 end_date TIMESTAMP,
-#                 is_active INTEGER DEFAULT 1,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Discount Usage
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS discount_usage(
-#                 id SERIAL PRIMARY KEY,
-#                 discount_code_id INTEGER NOT NULL REFERENCES discount_codes(id),
-#                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-#                 amount_discounted REAL NOT NULL,
-#                 used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Loyalty Points
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS loyalty_points(
-#                 id SERIAL PRIMARY KEY,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-#                 points INTEGER DEFAULT 0,
-#                 total_spent REAL DEFAULT 0,
-#                 total_rentals INTEGER DEFAULT 0,
-#                 tier TEXT DEFAULT 'Bronze',
-#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Points Transactions
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS points_transactions(
-#                 id SERIAL PRIMARY KEY,
-#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-#                 points INTEGER NOT NULL,
-#                 transaction_type TEXT NOT NULL,
-#                 description TEXT,
-#                 rental_id INTEGER REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Maintenance Records
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS maintenance_records(
-#                 id SERIAL PRIMARY KEY,
-#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
-#                 maintenance_type TEXT NOT NULL,
-#                 description TEXT,
-#                 cost REAL DEFAULT 0,
-#                 status TEXT DEFAULT 'Scheduled',
-#                 scheduled_date TIMESTAMP,
-#                 completed_date TIMESTAMP,
-#                 performed_by TEXT,
-#                 notes TEXT,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Bike Conditions
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS bike_conditions(
-#                 id SERIAL PRIMARY KEY,
-#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
-#                 condition_type TEXT NOT NULL,
-#                 condition_status TEXT NOT NULL,
-#                 notes TEXT,
-#                 checked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-#                 checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 rental_id INTEGER REFERENCES daily_rentals(id) ON DELETE CASCADE
-#             );
-#         """)
-        
-#         # Bicycle Health
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS bicycle_health(
-#                 id SERIAL PRIMARY KEY,
-#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
-#                 health_score INTEGER DEFAULT 100,
-#                 condition_rating TEXT DEFAULT 'Excellent',
-#                 last_maintenance_date TIMESTAMP,
-#                 next_maintenance_due TIMESTAMP,
-#                 total_maintenance_count INTEGER DEFAULT 0,
-#                 total_repair_cost REAL DEFAULT 0,
-#                 last_condition_check TIMESTAMP,
-#                 notes TEXT,
-#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Bicycle Health History
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS bicycle_health_history(
-#                 id SERIAL PRIMARY KEY,
-#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
-#                 health_score INTEGER NOT NULL,
-#                 condition_rating TEXT NOT NULL,
-#                 reason TEXT,
-#                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Announcements
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS announcements(
-#                 id SERIAL PRIMARY KEY,
-#                 title TEXT NOT NULL,
-#                 content TEXT NOT NULL,
-#                 author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-#                 author_name TEXT NOT NULL,
-#                 author_role TEXT NOT NULL,
-#                 priority TEXT DEFAULT 'normal',
-#                 category TEXT DEFAULT 'general',
-#                 is_pinned INTEGER DEFAULT 0,
-#                 is_active INTEGER DEFAULT 1,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Announcement Comments
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS announcement_comments(
-#                 id SERIAL PRIMARY KEY,
-#                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
-#                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-#                 user_name TEXT NOT NULL,
-#                 user_role TEXT NOT NULL,
-#                 comment TEXT NOT NULL,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-        
-#         # Announcement Reads
-#         execute_query(c,"""
-#             CREATE TABLE IF NOT EXISTS announcement_reads(
-#                 id SERIAL PRIMARY KEY,
-#                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
-#                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-#                 read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 UNIQUE(announcement_id, user_id)
-#             );
-#         """)
-        
-#     else:
-#         # =============================================
-#         # SQLITE SYNTAX (Local Development)
-#         # =============================================
-#         c.executescript("""
-#         CREATE TABLE IF NOT EXISTS users(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             username TEXT UNIQUE NOT NULL,
-#             password_hash TEXT NOT NULL,
-#             role TEXT DEFAULT 'staff',
-#             full_name TEXT,
-#             email TEXT,
-#             branch_id INTEGER,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS customers(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             full_name TEXT NOT NULL,
-#             id_number TEXT,
-#             phone TEXT NOT NULL,
-#             email TEXT,
-#             address TEXT,
-#             user_id INTEGER,
-#             terms_accepted INTEGER DEFAULT 0,
-#             terms_accepted_date TEXT,
-#             signature_data TEXT,
-#             verification_status TEXT DEFAULT 'Pending',
-#             verification_notes TEXT,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS customer_documents(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             customer_id INTEGER NOT NULL,
-#             document_type TEXT NOT NULL,
-#             file_path TEXT NOT NULL,
-#             uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS bicycles(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bike_code TEXT UNIQUE NOT NULL,
-#             brand TEXT,
-#             model TEXT,
-#             bike_type TEXT DEFAULT 'Standard',
-#             hourly_rate REAL DEFAULT 20,
-#             daily_cap REAL DEFAULT 120,
-#             deposit_amount REAL DEFAULT 50,
-#             status TEXT DEFAULT 'Available',
-#             branch_id INTEGER,
-#             notes TEXT,
-#             FOREIGN KEY (branch_id) REFERENCES branches(id)
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS daily_rentals(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             customer_id INTEGER NOT NULL,
-#             bicycle_id INTEGER NOT NULL,
-#             branch_id INTEGER,
-#             start_time TEXT NOT NULL,
-#             end_time TEXT,
-#             actual_return_time TEXT,
-#             total_hours REAL,
-#             total_cost REAL,
-#             hourly_rate REAL,
-#             daily_cap REAL,
-#             deposit_paid REAL DEFAULT 0,
-#             late_fee REAL DEFAULT 0,
-#             discount_code_id INTEGER,
-#             discount_amount REAL DEFAULT 0,
-#             payment_status TEXT DEFAULT 'Pending',
-#             payment_method TEXT,
-#             status TEXT DEFAULT 'Active',
-#             condition_before TEXT,
-#             condition_after TEXT,
-#             agreement_signed INTEGER DEFAULT 0,
-#             notes TEXT,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id),
-#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id),
-#             FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
-#             FOREIGN KEY (branch_id) REFERENCES branches(id)
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS daily_rates(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bike_type TEXT,
-#             hourly_rate REAL DEFAULT 20,
-#             daily_cap REAL DEFAULT 120,
-#             deposit REAL DEFAULT 50,
-#             is_active INTEGER DEFAULT 1
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS rental_payments(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             daily_rental_id INTEGER NOT NULL,
-#             amount REAL NOT NULL,
-#             payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
-#             payment_method TEXT,
-#             status TEXT DEFAULT 'Completed',
-#             FOREIGN KEY (daily_rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS verification_requests(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             customer_id INTEGER NOT NULL,
-#             verified_by INTEGER,
-#             status TEXT DEFAULT 'Pending',
-#             notes TEXT,
-#             verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-#             FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS reminder_logs(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             rental_id INTEGER NOT NULL,
-#             reminder_type TEXT NOT NULL,
-#             sent_to TEXT NOT NULL,
-#             sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS discount_codes(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             code TEXT UNIQUE NOT NULL,
-#             description TEXT,
-#             discount_type TEXT NOT NULL,
-#             discount_value REAL NOT NULL,
-#             min_rental_amount REAL DEFAULT 0,
-#             max_uses INTEGER DEFAULT 0,
-#             used_count INTEGER DEFAULT 0,
-#             start_date TEXT,
-#             end_date TEXT,
-#             is_active INTEGER DEFAULT 1,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS discount_usage(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             discount_code_id INTEGER NOT NULL,
-#             rental_id INTEGER NOT NULL,
-#             customer_id INTEGER NOT NULL,
-#             amount_discounted REAL NOT NULL,
-#             used_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
-#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS loyalty_points(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             customer_id INTEGER NOT NULL,
-#             points INTEGER DEFAULT 0,
-#             total_spent REAL DEFAULT 0,
-#             total_rentals INTEGER DEFAULT 0,
-#             tier TEXT DEFAULT 'Bronze',
-#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS points_transactions(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             customer_id INTEGER NOT NULL,
-#             points INTEGER NOT NULL,
-#             transaction_type TEXT NOT NULL,
-#             description TEXT,
-#             rental_id INTEGER,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS maintenance_records(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bicycle_id INTEGER NOT NULL,
-#             maintenance_type TEXT NOT NULL,
-#             description TEXT,
-#             cost REAL DEFAULT 0,
-#             status TEXT DEFAULT 'Scheduled',
-#             scheduled_date TEXT,
-#             completed_date TEXT,
-#             performed_by TEXT,
-#             notes TEXT,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS bike_conditions(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bicycle_id INTEGER NOT NULL,
-#             condition_type TEXT NOT NULL,
-#             condition_status TEXT NOT NULL,
-#             notes TEXT,
-#             checked_by INTEGER,
-#             checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             rental_id INTEGER,
-#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE,
-#             FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
-#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS branches(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             name TEXT NOT NULL,
-#             location TEXT,
-#             address TEXT,
-#             phone TEXT,
-#             email TEXT,
-#             manager_id INTEGER,
-#             is_active INTEGER DEFAULT 1,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS bicycle_health(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bicycle_id INTEGER NOT NULL,
-#             health_score INTEGER DEFAULT 100,
-#             condition_rating TEXT DEFAULT 'Excellent',
-#             last_maintenance_date TEXT,
-#             next_maintenance_due TEXT,
-#             total_maintenance_count INTEGER DEFAULT 0,
-#             total_repair_cost REAL DEFAULT 0,
-#             last_condition_check TEXT,
-#             notes TEXT,
-#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS bicycle_health_history(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bicycle_id INTEGER NOT NULL,
-#             health_score INTEGER NOT NULL,
-#             condition_rating TEXT NOT NULL,
-#             reason TEXT,
-#             recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS announcements(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             title TEXT NOT NULL,
-#             content TEXT NOT NULL,
-#             author_id INTEGER NOT NULL,
-#             author_name TEXT NOT NULL,
-#             author_role TEXT NOT NULL,
-#             priority TEXT DEFAULT 'normal',
-#             category TEXT DEFAULT 'general',
-#             is_pinned INTEGER DEFAULT 0,
-#             is_active INTEGER DEFAULT 1,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS announcement_comments(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             announcement_id INTEGER NOT NULL,
-#             user_id INTEGER NOT NULL,
-#             user_name TEXT NOT NULL,
-#             user_role TEXT NOT NULL,
-#             comment TEXT NOT NULL,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
-#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-#         );
-        
-#         CREATE TABLE IF NOT EXISTS announcement_reads(
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             announcement_id INTEGER NOT NULL,
-#             user_id INTEGER NOT NULL,
-#             read_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
-#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-#             UNIQUE(announcement_id, user_id)
-#         );
-#         """)
-    
-#     # =============================================
-#     # ADD DEFAULT DATA (Works for both PostgreSQL and SQLite)
-#     # =============================================
-    
-#     # Add default rates
-
-#     c.execute("SELECT COUNT(*) as count FROM daily_rates")
-#     result = c.fetchone()
-#     # Works for both SQLite and PostgreSQL
-#     count = result['count'] if isinstance(result, dict) else result[0]
-
-#     if count == 0:
-
-#     execute_query(c,"SELECT COUNT(*) FROM daily_rates")
-#     if c.fetchone()[0] == 0:
-#         if is_postgres:
-#             execute_query(c,"""
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Standard', 20, 120, 50);
-#             """)
-#             execute_query(c,"""
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Electric', 30, 180, 75);
-#             """)
-#             execute_query(c,"""
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Mountain', 25, 150, 60);
-#             """)
-#         else:
-#             c.executescript("""
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Standard', 20, 120, 50);
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Electric', 30, 180, 75);
-#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-#                 VALUES ('Mountain', 25, 150, 60);
-#             """)
-    
-#     # Create default users with INSERT OR IGNORE (works for both SQLite and PostgreSQL)
-#     try:
-#         if is_postgres:
-#             # PostgreSQL uses INSERT ... ON CONFLICT
-#             execute_query(c,"""
-#                 INSERT INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('admin', %s, 'admin', 'System Administrator')
-#                 ON CONFLICT (username) DO NOTHING
-#             """, (generate_password_hash("admin123"),))
-            
-#             execute_query(c,"""
-#                 INSERT INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('manager', %s, 'manager', 'Store Manager')
-#                 ON CONFLICT (username) DO NOTHING
-#             """, (generate_password_hash("manager123"),))
-            
-#             execute_query(c,"""
-#                 INSERT INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('staff', %s, 'staff', 'Sales Staff')
-#                 ON CONFLICT (username) DO NOTHING
-#             """, (generate_password_hash("staff123"),))
-#         else:
-#             # SQLite uses INSERT OR IGNORE
-#             execute_query(c,"""
-#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('admin', ?, 'admin', 'System Administrator')
-#             """, (generate_password_hash("admin123"),))
-            
-#             execute_query(c,"""
-#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('manager', ?, 'manager', 'Store Manager')
-#             """, (generate_password_hash("manager123"),))
-            
-#             execute_query(c,"""
-#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
-#                 VALUES ('staff', ?, 'staff', 'Sales Staff')
-#             """, (generate_password_hash("staff123"),))
-#     except Exception as e:
-#         print(f"Error inserting default users: {e}")
-    
-#     conn.commit()
-#     conn.close()
 
 
 def init_db():
@@ -2418,20 +1431,7 @@ def dashboard():
     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
     
-    # # Active rentals
-    # rentals = execute_query(c, """
-    #     SELECT 
-    #         r.id,
-    #         c.full_name,
-    #         b.bike_code,
-    #         r.start_time,
-    #         strftime('%H:%M', 'now', 'localtime') AS duration
-    #     FROM daily_rentals r
-    #     JOIN customers c ON c.id = r.customer_id
-    #     JOIN bicycles b ON b.id = r.bicycle_id
-    #     WHERE r.status = 'Active'
-    #     ORDER BY r.start_time DESC
-    # """).fetchall()
+
         
     duration_sql = get_duration_sql()
     rentals = execute_query(c, f"""
@@ -2481,86 +1481,6 @@ def dashboard():
     )
 
 
-
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     conn = db()
-#     c = conn.cursor()
-
-#     # Get user info
-#     user = execute_query(c,"SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
-
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-#     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
-
-#     # total_bikes = execute_query(c,"SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
-#     # active_rentals = execute_query(c,"SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
-#     # total_customers = execute_query(c,"SELECT COUNT(*) FROM customers").fetchone()[0]
-    
-#     # pending_verification = execute_query(c,
-#     #     "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'"
-#     # ).fetchone()[0]
-    
-#     # today_revenue = execute_query(c,"""
-#     #     SELECT COALESCE(SUM(total_cost), 0) 
-#     #     FROM daily_rentals 
-#     #     WHERE date(created_at) = date('now') 
-#     #     AND status = 'Completed'
-#     # """).fetchone()[0]
-    
-#     rentals = execute_query(c,"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.start_time,
-#             strftime('%H:%M', 'now', 'localtime') AS duration
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Active'
-#         ORDER BY r.start_time DESC
-#     """).fetchall()
-    
-
-#     # 👇 ADD THIS: Completed but unpaid rentals
-#     unpaid_rentals = execute_query(c,"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-
-
-
-#     conn.close()
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         user=user,
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals 
-#     )
 
 
 @app.route("/rentals/start", methods=["GET", "POST"])
@@ -2874,58 +1794,6 @@ def view_document_file(customer_id, doc_id):
 
 
 
-
-# @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
-# @login_required
-# def record_payment(rental_id):
-#     conn = db()
-#     c = conn.cursor()
-    
-#     rental = execute_query(c,"""
-#         SELECT r.*, c.full_name, b.bike_code
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.id = ?
-#     """, (rental_id,)).fetchone()
-    
-#     if not rental:
-#         flash("Rental not found.", "danger")
-#         return redirect(url_for("dashboard"))
-    
-#     if request.method == "POST":
-#         amount = float(request.form.get("amount", 0))
-#         payment_method = request.form.get("payment_method", "Cash")
-        
-#         if amount <= 0:
-#             flash("Payment amount must be greater than zero.", "danger")
-#             return redirect(url_for("record_payment", rental_id=rental_id))
-        
-#         execute_query(c,"""
-#             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
-#             VALUES (?, ?, ?, 'Completed')
-#         """, (rental_id, amount, payment_method))
-        
-#         execute_query(c,"""
-#             UPDATE daily_rentals 
-#             SET payment_status = 'Paid'
-#             WHERE id = ?
-#         """, (rental_id,))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
-#         return redirect(url_for("payment_history"))
-    
-#     conn.close()
-    
-#     return render_template(
-#         "record_payment.html",
-#         title="Record Payment",
-#         rental=rental
-#     )
-
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
 @login_required
 def record_payment(rental_id):
@@ -2995,49 +1863,6 @@ def record_payment(rental_id):
 
 
 
-
-# @app.route("/payments")
-# @login_required
-# @staff_required
-# def payment_history():
-#     conn = db()
-#     c = conn.cursor()
-    
-#     payments = execute_query(c,"""
-#         SELECT 
-#             p.*,
-#             r.id AS rental_id,
-#             b.bike_code,
-#             c.full_name
-#         FROM rental_payments p
-#         JOIN daily_rentals r ON r.id = p.daily_rental_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         JOIN customers c ON c.id = r.customer_id
-#         ORDER BY p.payment_date DESC
-#         LIMIT 50
-#     """).fetchall()
-#     # """).fetchone()[0]
-#     # Get total revenue
-#     # total_revenue = execute_query(c,"""
-#     #     SELECT COALESCE(SUM(amount), 0) FROM rental_payments 
-#     # """, (rental_id,))
-#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (rental_id,))
-
-
-
-
-
-
-
-
-#     conn.close()
-    
-#     return render_template(
-#         "payment_history.html",
-#         title="Payment History",
-#         payments=payments,
-#         total_revenue=total_revenue
-#     )
 
 @app.route("/payments")
 @login_required
@@ -4462,116 +3287,441 @@ def mark_all_read():
 
 
 
+# # =============================================
+# # ANALYTICS DASHBOARD
+# # =============================================
+
+# @app.route("/analytics")
+# @login_required
+# @staff_required
+# @manager_required
+# def analytics_dashboard():
+#     """Comprehensive analytics dashboard for admin and managers."""
+#     from datetime import datetime  # 👈 Add this import at the top of the function
+#     conn = db()
+#     c = conn.cursor()
+
+
+
+    
+#     # =============================================
+#     # OVERVIEW METRICS
+#     # =============================================
+    
+#     # # Total Revenue
+
+#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
+
+
+
+#     # # Total Rentals
+
+#     total_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals")
+
+    
+#     # # Active Rentals
+
+#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
+    
+#     # # Total Customers
+
+#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
+    
+#     # # Verified Customers
+
+#     verified_customers = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'")
+    
+#     # # Total Bicycles
+
+#     total_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles")
+    
+#     # # Available Bicycles
+
+#     available_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
+    
+#     # =============================================
+#     # REVENUE TRENDS
+#     # =============================================
+  
+
+#     # Daily Revenue (Last 30 days)
+#     daily_revenue = execute_query(c,"""
+#         SELECT 
+#             date(payment_date) AS date,
+#             COALESCE(SUM(amount), 0) AS revenue,
+#             COUNT(*) AS transactions
+#         FROM rental_payments
+#         WHERE date(payment_date) >= date('now', '-30 days')
+#         GROUP BY date(payment_date)
+#         ORDER BY date(payment_date) ASC
+#     """).fetchall()
+    
+#     # Weekly Revenue (Last 12 weeks)
+#     weekly_revenue = execute_query(c,"""
+#         SELECT 
+#             strftime('%W', payment_date) AS week,
+#             strftime('%Y', payment_date) AS year,
+#             COALESCE(SUM(amount), 0) AS revenue,
+#             COUNT(*) AS transactions
+#         FROM rental_payments
+#         WHERE date(payment_date) >= date('now', '-84 days')
+#         GROUP BY week, year
+#         ORDER BY year ASC, week ASC
+#     """).fetchall()
+    
+#     # Monthly Revenue (Last 12 months)
+#     monthly_revenue = execute_query(c,"""
+#         SELECT 
+#             strftime('%Y-%m', payment_date) AS month,
+#             COALESCE(SUM(amount), 0) AS revenue,
+#             COUNT(*) AS transactions
+#         FROM rental_payments
+#         WHERE date(payment_date) >= date('now', '-365 days')
+#         GROUP BY month
+#         ORDER BY month ASC
+#     """).fetchall()
+    
+#     # =============================================
+#     # BICYCLE ANALYTICS
+#     # =============================================
+    
+#     # Most Rented Bicycles
+#     top_bicycles = execute_query(c,"""
+#         SELECT 
+#             b.bike_code,
+#             b.brand,
+#             b.model,
+#             b.bike_type,
+#             COUNT(r.id) AS rental_count,
+#             COALESCE(SUM(r.total_cost), 0) AS total_revenue,
+#             COALESCE(SUM(r.total_hours), 0) AS total_hours
+#         FROM bicycles b
+#         LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+#         GROUP BY b.id
+#         ORDER BY rental_count DESC
+#         LIMIT 10
+#     """).fetchall()
+    
+#     # Bike Type Performance
+#     bike_type_stats = execute_query(c,"""
+#         SELECT 
+#             b.bike_type,
+#             COUNT(b.id) AS bike_count,
+#             COUNT(r.id) AS rental_count,
+#             COALESCE(SUM(r.total_cost), 0) AS total_revenue,
+#             COALESCE(AVG(r.total_cost), 0) AS avg_revenue
+#         FROM bicycles b
+#         LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
+#         GROUP BY b.bike_type
+#         ORDER BY total_revenue DESC
+#     """).fetchall()
+    
+#     # =============================================
+#     # CUSTOMER ANALYTICS
+#     # =============================================
+    
+#     # Top Customers
+#     top_customers = execute_query(c,"""
+#         SELECT 
+#             c.id,
+#             c.full_name,
+#             c.phone,
+#             COUNT(r.id) AS rental_count,
+#             COALESCE(SUM(r.total_cost), 0) AS total_spent,
+#             COALESCE(lp.points, 0) AS points
+#         FROM customers c
+#         LEFT JOIN daily_rentals r ON r.customer_id = c.id
+#         LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
+#         GROUP BY c.id
+#         ORDER BY total_spent DESC
+#         LIMIT 10
+#     """).fetchall()
+    
+#     # New Customers Over Time (Last 30 days)
+#     new_customers = execute_query(c,"""
+#         SELECT 
+#             date(created_at) AS date,
+#             COUNT(*) AS count
+#         FROM customers
+#         WHERE date(created_at) >= date('now', '-30 days')
+#         GROUP BY date(created_at)
+#         ORDER BY date(created_at) ASC
+#     """).fetchall()
+    
+#     # =============================================
+#     # PAYMENT ANALYTICS
+#     # =============================================
+    
+#     # Payment Method Breakdown
+#     payment_methods = execute_query(c,"""
+#         SELECT 
+#             payment_method,
+#             COUNT(*) AS count,
+#             COALESCE(SUM(amount), 0) AS total
+#         FROM rental_payments
+#         GROUP BY payment_method
+#         ORDER BY total DESC
+#     """).fetchall()
+    
+#     # Average Rental Duration
+#     avg_duration = execute_query(c,"""
+#         SELECT 
+#             COALESCE(AVG(total_hours), 0) AS avg_hours,
+#             MIN(total_hours) AS min_hours,
+#             MAX(total_hours) AS max_hours
+#         FROM daily_rentals
+#         WHERE status = 'Completed' AND total_hours > 0
+#     """).fetchone()
+    
+#     # Revenue by Day of Week
+#     revenue_by_day = execute_query(c,"""
+#         SELECT 
+#             CASE strftime('%w', payment_date)
+#                 WHEN '0' THEN 'Sunday'
+#                 WHEN '1' THEN 'Monday'
+#                 WHEN '2' THEN 'Tuesday'
+#                 WHEN '3' THEN 'Wednesday'
+#                 WHEN '4' THEN 'Thursday'
+#                 WHEN '5' THEN 'Friday'
+#                 WHEN '6' THEN 'Saturday'
+#             END AS day_name,
+#             COALESCE(SUM(amount), 0) AS revenue,
+#             COUNT(*) AS transactions
+#         FROM rental_payments
+#         GROUP BY strftime('%w', payment_date)
+#         ORDER BY strftime('%w', payment_date)
+#     """).fetchall()
+
+
+#     # =============================================
+#     # MAINTENANCE ANALYTICS
+#     # =============================================
+    
+#     maintenance_stats = execute_query(c,"""
+#         SELECT 
+#             COUNT(*) AS total,
+#             SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
+#             SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) AS in_progress,
+#             SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+#             SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+#             COALESCE(SUM(cost), 0) AS total_cost
+#         FROM maintenance_records
+#     """).fetchone()
+    
+#     # =============================================
+#     # DISCOUNT ANALYTICS
+#     # =============================================
+    
+#     discount_stats = execute_query(c,"""
+#         SELECT 
+#             COUNT(*) AS total_used,
+#             COALESCE(SUM(amount_discounted), 0) AS total_savings
+#         FROM discount_usage
+#     """).fetchone()
+    
+#     conn.close()
+    
+#     #Prepare data for charts
+#     chart_data = {
+#         "daily_dates": [row["date"] for row in daily_revenue],
+#         "daily_revenue": [row["revenue"] for row in daily_revenue],
+#         "daily_transactions": [row["transactions"] for row in daily_revenue],
+#         "monthly_months": [row["month"] for row in monthly_revenue],
+#         "monthly_revenue": [row["revenue"] for row in monthly_revenue],
+#         "new_customers_dates": [row["date"] for row in new_customers],
+#         "new_customers_count": [row["count"] for row in new_customers],
+#         "week_days": [row["day_name"] for row in revenue_by_day],
+#         "week_revenue": [row["revenue"] for row in revenue_by_day],
+
+
+
+   
+#     }
+    
+#     return render_template(
+#         "analytics.html",
+#         title="Analytics Dashboard",
+#         now=datetime.now(),  # 👈 Pass datetime to template
+#         total_revenue=total_revenue,
+#         total_rentals=total_rentals,
+#         active_rentals=active_rentals,
+#         total_customers=total_customers,
+#         verified_customers=verified_customers,
+#         total_bicycles=total_bicycles,
+#         available_bicycles=available_bicycles,
+#         daily_revenue=daily_revenue,
+#         weekly_revenue=weekly_revenue,
+#         monthly_revenue=monthly_revenue,
+#         top_bicycles=top_bicycles,
+#         bike_type_stats=bike_type_stats,
+#         top_customers=top_customers,
+#         new_customers=new_customers,
+#         payment_methods=payment_methods,
+#         avg_duration=avg_duration,
+#         revenue_by_day=revenue_by_day,
+#         maintenance_stats=maintenance_stats,
+#         discount_stats=discount_stats,
+#         chart_data=chart_data
+#     )
+
+
+
+
 # =============================================
 # ANALYTICS DASHBOARD
 # =============================================
 
 @app.route("/analytics")
 @login_required
-@staff_required
 @manager_required
 def analytics_dashboard():
     """Comprehensive analytics dashboard for admin and managers."""
-    from datetime import datetime  # 👈 Add this import at the top of the function
+    from datetime import datetime
     conn = db()
     c = conn.cursor()
+    
+    is_postgres = os.environ.get("DATABASE_URL") is not None
     
     # =============================================
     # OVERVIEW METRICS
     # =============================================
     
-    # # Total Revenue
-    # total_revenue = execute_query(c,"""
-    #     SELECT COALESCE(SUM(amount), 0) FROM rental_payments
-    # """).fetchone()[0]
     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
-
-
-
-    # # Total Rentals
-    # total_rentals = execute_query(c,"""
-    #     SELECT COUNT(*) FROM daily_rentals
-    # """).fetchone()[0]
     total_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals")
-
-    
-    # # Active Rentals
-    # active_rentals = execute_query(c,"""
-    #     SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'
-    # """).fetchone()[0]
     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-    
-    # # Total Customers
-    # total_customers = execute_query(c,"""
-    #     SELECT COUNT(*) FROM customers
-    # """).fetchone()[0]
     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-    
-    # # Verified Customers
-    # verified_customers = execute_query(c,"""
-    #     SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'
-    # """).fetchone()[0]
     verified_customers = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'")
-    
-    # # Total Bicycles
-    # total_bicycles = execute_query(c,"""
-    #     SELECT COUNT(*) FROM bicycles
-    # """).fetchone()[0]
     total_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles")
-    
-    # # Available Bicycles
-    # available_bicycles = execute_query(c,"""
-    #     SELECT COUNT(*) FROM bicycles WHERE status = 'Available'
-    # """).fetchone()[0]
     available_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
     
     # =============================================
     # REVENUE TRENDS
     # =============================================
     
-    # Daily Revenue (Last 30 days)
-    daily_revenue = execute_query(c,"""
-        SELECT 
-            date(payment_date) AS date,
-            COALESCE(SUM(amount), 0) AS revenue,
-            COUNT(*) AS transactions
-        FROM rental_payments
-        WHERE date(payment_date) >= date('now', '-30 days')
-        GROUP BY date(payment_date)
-        ORDER BY date(payment_date) ASC
-    """).fetchall()
-    
-    # Weekly Revenue (Last 12 weeks)
-    weekly_revenue = execute_query(c,"""
-        SELECT 
-            strftime('%W', payment_date) AS week,
-            strftime('%Y', payment_date) AS year,
-            COALESCE(SUM(amount), 0) AS revenue,
-            COUNT(*) AS transactions
-        FROM rental_payments
-        WHERE date(payment_date) >= date('now', '-84 days')
-        GROUP BY week, year
-        ORDER BY year ASC, week ASC
-    """).fetchall()
-    
-    # Monthly Revenue (Last 12 months)
-    monthly_revenue = execute_query(c,"""
-        SELECT 
-            strftime('%Y-%m', payment_date) AS month,
-            COALESCE(SUM(amount), 0) AS revenue,
-            COUNT(*) AS transactions
-        FROM rental_payments
-        WHERE date(payment_date) >= date('now', '-365 days')
-        GROUP BY month
-        ORDER BY month ASC
-    """).fetchall()
+    if is_postgres:
+        # PostgreSQL syntax
+        daily_revenue = execute_query(c, """
+            SELECT 
+                DATE(payment_date) AS date,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE DATE(payment_date) >= CURRENT_DATE - INTERVAL '30 days'
+            GROUP BY DATE(payment_date)
+            ORDER BY DATE(payment_date) ASC
+        """).fetchall()
+        
+        weekly_revenue = execute_query(c, """
+            SELECT 
+                EXTRACT(WEEK FROM payment_date) AS week,
+                EXTRACT(YEAR FROM payment_date) AS year,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE DATE(payment_date) >= CURRENT_DATE - INTERVAL '84 days'
+            GROUP BY EXTRACT(WEEK FROM payment_date), EXTRACT(YEAR FROM payment_date)
+            ORDER BY year ASC, week ASC
+        """).fetchall()
+        
+        monthly_revenue = execute_query(c, """
+            SELECT 
+                TO_CHAR(payment_date, 'YYYY-MM') AS month,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE DATE(payment_date) >= CURRENT_DATE - INTERVAL '365 days'
+            GROUP BY TO_CHAR(payment_date, 'YYYY-MM')
+            ORDER BY month ASC
+        """).fetchall()
+        
+        new_customers = execute_query(c, """
+            SELECT 
+                DATE(created_at) AS date,
+                COUNT(*) AS count
+            FROM customers
+            WHERE DATE(created_at) >= CURRENT_DATE - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        """).fetchall()
+        
+        revenue_by_day = execute_query(c, """
+            SELECT 
+                TO_CHAR(payment_date, 'Day') AS day_name,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            GROUP BY TO_CHAR(payment_date, 'Day'), EXTRACT(DOW FROM payment_date)
+            ORDER BY EXTRACT(DOW FROM payment_date)
+        """).fetchall()
+    else:
+        # SQLite syntax
+        daily_revenue = execute_query(c, """
+            SELECT 
+                date(payment_date) AS date,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE date(payment_date) >= date('now', '-30 days')
+            GROUP BY date(payment_date)
+            ORDER BY date(payment_date) ASC
+        """).fetchall()
+        
+        weekly_revenue = execute_query(c, """
+            SELECT 
+                strftime('%W', payment_date) AS week,
+                strftime('%Y', payment_date) AS year,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE date(payment_date) >= date('now', '-84 days')
+            GROUP BY week, year
+            ORDER BY year ASC, week ASC
+        """).fetchall()
+        
+        monthly_revenue = execute_query(c, """
+            SELECT 
+                strftime('%Y-%m', payment_date) AS month,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            WHERE date(payment_date) >= date('now', '-365 days')
+            GROUP BY month
+            ORDER BY month ASC
+        """).fetchall()
+        
+        new_customers = execute_query(c, """
+            SELECT 
+                date(created_at) AS date,
+                COUNT(*) AS count
+            FROM customers
+            WHERE date(created_at) >= date('now', '-30 days')
+            GROUP BY date(created_at)
+            ORDER BY date(created_at) ASC
+        """).fetchall()
+        
+        revenue_by_day = execute_query(c, """
+            SELECT 
+                CASE strftime('%w', payment_date)
+                    WHEN '0' THEN 'Sunday'
+                    WHEN '1' THEN 'Monday'
+                    WHEN '2' THEN 'Tuesday'
+                    WHEN '3' THEN 'Wednesday'
+                    WHEN '4' THEN 'Thursday'
+                    WHEN '5' THEN 'Friday'
+                    WHEN '6' THEN 'Saturday'
+                END AS day_name,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COUNT(*) AS transactions
+            FROM rental_payments
+            GROUP BY strftime('%w', payment_date)
+            ORDER BY strftime('%w', payment_date)
+        """).fetchall()
     
     # =============================================
     # BICYCLE ANALYTICS
     # =============================================
     
-    # Most Rented Bicycles
-    top_bicycles = execute_query(c,"""
+    top_bicycles = execute_query(c, """
         SELECT 
             b.bike_code,
             b.brand,
@@ -4582,13 +3732,12 @@ def analytics_dashboard():
             COALESCE(SUM(r.total_hours), 0) AS total_hours
         FROM bicycles b
         LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
-        GROUP BY b.id
+        GROUP BY b.id, b.bike_code, b.brand, b.model, b.bike_type
         ORDER BY rental_count DESC
         LIMIT 10
     """).fetchall()
     
-    # Bike Type Performance
-    bike_type_stats = execute_query(c,"""
+    bike_type_stats = execute_query(c, """
         SELECT 
             b.bike_type,
             COUNT(b.id) AS bike_count,
@@ -4605,8 +3754,7 @@ def analytics_dashboard():
     # CUSTOMER ANALYTICS
     # =============================================
     
-    # Top Customers
-    top_customers = execute_query(c,"""
+    top_customers = execute_query(c, """
         SELECT 
             c.id,
             c.full_name,
@@ -4617,28 +3765,16 @@ def analytics_dashboard():
         FROM customers c
         LEFT JOIN daily_rentals r ON r.customer_id = c.id
         LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
-        GROUP BY c.id
+        GROUP BY c.id, c.full_name, c.phone, lp.points
         ORDER BY total_spent DESC
         LIMIT 10
-    """).fetchall()
-    
-    # New Customers Over Time (Last 30 days)
-    new_customers = execute_query(c,"""
-        SELECT 
-            date(created_at) AS date,
-            COUNT(*) AS count
-        FROM customers
-        WHERE date(created_at) >= date('now', '-30 days')
-        GROUP BY date(created_at)
-        ORDER BY date(created_at) ASC
     """).fetchall()
     
     # =============================================
     # PAYMENT ANALYTICS
     # =============================================
     
-    # Payment Method Breakdown
-    payment_methods = execute_query(c,"""
+    payment_methods = execute_query(c, """
         SELECT 
             payment_method,
             COUNT(*) AS count,
@@ -4648,40 +3784,20 @@ def analytics_dashboard():
         ORDER BY total DESC
     """).fetchall()
     
-    # Average Rental Duration
-    avg_duration = execute_query(c,"""
+    avg_duration = execute_query(c, """
         SELECT 
             COALESCE(AVG(total_hours), 0) AS avg_hours,
-            MIN(total_hours) AS min_hours,
-            MAX(total_hours) AS max_hours
+            COALESCE(MIN(total_hours), 0) AS min_hours,
+            COALESCE(MAX(total_hours), 0) AS max_hours
         FROM daily_rentals
         WHERE status = 'Completed' AND total_hours > 0
     """).fetchone()
-    
-    # Revenue by Day of Week
-    revenue_by_day = execute_query(c,"""
-        SELECT 
-            CASE strftime('%w', payment_date)
-                WHEN '0' THEN 'Sunday'
-                WHEN '1' THEN 'Monday'
-                WHEN '2' THEN 'Tuesday'
-                WHEN '3' THEN 'Wednesday'
-                WHEN '4' THEN 'Thursday'
-                WHEN '5' THEN 'Friday'
-                WHEN '6' THEN 'Saturday'
-            END AS day_name,
-            COALESCE(SUM(amount), 0) AS revenue,
-            COUNT(*) AS transactions
-        FROM rental_payments
-        GROUP BY strftime('%w', payment_date)
-        ORDER BY strftime('%w', payment_date)
-    """).fetchall()
     
     # =============================================
     # MAINTENANCE ANALYTICS
     # =============================================
     
-    maintenance_stats = execute_query(c,"""
+    maintenance_stats = execute_query(c, """
         SELECT 
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
@@ -4696,7 +3812,7 @@ def analytics_dashboard():
     # DISCOUNT ANALYTICS
     # =============================================
     
-    discount_stats = execute_query(c,"""
+    discount_stats = execute_query(c, """
         SELECT 
             COUNT(*) AS total_used,
             COALESCE(SUM(amount_discounted), 0) AS total_savings
@@ -4705,7 +3821,10 @@ def analytics_dashboard():
     
     conn.close()
     
-    # Prepare data for charts
+    # =============================================
+    # PREPARE CHART DATA
+    # =============================================
+    
     chart_data = {
         "daily_dates": [row["date"] for row in daily_revenue],
         "daily_revenue": [row["revenue"] for row in daily_revenue],
@@ -4718,10 +3837,15 @@ def analytics_dashboard():
         "week_revenue": [row["revenue"] for row in revenue_by_day],
     }
     
+    # Handle average duration (might be None)
+    avg_hours = avg_duration['avg_hours'] if avg_duration and isinstance(avg_duration, dict) else 0
+    min_hours = avg_duration['min_hours'] if avg_duration and isinstance(avg_duration, dict) else 0
+    max_hours = avg_duration['max_hours'] if avg_duration and isinstance(avg_duration, dict) else 0
+    
     return render_template(
         "analytics.html",
         title="Analytics Dashboard",
-        now=datetime.now(),  # 👈 Pass datetime to template
+        now=datetime.now(),
         total_revenue=total_revenue,
         total_rentals=total_rentals,
         active_rentals=active_rentals,
@@ -4737,14 +3861,16 @@ def analytics_dashboard():
         top_customers=top_customers,
         new_customers=new_customers,
         payment_methods=payment_methods,
-        avg_duration=avg_duration,
+        avg_duration={
+            "avg_hours": avg_hours,
+            "min_hours": min_hours,
+            "max_hours": max_hours
+        },
         revenue_by_day=revenue_by_day,
         maintenance_stats=maintenance_stats,
         discount_stats=discount_stats,
         chart_data=chart_data
     )
-
-
 
 
 
@@ -5336,12 +4462,7 @@ def loyalty_dashboard():
         ORDER BY lp.points DESC
     """).fetchall()
     
-    # Summary stats
-    # total_points = execute_query(c,"SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
-    # total_customers_with_points = execute_query(c,"SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
-    # total_redeemed = execute_query(c,"""
-    #     SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'
-    # """).fetchone()[0]
+
     total_points = get_single_value(c, "SELECT COALESCE(SUM(points), 0) FROM loyalty_points")
     total_customers_with_points = get_single_value(c, "SELECT COUNT(*) FROM loyalty_points WHERE points > 0")
     total_redeemed = get_single_value(c, "SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'")    
@@ -5503,10 +4624,7 @@ def maintenance_dashboard():
         LIMIT 50
     """).fetchall()
     
-    # # Summary
-    # scheduled = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
-    # in_progress = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
-    # completed = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
+  
     scheduled = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'")
     in_progress = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'")
     completed = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'")    
@@ -6283,29 +5401,7 @@ def logout():
 
 
 
-# # =============================================
-# # INITIALIZE DATABASE ON STARTUP
-# # =============================================
-# # This runs when the app starts on Render
-# with app.app_context():
-#     try:
-#         # Check if tables exist
-#         conn = db()
-#         c = conn.cursor()
-#         execute_query(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-#         table_exists = c.fetchone()
-#         conn.close()
-        
-#         if not table_exists:
-#             print("Database tables not found. Initializing...")
-#             init_db()
-#             print("Database initialized successfully!")
-#         else:
-#             print("Database already initialized.")
-#     except Exception as e:
-#         print(f"Error checking database: {e}")
-#         print("Attempting to initialize database...")
-#         init_db()
+
 
 with app.app_context():
     try:
