@@ -103,6 +103,21 @@ def execute_query(cursor, query, params=None):
     # ✅ Return the cursor so you can use .fetchone() or .fetchall()
     return cursor
 
+def get_single_value(cursor, query, params=None):
+    """Get a single value from a query (handles both SQLite and PostgreSQL)."""
+    result = execute_query(cursor, query, params).fetchone()
+    if result is None:
+        return 0
+    # For PostgreSQL with RealDictCursor, result is a dict
+    if isinstance(result, dict):
+        # Get the first value from the dict
+        return list(result.values())[0] if result.values() else 0
+    else:
+        # For SQLite tuple
+        return result[0] if result else 0
+
+
+
 def get_count(cursor, query, params=None):
     """Execute a count query and return the count, works for both SQLite and PostgreSQL."""
     result = execute_query(cursor, query, params).fetchone()
@@ -2381,37 +2396,23 @@ def customer_rent():
 
 
 
-
-
-
-
 @app.route("/dashboard")
 @login_required
 @staff_required
 def dashboard():
+    """Staff dashboard - NOT for customers."""
     conn = db()
     c = conn.cursor()
-
-    # Get user info
-    user = execute_query(c,"SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
-
-
-    total_bikes = execute_query(c,"SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
-    active_rentals = execute_query(c,"SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
-    total_customers = execute_query(c,"SELECT COUNT(*) FROM customers").fetchone()[0]
     
-    pending_verification = execute_query(c,
-        "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'"
-    ).fetchone()[0]
+    # Stats - using get_single_value helper
+    total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
+    active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
+    total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
+    pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
+    today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
     
-    today_revenue = execute_query(c,"""
-        SELECT COALESCE(SUM(total_cost), 0) 
-        FROM daily_rentals 
-        WHERE date(created_at) = date('now') 
-        AND status = 'Completed'
-    """).fetchone()[0]
-    
-    rentals = execute_query(c,"""
+    # Active rentals
+    rentals = execute_query(c, """
         SELECT 
             r.id,
             c.full_name,
@@ -2425,9 +2426,8 @@ def dashboard():
         ORDER BY r.start_time DESC
     """).fetchall()
     
-
-    # 👇 ADD THIS: Completed but unpaid rentals
-    unpaid_rentals = execute_query(c,"""
+    # Unpaid rentals
+    unpaid_rentals = execute_query(c, """
         SELECT 
             r.id,
             c.full_name,
@@ -2442,23 +2442,102 @@ def dashboard():
         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
         ORDER BY r.end_time DESC
     """).fetchall()
-
-
-
+    
     conn.close()
     
     return render_template(
         "dashboard.html",
         title="Dashboard - Daily Rentals",
-        user=user,
         total_bikes=total_bikes,
         active_rentals=active_rentals,
         total_customers=total_customers,
         pending_verification=pending_verification,
         today_revenue=today_revenue,
         rentals=rentals,
-        unpaid_rentals=unpaid_rentals 
+        unpaid_rentals=unpaid_rentals
     )
+
+
+
+# @app.route("/dashboard")
+# @login_required
+# @staff_required
+# def dashboard():
+#     conn = db()
+#     c = conn.cursor()
+
+#     # Get user info
+#     user = execute_query(c,"SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+
+#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
+#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
+#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
+#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
+#     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
+
+#     # total_bikes = execute_query(c,"SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
+#     # active_rentals = execute_query(c,"SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
+#     # total_customers = execute_query(c,"SELECT COUNT(*) FROM customers").fetchone()[0]
+    
+#     # pending_verification = execute_query(c,
+#     #     "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'"
+#     # ).fetchone()[0]
+    
+#     # today_revenue = execute_query(c,"""
+#     #     SELECT COALESCE(SUM(total_cost), 0) 
+#     #     FROM daily_rentals 
+#     #     WHERE date(created_at) = date('now') 
+#     #     AND status = 'Completed'
+#     # """).fetchone()[0]
+    
+#     rentals = execute_query(c,"""
+#         SELECT 
+#             r.id,
+#             c.full_name,
+#             b.bike_code,
+#             r.start_time,
+#             strftime('%H:%M', 'now', 'localtime') AS duration
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.status = 'Active'
+#         ORDER BY r.start_time DESC
+#     """).fetchall()
+    
+
+#     # 👇 ADD THIS: Completed but unpaid rentals
+#     unpaid_rentals = execute_query(c,"""
+#         SELECT 
+#             r.id,
+#             c.full_name,
+#             b.bike_code,
+#             r.total_cost,
+#             r.start_time,
+#             r.end_time
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.status = 'Completed'
+#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
+#         ORDER BY r.end_time DESC
+#     """).fetchall()
+
+
+
+#     conn.close()
+    
+#     return render_template(
+#         "dashboard.html",
+#         title="Dashboard - Daily Rentals",
+#         user=user,
+#         total_bikes=total_bikes,
+#         active_rentals=active_rentals,
+#         total_customers=total_customers,
+#         pending_verification=pending_verification,
+#         today_revenue=today_revenue,
+#         rentals=rentals,
+#         unpaid_rentals=unpaid_rentals 
+#     )
 
 
 @app.route("/rentals/start", methods=["GET", "POST"])
@@ -2773,13 +2852,64 @@ def view_document_file(customer_id, doc_id):
 
 
 
+# @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
+# @login_required
+# def record_payment(rental_id):
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c,"""
+#         SELECT r.*, c.full_name, b.bike_code
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         flash("Rental not found.", "danger")
+#         return redirect(url_for("dashboard"))
+    
+#     if request.method == "POST":
+#         amount = float(request.form.get("amount", 0))
+#         payment_method = request.form.get("payment_method", "Cash")
+        
+#         if amount <= 0:
+#             flash("Payment amount must be greater than zero.", "danger")
+#             return redirect(url_for("record_payment", rental_id=rental_id))
+        
+#         execute_query(c,"""
+#             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
+#             VALUES (?, ?, ?, 'Completed')
+#         """, (rental_id, amount, payment_method))
+        
+#         execute_query(c,"""
+#             UPDATE daily_rentals 
+#             SET payment_status = 'Paid'
+#             WHERE id = ?
+#         """, (rental_id,))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
+#         return redirect(url_for("payment_history"))
+    
+#     conn.close()
+    
+#     return render_template(
+#         "record_payment.html",
+#         title="Record Payment",
+#         rental=rental
+#     )
+
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
 @login_required
 def record_payment(rental_id):
     conn = db()
     c = conn.cursor()
     
-    rental = execute_query(c,"""
+    rental = execute_query(c, """
         SELECT r.*, c.full_name, b.bike_code
         FROM daily_rentals r
         JOIN customers c ON c.id = r.customer_id
@@ -2799,14 +2929,16 @@ def record_payment(rental_id):
             flash("Payment amount must be greater than zero.", "danger")
             return redirect(url_for("record_payment", rental_id=rental_id))
         
-        execute_query(c,"""
+        # Record the payment
+        execute_query(c, """
             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
             VALUES (?, ?, ?, 'Completed')
         """, (rental_id, amount, payment_method))
         
-        execute_query(c,"""
+        # Update rental payment status
+        execute_query(c, """
             UPDATE daily_rentals 
-            SET payment_status = 'Paid'
+            SET payment_status = 'Paid' 
             WHERE id = ?
         """, (rental_id,))
         
@@ -2816,25 +2948,82 @@ def record_payment(rental_id):
         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
         return redirect(url_for("payment_history"))
     
+    # ✅ FIX: Use rental_id, not user_id
+    # Get total payments for this rental (if needed)
+    total_paid = get_single_value(c, """
+        SELECT COALESCE(SUM(amount), 0) 
+        FROM rental_payments 
+        WHERE daily_rental_id = ?
+    """, (rental_id,))
+    
+    # If rental has a total_cost, calculate remaining balance
+    remaining_balance = rental["total_cost"] - total_paid if rental["total_cost"] else 0
+    
     conn.close()
     
     return render_template(
         "record_payment.html",
         title="Record Payment",
-        rental=rental
+        rental=rental,
+        total_paid=total_paid,
+        remaining_balance=remaining_balance
     )
 
 
 
 
+
+# @app.route("/payments")
+# @login_required
+# @staff_required
+# def payment_history():
+#     conn = db()
+#     c = conn.cursor()
+    
+#     payments = execute_query(c,"""
+#         SELECT 
+#             p.*,
+#             r.id AS rental_id,
+#             b.bike_code,
+#             c.full_name
+#         FROM rental_payments p
+#         JOIN daily_rentals r ON r.id = p.daily_rental_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         JOIN customers c ON c.id = r.customer_id
+#         ORDER BY p.payment_date DESC
+#         LIMIT 50
+#     """).fetchall()
+#     # """).fetchone()[0]
+#     # Get total revenue
+#     # total_revenue = execute_query(c,"""
+#     #     SELECT COALESCE(SUM(amount), 0) FROM rental_payments 
+#     # """, (rental_id,))
+#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (rental_id,))
+
+
+
+
+
+
+
+
+#     conn.close()
+    
+#     return render_template(
+#         "payment_history.html",
+#         title="Payment History",
+#         payments=payments,
+#         total_revenue=total_revenue
+#     )
+
 @app.route("/payments")
 @login_required
-@staff_required
 def payment_history():
+    """Payment history - shows all payments."""
     conn = db()
     c = conn.cursor()
     
-    payments = execute_query(c,"""
+    payments = execute_query(c, """
         SELECT 
             p.*,
             r.id AS rental_id,
@@ -2849,9 +3038,7 @@ def payment_history():
     """).fetchall()
     
     # Get total revenue
-    total_revenue = execute_query(c,"""
-        SELECT COALESCE(SUM(amount), 0) FROM rental_payments
-    """).fetchone()[0]
+    total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
     
     conn.close()
     
@@ -2861,8 +3048,6 @@ def payment_history():
         payments=payments,
         total_revenue=total_revenue
     )
-
-
 
 
 @app.route("/reports/revenue")
@@ -4057,14 +4242,20 @@ def announcements():
         WHERE a.is_active = 1
         ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
     """, (user_id,)).fetchall()
-    
+
+    # """, (user_id,)).fetchone()[0]
     # Get unread count
     unread_count = execute_query(c,"""
         SELECT COUNT(*) FROM announcements a
         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
         WHERE a.is_active = 1 AND ar.id IS NULL
-    """, (user_id,)).fetchone()[0]
-    
+
+    """, (user_id,))
+    total = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (user_id,))
+
+
+
+
     conn.close()
     
     return render_template(
@@ -4266,40 +4457,50 @@ def analytics_dashboard():
     # OVERVIEW METRICS
     # =============================================
     
-    # Total Revenue
-    total_revenue = execute_query(c,"""
-        SELECT COALESCE(SUM(amount), 0) FROM rental_payments
-    """).fetchone()[0]
+    # # Total Revenue
+    # total_revenue = execute_query(c,"""
+    #     SELECT COALESCE(SUM(amount), 0) FROM rental_payments
+    # """).fetchone()[0]
+    total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
+
+
+
+    # # Total Rentals
+    # total_rentals = execute_query(c,"""
+    #     SELECT COUNT(*) FROM daily_rentals
+    # """).fetchone()[0]
+    total_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals")
+
     
-    # Total Rentals
-    total_rentals = execute_query(c,"""
-        SELECT COUNT(*) FROM daily_rentals
-    """).fetchone()[0]
+    # # Active Rentals
+    # active_rentals = execute_query(c,"""
+    #     SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'
+    # """).fetchone()[0]
+    active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
     
-    # Active Rentals
-    active_rentals = execute_query(c,"""
-        SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'
-    """).fetchone()[0]
+    # # Total Customers
+    # total_customers = execute_query(c,"""
+    #     SELECT COUNT(*) FROM customers
+    # """).fetchone()[0]
+    total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
     
-    # Total Customers
-    total_customers = execute_query(c,"""
-        SELECT COUNT(*) FROM customers
-    """).fetchone()[0]
+    # # Verified Customers
+    # verified_customers = execute_query(c,"""
+    #     SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'
+    # """).fetchone()[0]
+    verified_customers = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'")
     
-    # Verified Customers
-    verified_customers = execute_query(c,"""
-        SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'
-    """).fetchone()[0]
+    # # Total Bicycles
+    # total_bicycles = execute_query(c,"""
+    #     SELECT COUNT(*) FROM bicycles
+    # """).fetchone()[0]
+    total_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles")
     
-    # Total Bicycles
-    total_bicycles = execute_query(c,"""
-        SELECT COUNT(*) FROM bicycles
-    """).fetchone()[0]
-    
-    # Available Bicycles
-    available_bicycles = execute_query(c,"""
-        SELECT COUNT(*) FROM bicycles WHERE status = 'Available'
-    """).fetchone()[0]
+    # # Available Bicycles
+    # available_bicycles = execute_query(c,"""
+    #     SELECT COUNT(*) FROM bicycles WHERE status = 'Available'
+    # """).fetchone()[0]
+    available_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
     
     # =============================================
     # REVENUE TRENDS
@@ -5113,12 +5314,18 @@ def loyalty_dashboard():
     """).fetchall()
     
     # Summary stats
-    total_points = execute_query(c,"SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
-    total_customers_with_points = execute_query(c,"SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
-    total_redeemed = execute_query(c,"""
-        SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'
-    """).fetchone()[0]
-    
+    # total_points = execute_query(c,"SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
+    # total_customers_with_points = execute_query(c,"SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
+    # total_redeemed = execute_query(c,"""
+    #     SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'
+    # """).fetchone()[0]
+    total_points = get_single_value(c, "SELECT COALESCE(SUM(points), 0) FROM loyalty_points")
+    total_customers_with_points = get_single_value(c, "SELECT COUNT(*) FROM loyalty_points WHERE points > 0")
+    total_redeemed = get_single_value(c, "SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'")    
+
+
+
+
     conn.close()
     
     return render_template(
@@ -5273,11 +5480,16 @@ def maintenance_dashboard():
         LIMIT 50
     """).fetchall()
     
-    # Summary
-    scheduled = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
-    in_progress = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
-    completed = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
-    
+    # # Summary
+    # scheduled = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
+    # in_progress = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
+    # completed = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
+    scheduled = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'")
+    in_progress = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'")
+    completed = get_single_value(c, "SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'")    
+
+
+
     conn.close()
     
     return render_template(
