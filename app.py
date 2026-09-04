@@ -103,6 +103,22 @@ def execute_query(cursor, query, params=None):
     # ✅ Return the cursor so you can use .fetchone() or .fetchall()
     return cursor
 
+def get_count(cursor, query, params=None):
+    """Execute a count query and return the count, works for both SQLite and PostgreSQL."""
+    result = execute_query(cursor, query, params).fetchone()
+    if result is None:
+        return 0
+    # For PostgreSQL with RealDictCursor, result is a dict
+    # For SQLite with Row, result is also dict-like
+    if isinstance(result, dict):
+        # Try to get the first value from the dict
+        return list(result.values())[0] if result.values() else 0
+    else:
+        # For tuple or other types
+        return result[0] if result else 0
+
+
+
 # =============================================
 # NOTIFICATION CONFIGURATION
 # =============================================
