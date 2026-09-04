@@ -1058,6 +1058,23 @@ def customer_required(f):
 # USER MANAGEMENT ROUTES
 # =============================================
 
+# @app.route("/users")
+# @login_required
+# @admin_required
+# def users():
+#     """View all users (Admin only)."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     users = execute_query(c,"""
+#         SELECT id, username, role, full_name, email, created_at
+#         FROM users
+#         ORDER BY role, username
+#     """).fetchall()
+    
+#     conn.close()
+#     return render_template("users.html", title="User Management", users=users)
+
 @app.route("/users")
 @login_required
 @admin_required
@@ -1066,14 +1083,24 @@ def users():
     conn = db()
     c = conn.cursor()
     
-    users = execute_query(c,"""
+    users_list = execute_query(c, """
         SELECT id, username, role, full_name, email, created_at
         FROM users
         ORDER BY role, username
     """).fetchall()
     
     conn.close()
-    return render_template("users.html", title="User Management", users=users)
+    
+    # ✅ Format datetime for each user
+    for user in users_list:
+        if user.get("created_at"):
+            if isinstance(user["created_at"], datetime):
+                user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
+            elif isinstance(user["created_at"], str):
+                user["created_at"] = user["created_at"][:10]
+    
+    return render_template("users.html", title="User Management", users=users_list)
+
 
 
 @app.route("/users/add", methods=["GET", "POST"])
@@ -3066,9 +3093,63 @@ def delete_bicycle(bicycle_id):
     return redirect(url_for("bicycles"))
 
 
-# =============================================
-# ANNOUNCEMENTS / COMMUNICATION
-# =============================================
+# # =============================================
+# # ANNOUNCEMENTS / COMMUNICATION
+# # =============================================
+
+# @app.route("/announcements")
+# @login_required
+# def announcements():
+#     """View all announcements."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     user_id = session["user_id"]
+#     user_role = session.get("role", "staff")
+    
+#     # Get all active announcements with read status
+#     announcements = execute_query(c,"""
+#         SELECT 
+#             a.*,
+#             CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
+#         FROM announcements a
+#         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+#         WHERE a.is_active = 1
+#         ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
+#     """, (user_id,)).fetchall()
+
+#     # """, (user_id,)).fetchone()[0]
+#     # Get unread count
+#     # unread_count = execute_query(c,"""
+#     #     SELECT COUNT(*) FROM announcements a
+#     #     LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+#     #     WHERE a.is_active = 1 AND ar.id IS NULL
+
+#     # """, (user_id,))
+
+#     unread_result = execute_query(c, """
+#         SELECT COUNT(*) as count FROM announcements a
+#         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+#         WHERE a.is_active = 1 AND ar.id IS NULL
+#     """, (user_id,)).fetchone()
+
+#     # ✅ Extract the count properly
+#     unread_count = unread_result['count'] if isinstance(unread_result, dict) else unread_result[0] if unread_result else 0
+
+#     total = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (user_id,))
+
+
+
+
+#     conn.close()
+    
+#     return render_template(
+#         "announcements.html",
+#         title="Announcements",
+#         announcements=announcements,
+#         unread_count=unread_count,
+#         user_role=user_role
+#     )
 
 @app.route("/announcements")
 @login_required
@@ -3081,7 +3162,7 @@ def announcements():
     user_role = session.get("role", "staff")
     
     # Get all active announcements with read status
-    announcements = execute_query(c,"""
+    announcements_list = execute_query(c, """
         SELECT 
             a.*,
             CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
@@ -3090,29 +3171,27 @@ def announcements():
         WHERE a.is_active = 1
         ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
     """, (user_id,)).fetchall()
-
-    # """, (user_id,)).fetchone()[0]
-    # Get unread count
-    unread_count = execute_query(c,"""
-        SELECT COUNT(*) FROM announcements a
+    
+    # ✅ FIX: Get unread count as integer
+    unread_result = execute_query(c, """
+        SELECT COUNT(*) as count FROM announcements a
         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
         WHERE a.is_active = 1 AND ar.id IS NULL
-
-    """, (user_id,))
-    total = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (user_id,))
-
-
-
-
+    """, (user_id,)).fetchone()
+    
+    unread_count = unread_result['count'] if isinstance(unread_result, dict) else unread_result[0] if unread_result else 0
+    
     conn.close()
     
     return render_template(
         "announcements.html",
         title="Announcements",
-        announcements=announcements,
+        announcements=announcements_list,
         unread_count=unread_count,
         user_role=user_role
     )
+
+
 
 
 @app.route("/announcements/create", methods=["GET", "POST"])
