@@ -181,15 +181,35 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 #         return conn
 
 
+# def db():
+#     """Connect to the database."""
+#     if os.environ.get("DATABASE_URL"):
+#         # PostgreSQL (Production on Render)
+#         import psycopg2
+#         import psycopg2.extras
+        
+#         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
+#         # Use RealDictCursor for dictionary-like rows
+#         return conn
+#     else:
+#         # SQLite (Local Development)
+#         import sqlite3
+#         conn = sqlite3.connect(DB)
+#         conn.execute("PRAGMA foreign_keys = ON")
+#         conn.row_factory = sqlite3.Row
+#         return conn
+
 def db():
     """Connect to the database."""
+    import os
     if os.environ.get("DATABASE_URL"):
         # PostgreSQL (Production on Render)
         import psycopg2
         import psycopg2.extras
         
         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-        # Use RealDictCursor for dictionary-like rows
+        # ✅ IMPORTANT: Use RealDictCursor to return rows as dictionaries
+        conn.cursor_factory = psycopg2.extras.RealDictCursor
         return conn
     else:
         # SQLite (Local Development)
@@ -198,6 +218,7 @@ def db():
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
+
 
 # def execute_query(cursor, query, params=None):
 #     """Execute a query with proper parameter handling for both SQLite and PostgreSQL."""
