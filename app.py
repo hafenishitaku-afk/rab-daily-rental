@@ -1,83 +1,4 @@
-# import os
-# from dotenv import load_dotenv
 
-# # Load environment variables
-# load_dotenv()
-
-# # Set secret key from environment
-# app.secret_key = os.environ.get("SECRET_KEY", "default-dev-key-change-me")
-
-# # Production database configuration
-# if os.environ.get("DATABASE_URL"):
-#     # For Render/PostgreSQL
-#     DATABASE_URL = os.environ.get("DATABASE_URL")
-# else:
-#     # For local development
-#     DB = Path(__file__).resolve().parent / "rab.db"
-
-# from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
-# import sqlite3
-# from pathlib import Path
-# from functools import wraps
-# from datetime import datetime, date, timedelta
-# from werkzeug.security import generate_password_hash, check_password_hash
-# from werkzeug.utils import secure_filename
-# import os
-
-# import csv
-# from io import StringIO, BytesIO
-# from datetime import datetime
-# from reportlab.lib.pagesizes import A4, landscape
-# from reportlab.lib import colors
-# from reportlab.lib.units import mm
-# from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-# from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-# from reportlab.lib.enums import TA_CENTER, TA_RIGHT
-# from flask import make_response
-
-
-
-# # =============================================
-# # NOTIFICATION CONFIGURATION
-# # =============================================
-
-# # Email configuration (for development, use console logging)
-# import smtplib
-# from email.mime.text import MIMEText
-# from email.mime.multipart import MIMEMultipart
-
-
-# EMAIL_ENABLED = True
-# EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
-# EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
-# EMAIL_USER = os.environ.get("EMAIL_USER", "your-email@gmail.com")
-# EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "your-app-password")
-# EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
-
-# # SMS settings
-# SMS_ENABLED = False  # Set to True when Twilio is configured
-
-
-
-
-
-# BASE = Path(__file__).resolve().parent
-# DB = BASE / "rab.db"
-
-# app = Flask(__name__)
-# app.secret_key = os.environ.get("SECRET_KEY", "daily-rental-secret-key")
-
-# # Upload folder configuration
-# UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-# os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-
-# def db():
-#     """Connect to the database with foreign keys enabled."""
-#     conn = sqlite3.connect(DB)
-#     conn.execute("PRAGMA foreign_keys = ON")
-#     conn.row_factory = sqlite3.Row
-#     return conn
 
 
 import os
@@ -129,75 +50,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "daily-rental-secret-key")
 UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# =============================================
-# DATABASE CONNECTION
-# =============================================
-# def db():
-#     """Connect to the database with foreign keys enabled."""
-#     conn = sqlite3.connect(DB)
-#     conn.execute("PRAGMA foreign_keys = ON")
-#     conn.row_factory = sqlite3.Row
-#     return conn
 
-
-# import os
-# import psycopg2
-# import psycopg2.extras
-
-# def db():
-#     """Connect to the database."""
-#     if os.environ.get("DATABASE_URL"):
-#         # PostgreSQL (Production)
-#         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-#         # Make it behave like sqlite3 Row
-#         conn.row_factory = lambda cursor, row: {col[0]: row[i] for i, col in enumerate(cursor.description)}
-#         return conn
-#     else:
-#         # SQLite (Development)
-#         import sqlite3
-#         conn = sqlite3.connect(DB)
-#         conn.execute("PRAGMA foreign_keys = ON")
-#         conn.row_factory = sqlite3.Row
-#         return conn
-
-
-# def db():
-#     """Connect to the database."""
-#     if os.environ.get("DATABASE_URL"):
-#         # PostgreSQL (Production on Render)
-#         import psycopg2
-#         import psycopg2.extras
-        
-#         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-#         # Make it behave like sqlite3 Row
-#         conn.row_factory = lambda cursor, row: {col[0]: row[i] for i, col in enumerate(cursor.description)}
-#         return conn
-#     else:
-#         # SQLite (Local Development)
-#         import sqlite3
-#         conn = sqlite3.connect(DB)
-#         conn.execute("PRAGMA foreign_keys = ON")
-#         conn.row_factory = sqlite3.Row
-#         return conn
-
-
-# def db():
-#     """Connect to the database."""
-#     if os.environ.get("DATABASE_URL"):
-#         # PostgreSQL (Production on Render)
-#         import psycopg2
-#         import psycopg2.extras
-        
-#         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-#         # Use RealDictCursor for dictionary-like rows
-#         return conn
-#     else:
-#         # SQLite (Local Development)
-#         import sqlite3
-#         conn = sqlite3.connect(DB)
-#         conn.execute("PRAGMA foreign_keys = ON")
-#         conn.row_factory = sqlite3.Row
-#         return conn
 
 def db():
     """Connect to the database."""
@@ -594,6 +447,692 @@ def login_required(f):
 #     conn.commit()
 #     conn.close()
 
+# def init_db():
+#     """Initialize the database with daily rental tables."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     if is_postgres:
+#         # =============================================
+#         # POSTGRESQL SYNTAX (Production on Render)
+#         # =============================================
+        
+#         # Users table
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS users(
+#                 id SERIAL PRIMARY KEY,
+#                 username TEXT UNIQUE NOT NULL,
+#                 password_hash TEXT NOT NULL,
+#                 role TEXT DEFAULT 'staff',
+#                 full_name TEXT,
+#                 email TEXT,
+#                 branch_id INTEGER,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Customers table
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS customers(
+#                 id SERIAL PRIMARY KEY,
+#                 full_name TEXT NOT NULL,
+#                 id_number TEXT,
+#                 phone TEXT NOT NULL,
+#                 email TEXT,
+#                 address TEXT,
+#                 user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+#                 terms_accepted INTEGER DEFAULT 0,
+#                 terms_accepted_date TIMESTAMP,
+#                 signature_data TEXT,
+#                 verification_status TEXT DEFAULT 'Pending',
+#                 verification_notes TEXT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Customer Documents
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS customer_documents(
+#                 id SERIAL PRIMARY KEY,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+#                 document_type TEXT NOT NULL,
+#                 file_path TEXT NOT NULL,
+#                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Branches
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS branches(
+#                 id SERIAL PRIMARY KEY,
+#                 name TEXT NOT NULL,
+#                 location TEXT,
+#                 address TEXT,
+#                 phone TEXT,
+#                 email TEXT,
+#                 manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+#                 is_active INTEGER DEFAULT 1,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Bicycles
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS bicycles(
+#                 id SERIAL PRIMARY KEY,
+#                 bike_code TEXT UNIQUE NOT NULL,
+#                 brand TEXT,
+#                 model TEXT,
+#                 bike_type TEXT DEFAULT 'Standard',
+#                 hourly_rate REAL DEFAULT 20,
+#                 daily_cap REAL DEFAULT 120,
+#                 deposit_amount REAL DEFAULT 50,
+#                 status TEXT DEFAULT 'Available',
+#                 branch_id INTEGER REFERENCES branches(id),
+#                 notes TEXT
+#             );
+#         """)
+        
+#         # Daily Rentals
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS daily_rentals(
+#                 id SERIAL PRIMARY KEY,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id),
+#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id),
+#                 branch_id INTEGER REFERENCES branches(id),
+#                 start_time TIMESTAMP NOT NULL,
+#                 end_time TIMESTAMP,
+#                 actual_return_time TIMESTAMP,
+#                 total_hours REAL,
+#                 total_cost REAL,
+#                 hourly_rate REAL,
+#                 daily_cap REAL,
+#                 deposit_paid REAL DEFAULT 0,
+#                 late_fee REAL DEFAULT 0,
+#                 discount_code_id INTEGER,
+#                 discount_amount REAL DEFAULT 0,
+#                 payment_status TEXT DEFAULT 'Pending',
+#                 payment_method TEXT,
+#                 status TEXT DEFAULT 'Active',
+#                 condition_before TEXT,
+#                 condition_after TEXT,
+#                 agreement_signed INTEGER DEFAULT 0,
+#                 notes TEXT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Daily Rates
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS daily_rates(
+#                 id SERIAL PRIMARY KEY,
+#                 bike_type TEXT,
+#                 hourly_rate REAL DEFAULT 20,
+#                 daily_cap REAL DEFAULT 120,
+#                 deposit REAL DEFAULT 50,
+#                 is_active INTEGER DEFAULT 1
+#             );
+#         """)
+        
+#         # Rental Payments
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS rental_payments(
+#                 id SERIAL PRIMARY KEY,
+#                 daily_rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
+#                 amount REAL NOT NULL,
+#                 payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 payment_method TEXT,
+#                 status TEXT DEFAULT 'Completed'
+#             );
+#         """)
+        
+#         # Verification Requests
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS verification_requests(
+#                 id SERIAL PRIMARY KEY,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+#                 verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+#                 status TEXT DEFAULT 'Pending',
+#                 notes TEXT,
+#                 verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Reminder Logs
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS reminder_logs(
+#                 id SERIAL PRIMARY KEY,
+#                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
+#                 reminder_type TEXT NOT NULL,
+#                 sent_to TEXT NOT NULL,
+#                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Discount Codes
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS discount_codes(
+#                 id SERIAL PRIMARY KEY,
+#                 code TEXT UNIQUE NOT NULL,
+#                 description TEXT,
+#                 discount_type TEXT NOT NULL,
+#                 discount_value REAL NOT NULL,
+#                 min_rental_amount REAL DEFAULT 0,
+#                 max_uses INTEGER DEFAULT 0,
+#                 used_count INTEGER DEFAULT 0,
+#                 start_date TIMESTAMP,
+#                 end_date TIMESTAMP,
+#                 is_active INTEGER DEFAULT 1,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Discount Usage
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS discount_usage(
+#                 id SERIAL PRIMARY KEY,
+#                 discount_code_id INTEGER NOT NULL REFERENCES discount_codes(id),
+#                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+#                 amount_discounted REAL NOT NULL,
+#                 used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Loyalty Points
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS loyalty_points(
+#                 id SERIAL PRIMARY KEY,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+#                 points INTEGER DEFAULT 0,
+#                 total_spent REAL DEFAULT 0,
+#                 total_rentals INTEGER DEFAULT 0,
+#                 tier TEXT DEFAULT 'Bronze',
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Points Transactions
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS points_transactions(
+#                 id SERIAL PRIMARY KEY,
+#                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+#                 points INTEGER NOT NULL,
+#                 transaction_type TEXT NOT NULL,
+#                 description TEXT,
+#                 rental_id INTEGER REFERENCES daily_rentals(id) ON DELETE CASCADE,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Maintenance Records
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS maintenance_records(
+#                 id SERIAL PRIMARY KEY,
+#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
+#                 maintenance_type TEXT NOT NULL,
+#                 description TEXT,
+#                 cost REAL DEFAULT 0,
+#                 status TEXT DEFAULT 'Scheduled',
+#                 scheduled_date TIMESTAMP,
+#                 completed_date TIMESTAMP,
+#                 performed_by TEXT,
+#                 notes TEXT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Bike Conditions
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS bike_conditions(
+#                 id SERIAL PRIMARY KEY,
+#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
+#                 condition_type TEXT NOT NULL,
+#                 condition_status TEXT NOT NULL,
+#                 notes TEXT,
+#                 checked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+#                 checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 rental_id INTEGER REFERENCES daily_rentals(id) ON DELETE CASCADE
+#             );
+#         """)
+        
+#         # Bicycle Health
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS bicycle_health(
+#                 id SERIAL PRIMARY KEY,
+#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
+#                 health_score INTEGER DEFAULT 100,
+#                 condition_rating TEXT DEFAULT 'Excellent',
+#                 last_maintenance_date TIMESTAMP,
+#                 next_maintenance_due TIMESTAMP,
+#                 total_maintenance_count INTEGER DEFAULT 0,
+#                 total_repair_cost REAL DEFAULT 0,
+#                 last_condition_check TIMESTAMP,
+#                 notes TEXT,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Bicycle Health History
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS bicycle_health_history(
+#                 id SERIAL PRIMARY KEY,
+#                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
+#                 health_score INTEGER NOT NULL,
+#                 condition_rating TEXT NOT NULL,
+#                 reason TEXT,
+#                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Announcements
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS announcements(
+#                 id SERIAL PRIMARY KEY,
+#                 title TEXT NOT NULL,
+#                 content TEXT NOT NULL,
+#                 author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+#                 author_name TEXT NOT NULL,
+#                 author_role TEXT NOT NULL,
+#                 priority TEXT DEFAULT 'normal',
+#                 category TEXT DEFAULT 'general',
+#                 is_pinned INTEGER DEFAULT 0,
+#                 is_active INTEGER DEFAULT 1,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Announcement Comments
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS announcement_comments(
+#                 id SERIAL PRIMARY KEY,
+#                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+#                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+#                 user_name TEXT NOT NULL,
+#                 user_role TEXT NOT NULL,
+#                 comment TEXT NOT NULL,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
+        
+#         # Announcement Reads
+#         execute_query(c,"""
+#             CREATE TABLE IF NOT EXISTS announcement_reads(
+#                 id SERIAL PRIMARY KEY,
+#                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+#                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+#                 read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 UNIQUE(announcement_id, user_id)
+#             );
+#         """)
+        
+#     else:
+#         # =============================================
+#         # SQLITE SYNTAX (Local Development)
+#         # =============================================
+#         c.executescript("""
+#         CREATE TABLE IF NOT EXISTS users(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             username TEXT UNIQUE NOT NULL,
+#             password_hash TEXT NOT NULL,
+#             role TEXT DEFAULT 'staff',
+#             full_name TEXT,
+#             email TEXT,
+#             branch_id INTEGER,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS customers(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             full_name TEXT NOT NULL,
+#             id_number TEXT,
+#             phone TEXT NOT NULL,
+#             email TEXT,
+#             address TEXT,
+#             user_id INTEGER,
+#             terms_accepted INTEGER DEFAULT 0,
+#             terms_accepted_date TEXT,
+#             signature_data TEXT,
+#             verification_status TEXT DEFAULT 'Pending',
+#             verification_notes TEXT,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS customer_documents(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             customer_id INTEGER NOT NULL,
+#             document_type TEXT NOT NULL,
+#             file_path TEXT NOT NULL,
+#             uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS bicycles(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bike_code TEXT UNIQUE NOT NULL,
+#             brand TEXT,
+#             model TEXT,
+#             bike_type TEXT DEFAULT 'Standard',
+#             hourly_rate REAL DEFAULT 20,
+#             daily_cap REAL DEFAULT 120,
+#             deposit_amount REAL DEFAULT 50,
+#             status TEXT DEFAULT 'Available',
+#             branch_id INTEGER,
+#             notes TEXT,
+#             FOREIGN KEY (branch_id) REFERENCES branches(id)
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS daily_rentals(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             customer_id INTEGER NOT NULL,
+#             bicycle_id INTEGER NOT NULL,
+#             branch_id INTEGER,
+#             start_time TEXT NOT NULL,
+#             end_time TEXT,
+#             actual_return_time TEXT,
+#             total_hours REAL,
+#             total_cost REAL,
+#             hourly_rate REAL,
+#             daily_cap REAL,
+#             deposit_paid REAL DEFAULT 0,
+#             late_fee REAL DEFAULT 0,
+#             discount_code_id INTEGER,
+#             discount_amount REAL DEFAULT 0,
+#             payment_status TEXT DEFAULT 'Pending',
+#             payment_method TEXT,
+#             status TEXT DEFAULT 'Active',
+#             condition_before TEXT,
+#             condition_after TEXT,
+#             agreement_signed INTEGER DEFAULT 0,
+#             notes TEXT,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id),
+#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id),
+#             FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
+#             FOREIGN KEY (branch_id) REFERENCES branches(id)
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS daily_rates(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bike_type TEXT,
+#             hourly_rate REAL DEFAULT 20,
+#             daily_cap REAL DEFAULT 120,
+#             deposit REAL DEFAULT 50,
+#             is_active INTEGER DEFAULT 1
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS rental_payments(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             daily_rental_id INTEGER NOT NULL,
+#             amount REAL NOT NULL,
+#             payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
+#             payment_method TEXT,
+#             status TEXT DEFAULT 'Completed',
+#             FOREIGN KEY (daily_rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS verification_requests(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             customer_id INTEGER NOT NULL,
+#             verified_by INTEGER,
+#             status TEXT DEFAULT 'Pending',
+#             notes TEXT,
+#             verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+#             FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS reminder_logs(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             rental_id INTEGER NOT NULL,
+#             reminder_type TEXT NOT NULL,
+#             sent_to TEXT NOT NULL,
+#             sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS discount_codes(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             code TEXT UNIQUE NOT NULL,
+#             description TEXT,
+#             discount_type TEXT NOT NULL,
+#             discount_value REAL NOT NULL,
+#             min_rental_amount REAL DEFAULT 0,
+#             max_uses INTEGER DEFAULT 0,
+#             used_count INTEGER DEFAULT 0,
+#             start_date TEXT,
+#             end_date TEXT,
+#             is_active INTEGER DEFAULT 1,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS discount_usage(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             discount_code_id INTEGER NOT NULL,
+#             rental_id INTEGER NOT NULL,
+#             customer_id INTEGER NOT NULL,
+#             amount_discounted REAL NOT NULL,
+#             used_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
+#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS loyalty_points(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             customer_id INTEGER NOT NULL,
+#             points INTEGER DEFAULT 0,
+#             total_spent REAL DEFAULT 0,
+#             total_rentals INTEGER DEFAULT 0,
+#             tier TEXT DEFAULT 'Bronze',
+#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS points_transactions(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             customer_id INTEGER NOT NULL,
+#             points INTEGER NOT NULL,
+#             transaction_type TEXT NOT NULL,
+#             description TEXT,
+#             rental_id INTEGER,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS maintenance_records(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bicycle_id INTEGER NOT NULL,
+#             maintenance_type TEXT NOT NULL,
+#             description TEXT,
+#             cost REAL DEFAULT 0,
+#             status TEXT DEFAULT 'Scheduled',
+#             scheduled_date TEXT,
+#             completed_date TEXT,
+#             performed_by TEXT,
+#             notes TEXT,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS bike_conditions(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bicycle_id INTEGER NOT NULL,
+#             condition_type TEXT NOT NULL,
+#             condition_status TEXT NOT NULL,
+#             notes TEXT,
+#             checked_by INTEGER,
+#             checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             rental_id INTEGER,
+#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE,
+#             FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
+#             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS branches(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             name TEXT NOT NULL,
+#             location TEXT,
+#             address TEXT,
+#             phone TEXT,
+#             email TEXT,
+#             manager_id INTEGER,
+#             is_active INTEGER DEFAULT 1,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS bicycle_health(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bicycle_id INTEGER NOT NULL,
+#             health_score INTEGER DEFAULT 100,
+#             condition_rating TEXT DEFAULT 'Excellent',
+#             last_maintenance_date TEXT,
+#             next_maintenance_due TEXT,
+#             total_maintenance_count INTEGER DEFAULT 0,
+#             total_repair_cost REAL DEFAULT 0,
+#             last_condition_check TEXT,
+#             notes TEXT,
+#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS bicycle_health_history(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             bicycle_id INTEGER NOT NULL,
+#             health_score INTEGER NOT NULL,
+#             condition_rating TEXT NOT NULL,
+#             reason TEXT,
+#             recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS announcements(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             title TEXT NOT NULL,
+#             content TEXT NOT NULL,
+#             author_id INTEGER NOT NULL,
+#             author_name TEXT NOT NULL,
+#             author_role TEXT NOT NULL,
+#             priority TEXT DEFAULT 'normal',
+#             category TEXT DEFAULT 'general',
+#             is_pinned INTEGER DEFAULT 0,
+#             is_active INTEGER DEFAULT 1,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS announcement_comments(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             announcement_id INTEGER NOT NULL,
+#             user_id INTEGER NOT NULL,
+#             user_name TEXT NOT NULL,
+#             user_role TEXT NOT NULL,
+#             comment TEXT NOT NULL,
+#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+#         );
+        
+#         CREATE TABLE IF NOT EXISTS announcement_reads(
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             announcement_id INTEGER NOT NULL,
+#             user_id INTEGER NOT NULL,
+#             read_at TEXT DEFAULT CURRENT_TIMESTAMP,
+#             FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+#             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+#             UNIQUE(announcement_id, user_id)
+#         );
+#         """)
+    
+#     # =============================================
+#     # ADD DEFAULT DATA (Works for both PostgreSQL and SQLite)
+#     # =============================================
+    
+#     # Add default rates
+
+#     c.execute("SELECT COUNT(*) as count FROM daily_rates")
+#     result = c.fetchone()
+#     # Works for both SQLite and PostgreSQL
+#     count = result['count'] if isinstance(result, dict) else result[0]
+
+#     if count == 0:
+
+#     execute_query(c,"SELECT COUNT(*) FROM daily_rates")
+#     if c.fetchone()[0] == 0:
+#         if is_postgres:
+#             execute_query(c,"""
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Standard', 20, 120, 50);
+#             """)
+#             execute_query(c,"""
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Electric', 30, 180, 75);
+#             """)
+#             execute_query(c,"""
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Mountain', 25, 150, 60);
+#             """)
+#         else:
+#             c.executescript("""
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Standard', 20, 120, 50);
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Electric', 30, 180, 75);
+#                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+#                 VALUES ('Mountain', 25, 150, 60);
+#             """)
+    
+#     # Create default users with INSERT OR IGNORE (works for both SQLite and PostgreSQL)
+#     try:
+#         if is_postgres:
+#             # PostgreSQL uses INSERT ... ON CONFLICT
+#             execute_query(c,"""
+#                 INSERT INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('admin', %s, 'admin', 'System Administrator')
+#                 ON CONFLICT (username) DO NOTHING
+#             """, (generate_password_hash("admin123"),))
+            
+#             execute_query(c,"""
+#                 INSERT INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('manager', %s, 'manager', 'Store Manager')
+#                 ON CONFLICT (username) DO NOTHING
+#             """, (generate_password_hash("manager123"),))
+            
+#             execute_query(c,"""
+#                 INSERT INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('staff', %s, 'staff', 'Sales Staff')
+#                 ON CONFLICT (username) DO NOTHING
+#             """, (generate_password_hash("staff123"),))
+#         else:
+#             # SQLite uses INSERT OR IGNORE
+#             execute_query(c,"""
+#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('admin', ?, 'admin', 'System Administrator')
+#             """, (generate_password_hash("admin123"),))
+            
+#             execute_query(c,"""
+#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('manager', ?, 'manager', 'Store Manager')
+#             """, (generate_password_hash("manager123"),))
+            
+#             execute_query(c,"""
+#                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
+#                 VALUES ('staff', ?, 'staff', 'Sales Staff')
+#             """, (generate_password_hash("staff123"),))
+#     except Exception as e:
+#         print(f"Error inserting default users: {e}")
+    
+#     conn.commit()
+#     conn.close()
+
+
 def init_db():
     """Initialize the database with daily rental tables."""
     conn = db()
@@ -607,7 +1146,7 @@ def init_db():
         # =============================================
         
         # Users table
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS users(
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
@@ -621,7 +1160,7 @@ def init_db():
         """)
         
         # Customers table
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS customers(
                 id SERIAL PRIMARY KEY,
                 full_name TEXT NOT NULL,
@@ -640,7 +1179,7 @@ def init_db():
         """)
         
         # Customer Documents
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS customer_documents(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -651,7 +1190,7 @@ def init_db():
         """)
         
         # Branches
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS branches(
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -666,7 +1205,7 @@ def init_db():
         """)
         
         # Bicycles
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycles(
                 id SERIAL PRIMARY KEY,
                 bike_code TEXT UNIQUE NOT NULL,
@@ -683,7 +1222,7 @@ def init_db():
         """)
         
         # Daily Rentals
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS daily_rentals(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id),
@@ -712,7 +1251,7 @@ def init_db():
         """)
         
         # Daily Rates
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS daily_rates(
                 id SERIAL PRIMARY KEY,
                 bike_type TEXT,
@@ -724,7 +1263,7 @@ def init_db():
         """)
         
         # Rental Payments
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS rental_payments(
                 id SERIAL PRIMARY KEY,
                 daily_rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
@@ -736,7 +1275,7 @@ def init_db():
         """)
         
         # Verification Requests
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS verification_requests(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -748,7 +1287,7 @@ def init_db():
         """)
         
         # Reminder Logs
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS reminder_logs(
                 id SERIAL PRIMARY KEY,
                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
@@ -759,7 +1298,7 @@ def init_db():
         """)
         
         # Discount Codes
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS discount_codes(
                 id SERIAL PRIMARY KEY,
                 code TEXT UNIQUE NOT NULL,
@@ -777,7 +1316,7 @@ def init_db():
         """)
         
         # Discount Usage
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS discount_usage(
                 id SERIAL PRIMARY KEY,
                 discount_code_id INTEGER NOT NULL REFERENCES discount_codes(id),
@@ -789,7 +1328,7 @@ def init_db():
         """)
         
         # Loyalty Points
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS loyalty_points(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -802,7 +1341,7 @@ def init_db():
         """)
         
         # Points Transactions
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS points_transactions(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -815,7 +1354,7 @@ def init_db():
         """)
         
         # Maintenance Records
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS maintenance_records(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -832,7 +1371,7 @@ def init_db():
         """)
         
         # Bike Conditions
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS bike_conditions(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -846,7 +1385,7 @@ def init_db():
         """)
         
         # Bicycle Health
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycle_health(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -863,7 +1402,7 @@ def init_db():
         """)
         
         # Bicycle Health History
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycle_health_history(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -875,7 +1414,7 @@ def init_db():
         """)
         
         # Announcements
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcements(
                 id SERIAL PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -893,7 +1432,7 @@ def init_db():
         """)
         
         # Announcement Comments
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcement_comments(
                 id SERIAL PRIMARY KEY,
                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
@@ -906,7 +1445,7 @@ def init_db():
         """)
         
         # Announcement Reads
-        execute_query(c,"""
+        execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcement_reads(
                 id SERIAL PRIMARY KEY,
                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
@@ -1199,25 +1738,19 @@ def init_db():
         """)
     
     # =============================================
-    # ADD DEFAULT DATA (Works for both PostgreSQL and SQLite)
+    # ADD DEFAULT RATES (Works for both)
     # =============================================
     
-    # Add default rates
-    execute_query(c,"SELECT COUNT(*) FROM daily_rates")
-    if c.fetchone()[0] == 0:
+    # Check if rates exist
+    execute_query(c, "SELECT COUNT(*) as count FROM daily_rates")
+    result = c.fetchone()
+    count = result['count'] if isinstance(result, dict) else result[0]
+    
+    if count == 0:
         if is_postgres:
-            execute_query(c,"""
-                INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Standard', 20, 120, 50);
-            """)
-            execute_query(c,"""
-                INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Electric', 30, 180, 75);
-            """)
-            execute_query(c,"""
-                INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Mountain', 25, 150, 60);
-            """)
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 20, 120, 50)")
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Electric', 30, 180, 75)")
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Mountain', 25, 150, 60)")
         else:
             c.executescript("""
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
@@ -1228,40 +1761,40 @@ def init_db():
                 VALUES ('Mountain', 25, 150, 60);
             """)
     
-    # Create default users with INSERT OR IGNORE (works for both SQLite and PostgreSQL)
+    # =============================================
+    # CREATE DEFAULT USERS
+    # =============================================
     try:
         if is_postgres:
-            # PostgreSQL uses INSERT ... ON CONFLICT
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('admin', %s, 'admin', 'System Administrator')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("admin123"),))
             
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('manager', %s, 'manager', 'Store Manager')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("manager123"),))
             
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('staff', %s, 'staff', 'Sales Staff')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("staff123"),))
         else:
-            # SQLite uses INSERT OR IGNORE
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('admin', ?, 'admin', 'System Administrator')
             """, (generate_password_hash("admin123"),))
             
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('manager', ?, 'manager', 'Store Manager')
             """, (generate_password_hash("manager123"),))
             
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('staff', ?, 'staff', 'Sales Staff')
             """, (generate_password_hash("staff123"),))
@@ -5499,16 +6032,36 @@ def logout():
 
 
 
-# =============================================
-# INITIALIZE DATABASE ON STARTUP
-# =============================================
-# This runs when the app starts on Render
+# # =============================================
+# # INITIALIZE DATABASE ON STARTUP
+# # =============================================
+# # This runs when the app starts on Render
+# with app.app_context():
+#     try:
+#         # Check if tables exist
+#         conn = db()
+#         c = conn.cursor()
+#         execute_query(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+#         table_exists = c.fetchone()
+#         conn.close()
+        
+#         if not table_exists:
+#             print("Database tables not found. Initializing...")
+#             init_db()
+#             print("Database initialized successfully!")
+#         else:
+#             print("Database already initialized.")
+#     except Exception as e:
+#         print(f"Error checking database: {e}")
+#         print("Attempting to initialize database...")
+#         init_db()
+
 with app.app_context():
     try:
-        # Check if tables exist
         conn = db()
         c = conn.cursor()
-        execute_query(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        # This works for both SQLite and PostgreSQL
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         table_exists = c.fetchone()
         conn.close()
         
@@ -5521,7 +6074,11 @@ with app.app_context():
     except Exception as e:
         print(f"Error checking database: {e}")
         print("Attempting to initialize database...")
-        init_db()
+        try:
+            init_db()
+            print("Database initialized successfully!")
+        except Exception as e2:
+            print(f"Failed to initialize database: {e2}")
 
 
 if __name__ == "__main__":
