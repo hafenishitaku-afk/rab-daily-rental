@@ -117,6 +117,13 @@ def get_single_value(cursor, query, params=None):
         return result[0] if result else 0
 
 
+def get_duration_sql():
+    """Return the correct duration SQL for the database."""
+    if os.environ.get("DATABASE_URL"):
+        return "TO_CHAR(CURRENT_TIMESTAMP, 'HH24:MI') AS duration"
+    else:
+        return "strftime('%H:%M', 'now', 'localtime') AS duration"
+
 
 def get_count(cursor, query, params=None):
     """Execute a count query and return the count, works for both SQLite and PostgreSQL."""
