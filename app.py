@@ -1925,149 +1925,411 @@ def payment_history():
     )
 
 
+# @app.route("/reports/revenue")
+# @login_required
+# @staff_required
+# def revenue_report():
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get date range from query parameters
+#     period = request.args.get("period", "daily")  # daily, weekly, monthly
+#     date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    
+#     # =============================================
+#     # DAILY REVENUE
+#     # =============================================
+#     if period == "daily":
+#         daily_revenue = execute_query(c,"""
+#             SELECT 
+#                 date(r.payment_date) AS date,
+#                 COUNT(*) AS transactions,
+#                 COALESCE(SUM(r.amount), 0) AS total,
+#                 GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
+#             FROM rental_payments r
+#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#             JOIN bicycles b ON b.id = dr.bicycle_id
+#             WHERE date(r.payment_date) = ?
+#             GROUP BY date(r.payment_date)
+#             ORDER BY date(r.payment_date) DESC
+#         """, (date_filter,)).fetchall()
+        
+#         # Get daily summary
+#         daily_summary = execute_query(c,"""
+#             SELECT 
+#                 COALESCE(SUM(amount), 0) AS total,
+#                 COUNT(*) AS transactions,
+#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
+#             FROM rental_payments r
+#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#             WHERE date(r.payment_date) = ?
+#         """, (date_filter,)).fetchone()
+        
+#         # Get all available dates for dropdown
+#         available_dates = execute_query(c,"""
+#             SELECT DISTINCT date(payment_date) AS date
+#             FROM rental_payments
+#             ORDER BY date DESC
+#         """).fetchall()
+        
+#         # Get last 7 days trend
+#         weekly_trend = execute_query(c,"""
+#             SELECT 
+#                 date(r.payment_date) AS date,
+#                 COALESCE(SUM(r.amount), 0) AS total
+#             FROM rental_payments r
+#             WHERE date(r.payment_date) >= date('now', '-7 days')
+#             GROUP BY date(r.payment_date)
+#             ORDER BY date(r.payment_date) ASC
+#         """).fetchall()
+        
+#         report_title = f"Revenue Report - {date_filter}"
+    
+#     # =============================================
+#     # WEEKLY REVENUE
+#     # =============================================
+#     elif period == "weekly":
+#         # Get week number and year
+#         year = request.args.get("year", datetime.now().strftime("%Y"))
+#         week = request.args.get("week", datetime.now().strftime("%W"))
+        
+#         weekly_revenue = execute_query(c,"""
+#             SELECT 
+#                 strftime('%W', r.payment_date) AS week,
+#                 strftime('%Y', r.payment_date) AS year,
+#                 COUNT(*) AS transactions,
+#                 COALESCE(SUM(r.amount), 0) AS total
+#             FROM rental_payments r
+#             WHERE strftime('%W', r.payment_date) = ? 
+#             AND strftime('%Y', r.payment_date) = ?
+#             GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
+#             ORDER BY year DESC, week DESC
+#         """, (week, year)).fetchall()
+        
+#         weekly_summary = execute_query(c,"""
+#             SELECT 
+#                 COALESCE(SUM(amount), 0) AS total,
+#                 COUNT(*) AS transactions,
+#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
+#             FROM rental_payments r
+#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#             WHERE strftime('%W', r.payment_date) = ? 
+#             AND strftime('%Y', r.payment_date) = ?
+#         """, (week, year)).fetchone()
+        
+#         available_weeks = execute_query(c,"""
+#             SELECT DISTINCT 
+#                 strftime('%W', payment_date) AS week,
+#                 strftime('%Y', payment_date) AS year
+#             FROM rental_payments
+#             ORDER BY year DESC, week DESC
+#             LIMIT 20
+#         """).fetchall()
+        
+#         report_title = f"Weekly Revenue Report - Week {week}, {year}"
+#         daily_revenue = weekly_revenue
+#         available_dates = available_weeks
+    
+#     # =============================================
+#     # MONTHLY REVENUE
+#     # =============================================
+#     else:  # monthly
+#         month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
+        
+#         monthly_revenue = execute_query(c,"""
+#             SELECT 
+#                 strftime('%Y-%m', r.payment_date) AS month,
+#                 COUNT(*) AS transactions,
+#                 COALESCE(SUM(r.amount), 0) AS total,
+#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
+#             FROM rental_payments r
+#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#             WHERE strftime('%Y-%m', r.payment_date) = ?
+#             GROUP BY strftime('%Y-%m', r.payment_date)
+#             ORDER BY month DESC
+#         """, (month_filter,)).fetchall()
+        
+#         monthly_summary = execute_query(c,"""
+#             SELECT 
+#                 COALESCE(SUM(amount), 0) AS total,
+#                 COUNT(*) AS transactions,
+#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
+#             FROM rental_payments r
+#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#             WHERE strftime('%Y-%m', r.payment_date) = ?
+#         """, (month_filter,)).fetchone()
+        
+#         available_months = execute_query(c,"""
+#             SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
+#             FROM rental_payments
+#             ORDER BY month DESC
+#         """).fetchall()
+        
+#         report_title = f"Monthly Revenue Report - {month_filter}"
+#         daily_revenue = monthly_revenue
+#         available_dates = available_months
+    
+#     conn.close()
+    
+#     return render_template(
+#         "revenue_report.html",
+#         title="Revenue Report",
+#         report_title=report_title,
+#         period=period,
+#         date_filter=date_filter,
+#         daily_revenue=daily_revenue,
+#         daily_summary=daily_summary if 'daily_summary' in locals() else None,
+#         weekly_summary=weekly_summary if 'weekly_summary' in locals() else None,
+#         monthly_summary=monthly_summary if 'monthly_summary' in locals() else None,
+#         available_dates=available_dates,
+#         weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
+#         report_type=period
+#     )
+
 @app.route("/reports/revenue")
 @login_required
-@staff_required
+@manager_required
 def revenue_report():
+    """Revenue report with daily/weekly/monthly views."""
     conn = db()
     c = conn.cursor()
     
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+    
     # Get date range from query parameters
-    period = request.args.get("period", "daily")  # daily, weekly, monthly
+    period = request.args.get("period", "daily")
     date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
     
-    # =============================================
-    # DAILY REVENUE
-    # =============================================
     if period == "daily":
-        daily_revenue = execute_query(c,"""
-            SELECT 
-                date(r.payment_date) AS date,
-                COUNT(*) AS transactions,
-                COALESCE(SUM(r.amount), 0) AS total,
-                GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
-            FROM rental_payments r
-            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-            JOIN bicycles b ON b.id = dr.bicycle_id
-            WHERE date(r.payment_date) = ?
-            GROUP BY date(r.payment_date)
-            ORDER BY date(r.payment_date) DESC
-        """, (date_filter,)).fetchall()
-        
-        # Get daily summary
-        daily_summary = execute_query(c,"""
-            SELECT 
-                COALESCE(SUM(amount), 0) AS total,
-                COUNT(*) AS transactions,
-                COUNT(DISTINCT dr.customer_id) AS unique_customers
-            FROM rental_payments r
-            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-            WHERE date(r.payment_date) = ?
-        """, (date_filter,)).fetchone()
-        
-        # Get all available dates for dropdown
-        available_dates = execute_query(c,"""
-            SELECT DISTINCT date(payment_date) AS date
-            FROM rental_payments
-            ORDER BY date DESC
-        """).fetchall()
-        
-        # Get last 7 days trend
-        weekly_trend = execute_query(c,"""
-            SELECT 
-                date(r.payment_date) AS date,
-                COALESCE(SUM(r.amount), 0) AS total
-            FROM rental_payments r
-            WHERE date(r.payment_date) >= date('now', '-7 days')
-            GROUP BY date(r.payment_date)
-            ORDER BY date(r.payment_date) ASC
-        """).fetchall()
+        if is_postgres:
+            # PostgreSQL syntax
+            daily_revenue = execute_query(c, """
+                SELECT 
+                    DATE(r.payment_date) AS date,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total,
+                    STRING_AGG(DISTINCT b.bike_code, ', ') AS bikes_rented
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                JOIN bicycles b ON b.id = dr.bicycle_id
+                WHERE DATE(r.payment_date) = %s
+                GROUP BY DATE(r.payment_date)
+                ORDER BY DATE(r.payment_date) DESC
+            """, (date_filter,)).fetchall()
+            
+            daily_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE DATE(r.payment_date) = %s
+            """, (date_filter,)).fetchone()
+            
+            available_dates = execute_query(c, """
+                SELECT DISTINCT DATE(payment_date) AS date
+                FROM rental_payments
+                ORDER BY date DESC
+            """).fetchall()
+            
+            weekly_trend = execute_query(c, """
+                SELECT 
+                    DATE(r.payment_date) AS date,
+                    COALESCE(SUM(r.amount), 0) AS total
+                FROM rental_payments r
+                WHERE DATE(r.payment_date) >= CURRENT_DATE - INTERVAL '7 days'
+                GROUP BY DATE(r.payment_date)
+                ORDER BY DATE(r.payment_date) ASC
+            """).fetchall()
+        else:
+            # SQLite syntax
+            daily_revenue = execute_query(c, """
+                SELECT 
+                    date(r.payment_date) AS date,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total,
+                    GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                JOIN bicycles b ON b.id = dr.bicycle_id
+                WHERE date(r.payment_date) = ?
+                GROUP BY date(r.payment_date)
+                ORDER BY date(r.payment_date) DESC
+            """, (date_filter,)).fetchall()
+            
+            daily_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE date(r.payment_date) = ?
+            """, (date_filter,)).fetchone()
+            
+            available_dates = execute_query(c, """
+                SELECT DISTINCT date(payment_date) AS date
+                FROM rental_payments
+                ORDER BY date DESC
+            """).fetchall()
+            
+            weekly_trend = execute_query(c, """
+                SELECT 
+                    date(r.payment_date) AS date,
+                    COALESCE(SUM(r.amount), 0) AS total
+                FROM rental_payments r
+                WHERE date(r.payment_date) >= date('now', '-7 days')
+                GROUP BY date(r.payment_date)
+                ORDER BY date(r.payment_date) ASC
+            """).fetchall()
         
         report_title = f"Revenue Report - {date_filter}"
-    
-    # =============================================
-    # WEEKLY REVENUE
-    # =============================================
+        
     elif period == "weekly":
-        # Get week number and year
         year = request.args.get("year", datetime.now().strftime("%Y"))
         week = request.args.get("week", datetime.now().strftime("%W"))
         
-        weekly_revenue = execute_query(c,"""
-            SELECT 
-                strftime('%W', r.payment_date) AS week,
-                strftime('%Y', r.payment_date) AS year,
-                COUNT(*) AS transactions,
-                COALESCE(SUM(r.amount), 0) AS total
-            FROM rental_payments r
-            WHERE strftime('%W', r.payment_date) = ? 
-            AND strftime('%Y', r.payment_date) = ?
-            GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
-            ORDER BY year DESC, week DESC
-        """, (week, year)).fetchall()
+        if is_postgres:
+            # PostgreSQL syntax
+            weekly_revenue = execute_query(c, """
+                SELECT 
+                    EXTRACT(WEEK FROM r.payment_date) AS week,
+                    EXTRACT(YEAR FROM r.payment_date) AS year,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total
+                FROM rental_payments r
+                WHERE EXTRACT(WEEK FROM r.payment_date) = %s
+                AND EXTRACT(YEAR FROM r.payment_date) = %s
+                GROUP BY EXTRACT(WEEK FROM r.payment_date), EXTRACT(YEAR FROM r.payment_date)
+                ORDER BY year DESC, week DESC
+            """, (week, year)).fetchall()
+            
+            weekly_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE EXTRACT(WEEK FROM r.payment_date) = %s
+                AND EXTRACT(YEAR FROM r.payment_date) = %s
+            """, (week, year)).fetchone()
+            
+            available_weeks = execute_query(c, """
+                SELECT DISTINCT 
+                    EXTRACT(WEEK FROM payment_date) AS week,
+                    EXTRACT(YEAR FROM payment_date) AS year
+                FROM rental_payments
+                ORDER BY year DESC, week DESC
+                LIMIT 20
+            """).fetchall()
+        else:
+            # SQLite syntax
+            weekly_revenue = execute_query(c, """
+                SELECT 
+                    strftime('%W', r.payment_date) AS week,
+                    strftime('%Y', r.payment_date) AS year,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total
+                FROM rental_payments r
+                WHERE strftime('%W', r.payment_date) = ?
+                AND strftime('%Y', r.payment_date) = ?
+                GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
+                ORDER BY year DESC, week DESC
+            """, (week, year)).fetchall()
+            
+            weekly_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE strftime('%W', r.payment_date) = ?
+                AND strftime('%Y', r.payment_date) = ?
+            """, (week, year)).fetchone()
+            
+            available_weeks = execute_query(c, """
+                SELECT DISTINCT 
+                    strftime('%W', payment_date) AS week,
+                    strftime('%Y', payment_date) AS year
+                FROM rental_payments
+                ORDER BY year DESC, week DESC
+                LIMIT 20
+            """).fetchall()
         
-        weekly_summary = execute_query(c,"""
-            SELECT 
-                COALESCE(SUM(amount), 0) AS total,
-                COUNT(*) AS transactions,
-                COUNT(DISTINCT dr.customer_id) AS unique_customers
-            FROM rental_payments r
-            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-            WHERE strftime('%W', r.payment_date) = ? 
-            AND strftime('%Y', r.payment_date) = ?
-        """, (week, year)).fetchone()
-        
-        available_weeks = execute_query(c,"""
-            SELECT DISTINCT 
-                strftime('%W', payment_date) AS week,
-                strftime('%Y', payment_date) AS year
-            FROM rental_payments
-            ORDER BY year DESC, week DESC
-            LIMIT 20
-        """).fetchall()
-        
-        report_title = f"Weekly Revenue Report - Week {week}, {year}"
         daily_revenue = weekly_revenue
         available_dates = available_weeks
-    
-    # =============================================
-    # MONTHLY REVENUE
-    # =============================================
+        report_title = f"Weekly Revenue Report - Week {week}, {year}"
+        
     else:  # monthly
         month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
         
-        monthly_revenue = execute_query(c,"""
-            SELECT 
-                strftime('%Y-%m', r.payment_date) AS month,
-                COUNT(*) AS transactions,
-                COALESCE(SUM(r.amount), 0) AS total,
-                COUNT(DISTINCT dr.customer_id) AS unique_customers
-            FROM rental_payments r
-            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-            WHERE strftime('%Y-%m', r.payment_date) = ?
-            GROUP BY strftime('%Y-%m', r.payment_date)
-            ORDER BY month DESC
-        """, (month_filter,)).fetchall()
+        if is_postgres:
+            # PostgreSQL syntax
+            monthly_revenue = execute_query(c, """
+                SELECT 
+                    TO_CHAR(r.payment_date, 'YYYY-MM') AS month,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE TO_CHAR(r.payment_date, 'YYYY-MM') = %s
+                GROUP BY TO_CHAR(r.payment_date, 'YYYY-MM')
+                ORDER BY month DESC
+            """, (month_filter,)).fetchall()
+            
+            monthly_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE TO_CHAR(r.payment_date, 'YYYY-MM') = %s
+            """, (month_filter,)).fetchone()
+            
+            available_months = execute_query(c, """
+                SELECT DISTINCT TO_CHAR(payment_date, 'YYYY-MM') AS month
+                FROM rental_payments
+                ORDER BY month DESC
+            """).fetchall()
+        else:
+            # SQLite syntax
+            monthly_revenue = execute_query(c, """
+                SELECT 
+                    strftime('%Y-%m', r.payment_date) AS month,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(r.amount), 0) AS total,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE strftime('%Y-%m', r.payment_date) = ?
+                GROUP BY strftime('%Y-%m', r.payment_date)
+                ORDER BY month DESC
+            """, (month_filter,)).fetchall()
+            
+            monthly_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions,
+                    COUNT(DISTINCT dr.customer_id) AS unique_customers
+                FROM rental_payments r
+                JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+                WHERE strftime('%Y-%m', r.payment_date) = ?
+            """, (month_filter,)).fetchone()
+            
+            available_months = execute_query(c, """
+                SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
+                FROM rental_payments
+                ORDER BY month DESC
+            """).fetchall()
         
-        monthly_summary = execute_query(c,"""
-            SELECT 
-                COALESCE(SUM(amount), 0) AS total,
-                COUNT(*) AS transactions,
-                COUNT(DISTINCT dr.customer_id) AS unique_customers
-            FROM rental_payments r
-            JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-            WHERE strftime('%Y-%m', r.payment_date) = ?
-        """, (month_filter,)).fetchone()
-        
-        available_months = execute_query(c,"""
-            SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
-            FROM rental_payments
-            ORDER BY month DESC
-        """).fetchall()
-        
-        report_title = f"Monthly Revenue Report - {month_filter}"
         daily_revenue = monthly_revenue
         available_dates = available_months
+        report_title = f"Monthly Revenue Report - {month_filter}"
     
     conn.close()
     
@@ -2085,6 +2347,9 @@ def revenue_report():
         weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
         report_type=period
     )
+
+
+
 
 @app.route("/rentals/history")
 @login_required
