@@ -161,6 +161,26 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 #         return conn
 
 
+# def db():
+#     """Connect to the database."""
+#     if os.environ.get("DATABASE_URL"):
+#         # PostgreSQL (Production on Render)
+#         import psycopg2
+#         import psycopg2.extras
+        
+#         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
+#         # Make it behave like sqlite3 Row
+#         conn.row_factory = lambda cursor, row: {col[0]: row[i] for i, col in enumerate(cursor.description)}
+#         return conn
+#     else:
+#         # SQLite (Local Development)
+#         import sqlite3
+#         conn = sqlite3.connect(DB)
+#         conn.execute("PRAGMA foreign_keys = ON")
+#         conn.row_factory = sqlite3.Row
+#         return conn
+
+
 def db():
     """Connect to the database."""
     if os.environ.get("DATABASE_URL"):
@@ -169,8 +189,7 @@ def db():
         import psycopg2.extras
         
         conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-        # Make it behave like sqlite3 Row
-        conn.row_factory = lambda cursor, row: {col[0]: row[i] for i, col in enumerate(cursor.description)}
+        # Use RealDictCursor for dictionary-like rows
         return conn
     else:
         # SQLite (Local Development)
@@ -179,6 +198,20 @@ def db():
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
+
+def execute_query(cursor, query, params=None):
+    """Execute a query with proper parameter handling for both SQLite and PostgreSQL."""
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+    if is_postgres:
+        # Replace ? with %s for PostgreSQL
+        query = query.replace("?", "%s")
+    
+    if params:
+        return cursor.execute(query, params)
+    else:
+        return cursor.execute(query)
+
 
 
 # =============================================
@@ -495,7 +528,7 @@ def login_required(f):
 #     """)
     
 #     # Add default rates
-#     c.execute("SELECT COUNT(*) FROM daily_rates")
+#     execute_query(c,"SELECT COUNT(*) FROM daily_rates")
 #     if c.fetchone()[0] == 0:
 #         c.executescript("""
 #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
@@ -507,17 +540,17 @@ def login_required(f):
 #         """)
     
 #     # ✅ Create default users with INSERT OR IGNORE
-#     c.execute("""
+#     execute_query(c,"""
 #         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
 #         VALUES ('admin', ?, 'admin', 'System Administrator')
 #     """, (generate_password_hash("admin123"),))
     
-#     c.execute("""
+#     execute_query(c,"""
 #         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
 #         VALUES ('manager', ?, 'manager', 'Store Manager')
 #     """, (generate_password_hash("manager123"),))
     
-#     c.execute("""
+#     execute_query(c,"""
 #         INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
 #         VALUES ('staff', ?, 'staff', 'Sales Staff')
 #     """, (generate_password_hash("staff123"),))
@@ -538,7 +571,7 @@ def init_db():
         # =============================================
         
         # Users table
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS users(
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
@@ -552,7 +585,7 @@ def init_db():
         """)
         
         # Customers table
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS customers(
                 id SERIAL PRIMARY KEY,
                 full_name TEXT NOT NULL,
@@ -571,7 +604,7 @@ def init_db():
         """)
         
         # Customer Documents
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS customer_documents(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -582,7 +615,7 @@ def init_db():
         """)
         
         # Branches
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS branches(
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -597,7 +630,7 @@ def init_db():
         """)
         
         # Bicycles
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS bicycles(
                 id SERIAL PRIMARY KEY,
                 bike_code TEXT UNIQUE NOT NULL,
@@ -614,7 +647,7 @@ def init_db():
         """)
         
         # Daily Rentals
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS daily_rentals(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id),
@@ -643,7 +676,7 @@ def init_db():
         """)
         
         # Daily Rates
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS daily_rates(
                 id SERIAL PRIMARY KEY,
                 bike_type TEXT,
@@ -655,7 +688,7 @@ def init_db():
         """)
         
         # Rental Payments
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS rental_payments(
                 id SERIAL PRIMARY KEY,
                 daily_rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
@@ -667,7 +700,7 @@ def init_db():
         """)
         
         # Verification Requests
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS verification_requests(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -679,7 +712,7 @@ def init_db():
         """)
         
         # Reminder Logs
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS reminder_logs(
                 id SERIAL PRIMARY KEY,
                 rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
@@ -690,7 +723,7 @@ def init_db():
         """)
         
         # Discount Codes
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS discount_codes(
                 id SERIAL PRIMARY KEY,
                 code TEXT UNIQUE NOT NULL,
@@ -708,7 +741,7 @@ def init_db():
         """)
         
         # Discount Usage
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS discount_usage(
                 id SERIAL PRIMARY KEY,
                 discount_code_id INTEGER NOT NULL REFERENCES discount_codes(id),
@@ -720,7 +753,7 @@ def init_db():
         """)
         
         # Loyalty Points
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS loyalty_points(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -733,7 +766,7 @@ def init_db():
         """)
         
         # Points Transactions
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS points_transactions(
                 id SERIAL PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -746,7 +779,7 @@ def init_db():
         """)
         
         # Maintenance Records
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS maintenance_records(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -763,7 +796,7 @@ def init_db():
         """)
         
         # Bike Conditions
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS bike_conditions(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -777,7 +810,7 @@ def init_db():
         """)
         
         # Bicycle Health
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS bicycle_health(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -794,7 +827,7 @@ def init_db():
         """)
         
         # Bicycle Health History
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS bicycle_health_history(
                 id SERIAL PRIMARY KEY,
                 bicycle_id INTEGER NOT NULL REFERENCES bicycles(id) ON DELETE CASCADE,
@@ -806,7 +839,7 @@ def init_db():
         """)
         
         # Announcements
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS announcements(
                 id SERIAL PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -824,7 +857,7 @@ def init_db():
         """)
         
         # Announcement Comments
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS announcement_comments(
                 id SERIAL PRIMARY KEY,
                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
@@ -837,7 +870,7 @@ def init_db():
         """)
         
         # Announcement Reads
-        c.execute("""
+        execute_query(c,"""
             CREATE TABLE IF NOT EXISTS announcement_reads(
                 id SERIAL PRIMARY KEY,
                 announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
@@ -1134,18 +1167,18 @@ def init_db():
     # =============================================
     
     # Add default rates
-    c.execute("SELECT COUNT(*) FROM daily_rates")
+    execute_query(c,"SELECT COUNT(*) FROM daily_rates")
     if c.fetchone()[0] == 0:
         if is_postgres:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
                 VALUES ('Standard', 20, 120, 50);
             """)
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
                 VALUES ('Electric', 30, 180, 75);
             """)
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
                 VALUES ('Mountain', 25, 150, 60);
             """)
@@ -1163,36 +1196,36 @@ def init_db():
     try:
         if is_postgres:
             # PostgreSQL uses INSERT ... ON CONFLICT
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('admin', %s, 'admin', 'System Administrator')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("admin123"),))
             
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('manager', %s, 'manager', 'Store Manager')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("manager123"),))
             
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO users (username, password_hash, role, full_name) 
                 VALUES ('staff', %s, 'staff', 'Sales Staff')
                 ON CONFLICT (username) DO NOTHING
             """, (generate_password_hash("staff123"),))
         else:
             # SQLite uses INSERT OR IGNORE
-            c.execute("""
+            execute_query(c,"""
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('admin', ?, 'admin', 'System Administrator')
             """, (generate_password_hash("admin123"),))
             
-            c.execute("""
+            execute_query(c,"""
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('manager', ?, 'manager', 'Store Manager')
             """, (generate_password_hash("manager123"),))
             
-            c.execute("""
+            execute_query(c,"""
                 INSERT OR IGNORE INTO users (username, password_hash, role, full_name) 
                 VALUES ('staff', ?, 'staff', 'Sales Staff')
             """, (generate_password_hash("staff123"),))
@@ -1218,7 +1251,7 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         
-        user = c.execute(
+        user = execute_query(c,
             "SELECT * FROM users WHERE username = ?", 
             (username,)
         ).fetchone()
@@ -1235,7 +1268,7 @@ def login():
                 # Get customer ID
                 conn = db()
                 c = conn.cursor()
-                customer = c.execute(
+                customer = execute_query(c,
                     "SELECT id FROM customers WHERE user_id = ?", 
                     (user["id"],)
                 ).fetchone()
@@ -1273,7 +1306,7 @@ def customer_login():
         conn = db()
         c = conn.cursor()
         
-        user = c.execute(
+        user = execute_query(c,
             "SELECT * FROM users WHERE username = ? AND role = 'customer'", 
             (username,)
         ).fetchone()
@@ -1288,7 +1321,7 @@ def customer_login():
             # Get customer ID
             conn = db()
             c = conn.cursor()
-            customer = c.execute(
+            customer = execute_query(c,
                 "SELECT id FROM customers WHERE user_id = ?", 
                 (user["id"],)
             ).fetchone()
@@ -1323,7 +1356,7 @@ def role_required(allowed_roles):
             
             conn = db()
             c = conn.cursor()
-            user = c.execute(
+            user = execute_query(c,
                 "SELECT role FROM users WHERE id = ?", 
                 (session["user_id"],)
             ).fetchone()
@@ -1413,7 +1446,7 @@ def users():
     conn = db()
     c = conn.cursor()
     
-    users = c.execute("""
+    users = execute_query(c,"""
         SELECT id, username, role, full_name, email, created_at
         FROM users
         ORDER BY role, username
@@ -1443,7 +1476,7 @@ def add_user():
         c = conn.cursor()
         
         try:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO users (username, password_hash, role, full_name, email)
                 VALUES (?, ?, ?, ?, ?)
             """, (username, generate_password_hash(password), role, full_name, email))
@@ -1467,7 +1500,7 @@ def edit_user(user_id):
     conn = db()
     c = conn.cursor()
     
-    user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = execute_query(c,"SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     
     if not user:
         flash("User not found.", "danger")
@@ -1480,13 +1513,13 @@ def edit_user(user_id):
         new_password = request.form.get("new_password", "").strip()
         
         if new_password:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE users 
                 SET role = ?, full_name = ?, email = ?, password_hash = ?
                 WHERE id = ?
             """, (role, full_name, email, generate_password_hash(new_password), user_id))
         else:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE users 
                 SET role = ?, full_name = ?, email = ?
                 WHERE id = ?
@@ -1517,65 +1550,65 @@ def delete_user(user_id):
     c = conn.cursor()
     
     # Check if user exists
-    user = c.execute("SELECT username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = execute_query(c,"SELECT username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         flash("User not found.", "danger")
         return redirect(url_for("users"))
     
     try:
         # ✅ STEP 1: Get customer ID if exists
-        customer = c.execute("SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+        customer = execute_query(c,"SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
         
         if customer:
             customer_id = customer["id"]
             
             # ✅ STEP 2: Delete customer documents FIRST
-            c.execute("DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 3: Delete discount usage
-            c.execute("DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 4: Delete loyalty points
-            c.execute("DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 5: Delete points transactions
-            c.execute("DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 6: Delete verification requests
-            c.execute("DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 7: Get all rentals for this customer
-            rentals = c.execute("SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
+            rentals = execute_query(c,"SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
             
             for rental in rentals:
                 rental_id = rental["id"]
                 # Delete rental payments
-                c.execute("DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental_id,))
+                execute_query(c,"DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental_id,))
                 # Delete reminder logs
-                c.execute("DELETE FROM reminder_logs WHERE rental_id = ?", (rental_id,))
+                execute_query(c,"DELETE FROM reminder_logs WHERE rental_id = ?", (rental_id,))
                 # Delete bike conditions
-                c.execute("DELETE FROM bike_conditions WHERE rental_id = ?", (rental_id,))
+                execute_query(c,"DELETE FROM bike_conditions WHERE rental_id = ?", (rental_id,))
             
             # ✅ STEP 8: Delete rentals
-            c.execute("DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
             
             # ✅ STEP 9: Finally delete the customer
-            c.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+            execute_query(c,"DELETE FROM customers WHERE id = ?", (customer_id,))
         
         # ✅ STEP 10: Delete user's announcement comments
-        c.execute("DELETE FROM announcement_comments WHERE user_id = ?", (user_id,))
+        execute_query(c,"DELETE FROM announcement_comments WHERE user_id = ?", (user_id,))
         
         # ✅ STEP 11: Delete user's announcements
-        c.execute("DELETE FROM announcements WHERE author_id = ?", (user_id,))
+        execute_query(c,"DELETE FROM announcements WHERE author_id = ?", (user_id,))
         
         # ✅ STEP 12: Delete verification requests where user is verifier
-        c.execute("DELETE FROM verification_requests WHERE verified_by = ?", (user_id,))
+        execute_query(c,"DELETE FROM verification_requests WHERE verified_by = ?", (user_id,))
         
         # ✅ STEP 13: Delete bike conditions where user is checker
-        c.execute("DELETE FROM bike_conditions WHERE checked_by = ?", (user_id,))
+        execute_query(c,"DELETE FROM bike_conditions WHERE checked_by = ?", (user_id,))
         
         # ✅ STEP 14: Finally delete the user
-        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        execute_query(c,"DELETE FROM users WHERE id = ?", (user_id,))
         
         conn.commit()
         flash(f"User '{user['username']}' deleted successfully.", "success")
@@ -1607,7 +1640,7 @@ def reset_customer_password(customer_id):
     c = conn.cursor()
     
     # Get customer
-    customer = c.execute("""
+    customer = execute_query(c,"""
         SELECT c.*, u.id AS user_id, u.username 
         FROM customers c
         JOIN users u ON u.id = c.user_id
@@ -1626,7 +1659,7 @@ def reset_customer_password(customer_id):
             return redirect(url_for("reset_customer_password", customer_id=customer_id))
         
         # Update password
-        c.execute("""
+        execute_query(c,"""
             UPDATE users 
             SET password_hash = ? 
             WHERE id = ?
@@ -1657,7 +1690,7 @@ def profile():
     conn = db()
     c = conn.cursor()
     
-    user = c.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    user = execute_query(c,"SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
     
     if request.method == "POST":
         full_name = request.form.get("full_name", "").strip()
@@ -1670,13 +1703,13 @@ def profile():
                 flash("Current password is incorrect.", "danger")
                 return redirect(url_for("profile"))
             
-            c.execute("""
+            execute_query(c,"""
                 UPDATE users 
                 SET full_name = ?, email = ?, password_hash = ?
                 WHERE id = ?
             """, (full_name, email, generate_password_hash(new_password), session["user_id"]))
         else:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE users 
                 SET full_name = ?, email = ?
                 WHERE id = ?
@@ -1705,7 +1738,7 @@ def customer_rentals():
     c = conn.cursor()
     
     # Get customer ID
-    customer = c.execute(
+    customer = execute_query(c,
         "SELECT id FROM customers WHERE user_id = ?", 
         (session["user_id"],)
     ).fetchone()
@@ -1715,7 +1748,7 @@ def customer_rentals():
         return redirect(url_for("customer_portal"))
     
     # Get customer's rentals only
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT 
             r.*,
             b.bike_code,
@@ -1745,7 +1778,7 @@ def customer_rent():
     c = conn.cursor()
     
     # Get available bikes only
-    bikes = c.execute("""
+    bikes = execute_query(c,"""
         SELECT * FROM bicycles 
         WHERE status = 'Available'
         ORDER BY bike_code
@@ -1775,25 +1808,25 @@ def dashboard():
     c = conn.cursor()
 
     # Get user info
-    user = c.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    user = execute_query(c,"SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
 
 
-    total_bikes = c.execute("SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
-    active_rentals = c.execute("SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
-    total_customers = c.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+    total_bikes = execute_query(c,"SELECT COUNT(*) FROM bicycles WHERE status = 'Available'").fetchone()[0]
+    active_rentals = execute_query(c,"SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'").fetchone()[0]
+    total_customers = execute_query(c,"SELECT COUNT(*) FROM customers").fetchone()[0]
     
-    pending_verification = c.execute(
+    pending_verification = execute_query(c,
         "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'"
     ).fetchone()[0]
     
-    today_revenue = c.execute("""
+    today_revenue = execute_query(c,"""
         SELECT COALESCE(SUM(total_cost), 0) 
         FROM daily_rentals 
         WHERE date(created_at) = date('now') 
         AND status = 'Completed'
     """).fetchone()[0]
     
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT 
             r.id,
             c.full_name,
@@ -1809,7 +1842,7 @@ def dashboard():
     
 
     # 👇 ADD THIS: Completed but unpaid rentals
-    unpaid_rentals = c.execute("""
+    unpaid_rentals = execute_query(c,"""
         SELECT 
             r.id,
             c.full_name,
@@ -1856,7 +1889,7 @@ def start_rental():
         start_time = request.form.get("start_time")
         
         # Verify customer is verified
-        customer = c.execute(
+        customer = execute_query(c,
             "SELECT verification_status FROM customers WHERE id = ?",
             (customer_id,)
         ).fetchone()
@@ -1865,7 +1898,7 @@ def start_rental():
             flash("Customer must be verified before renting.", "danger")
             return redirect(url_for("start_rental"))
         
-        bike = c.execute(
+        bike = execute_query(c,
             "SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?",
             (bicycle_id,)
         ).fetchone()
@@ -1874,7 +1907,7 @@ def start_rental():
             flash("Bicycle not found.", "danger")
             return redirect(url_for("start_rental"))
         
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO daily_rentals (
                 customer_id, bicycle_id, start_time, 
                 hourly_rate, daily_cap, deposit_paid, status,
@@ -1887,7 +1920,7 @@ def start_rental():
         
         rental_id = c.lastrowid
         
-        c.execute("UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
+        execute_query(c,"UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
         
         conn.commit()
         conn.close()
@@ -1895,11 +1928,11 @@ def start_rental():
         flash(f"Rental started successfully! Rental ID: {rental_id}", "success")
         return redirect(url_for("dashboard"))
     
-    customers = c.execute(
+    customers = execute_query(c,
         "SELECT id, full_name, phone FROM customers WHERE verification_status = 'Verified' ORDER BY full_name"
     ).fetchall()
     
-    bicycles = c.execute(
+    bicycles = execute_query(c,
         "SELECT id, bike_code, brand, model, hourly_rate, daily_cap FROM bicycles WHERE status = 'Available'"
     ).fetchall()
     
@@ -1946,7 +1979,7 @@ def customers():
         username = phone
         
         # Check if username already exists
-        existing_user = c.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        existing_user = execute_query(c,"SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing_user:
             # If phone exists, try email
             if email:
@@ -1962,7 +1995,7 @@ def customers():
         
         # Insert user with role 'customer'
         try:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO users (username, password_hash, role, full_name, email)
                 VALUES (?, ?, 'customer', ?, ?)
             """, (username, password_hash, full_name, email))
@@ -1972,7 +2005,7 @@ def customers():
             return redirect(url_for("customers"))
         
         # ✅ STEP 2: Insert customer with user_id
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO customers (
                 full_name, id_number, phone, email, address, user_id,
                 terms_accepted, terms_accepted_date, signature_data, verification_status
@@ -1993,7 +2026,7 @@ def customers():
         if id_photo and id_photo.filename:
             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'id_copy', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2001,7 +2034,7 @@ def customers():
         if customer_photo and customer_photo.filename:
             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'customer_photo', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2016,7 +2049,7 @@ def customers():
         
         return redirect(url_for("customers"))
     
-    customers = c.execute("SELECT * FROM customers ORDER BY full_name").fetchall()
+    customers = execute_query(c,"SELECT * FROM customers ORDER BY full_name").fetchall()
     conn.close()
     
     return render_template("customers.html", title="Customers", customers=customers)
@@ -2034,7 +2067,7 @@ def verify_customer_page(customer_id):
     conn = db()
     c = conn.cursor()
     
-    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
     
     if not customer:
         flash("Customer not found.", "danger")
@@ -2055,7 +2088,7 @@ def verify_customer(customer_id):
     c = conn.cursor()
     
     # ✅ Check if customer exists
-    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers"))
@@ -2065,7 +2098,7 @@ def verify_customer(customer_id):
     
     try:
         # ✅ STEP 1: Update customer verification status
-        c.execute("""
+        execute_query(c,"""
             UPDATE customers 
             SET verification_status = ?, verification_notes = ?
             WHERE id = ?
@@ -2073,10 +2106,10 @@ def verify_customer(customer_id):
         
         # ✅ STEP 2: Insert into verification_requests
         # Make sure the user exists in the users table
-        user = c.execute("SELECT id FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+        user = execute_query(c,"SELECT id FROM users WHERE id = ?", (session["user_id"],)).fetchone()
         
         if user:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO verification_requests (customer_id, verified_by, status, notes)
                 VALUES (?, ?, ?, ?)
             """, (customer_id, session["user_id"], status, notes))
@@ -2105,8 +2138,8 @@ def view_documents(customer_id):
     conn = db()
     c = conn.cursor()
     
-    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
-    documents = c.execute("""
+    customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    documents = execute_query(c,"""
         SELECT * FROM customer_documents 
         WHERE customer_id = ? 
         ORDER BY uploaded_at DESC
@@ -2133,7 +2166,7 @@ def view_document_file(customer_id, doc_id):
     conn = db()
     c = conn.cursor()
     
-    doc = c.execute("""
+    doc = execute_query(c,"""
         SELECT * FROM customer_documents 
         WHERE id = ? AND customer_id = ?
     """, (doc_id, customer_id)).fetchone()
@@ -2161,7 +2194,7 @@ def record_payment(rental_id):
     conn = db()
     c = conn.cursor()
     
-    rental = c.execute("""
+    rental = execute_query(c,"""
         SELECT r.*, c.full_name, b.bike_code
         FROM daily_rentals r
         JOIN customers c ON c.id = r.customer_id
@@ -2181,12 +2214,12 @@ def record_payment(rental_id):
             flash("Payment amount must be greater than zero.", "danger")
             return redirect(url_for("record_payment", rental_id=rental_id))
         
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
             VALUES (?, ?, ?, 'Completed')
         """, (rental_id, amount, payment_method))
         
-        c.execute("""
+        execute_query(c,"""
             UPDATE daily_rentals 
             SET payment_status = 'Paid'
             WHERE id = ?
@@ -2216,7 +2249,7 @@ def payment_history():
     conn = db()
     c = conn.cursor()
     
-    payments = c.execute("""
+    payments = execute_query(c,"""
         SELECT 
             p.*,
             r.id AS rental_id,
@@ -2231,7 +2264,7 @@ def payment_history():
     """).fetchall()
     
     # Get total revenue
-    total_revenue = c.execute("""
+    total_revenue = execute_query(c,"""
         SELECT COALESCE(SUM(amount), 0) FROM rental_payments
     """).fetchone()[0]
     
@@ -2262,7 +2295,7 @@ def revenue_report():
     # DAILY REVENUE
     # =============================================
     if period == "daily":
-        daily_revenue = c.execute("""
+        daily_revenue = execute_query(c,"""
             SELECT 
                 date(r.payment_date) AS date,
                 COUNT(*) AS transactions,
@@ -2277,7 +2310,7 @@ def revenue_report():
         """, (date_filter,)).fetchall()
         
         # Get daily summary
-        daily_summary = c.execute("""
+        daily_summary = execute_query(c,"""
             SELECT 
                 COALESCE(SUM(amount), 0) AS total,
                 COUNT(*) AS transactions,
@@ -2288,14 +2321,14 @@ def revenue_report():
         """, (date_filter,)).fetchone()
         
         # Get all available dates for dropdown
-        available_dates = c.execute("""
+        available_dates = execute_query(c,"""
             SELECT DISTINCT date(payment_date) AS date
             FROM rental_payments
             ORDER BY date DESC
         """).fetchall()
         
         # Get last 7 days trend
-        weekly_trend = c.execute("""
+        weekly_trend = execute_query(c,"""
             SELECT 
                 date(r.payment_date) AS date,
                 COALESCE(SUM(r.amount), 0) AS total
@@ -2315,7 +2348,7 @@ def revenue_report():
         year = request.args.get("year", datetime.now().strftime("%Y"))
         week = request.args.get("week", datetime.now().strftime("%W"))
         
-        weekly_revenue = c.execute("""
+        weekly_revenue = execute_query(c,"""
             SELECT 
                 strftime('%W', r.payment_date) AS week,
                 strftime('%Y', r.payment_date) AS year,
@@ -2328,7 +2361,7 @@ def revenue_report():
             ORDER BY year DESC, week DESC
         """, (week, year)).fetchall()
         
-        weekly_summary = c.execute("""
+        weekly_summary = execute_query(c,"""
             SELECT 
                 COALESCE(SUM(amount), 0) AS total,
                 COUNT(*) AS transactions,
@@ -2339,7 +2372,7 @@ def revenue_report():
             AND strftime('%Y', r.payment_date) = ?
         """, (week, year)).fetchone()
         
-        available_weeks = c.execute("""
+        available_weeks = execute_query(c,"""
             SELECT DISTINCT 
                 strftime('%W', payment_date) AS week,
                 strftime('%Y', payment_date) AS year
@@ -2358,7 +2391,7 @@ def revenue_report():
     else:  # monthly
         month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
         
-        monthly_revenue = c.execute("""
+        monthly_revenue = execute_query(c,"""
             SELECT 
                 strftime('%Y-%m', r.payment_date) AS month,
                 COUNT(*) AS transactions,
@@ -2371,7 +2404,7 @@ def revenue_report():
             ORDER BY month DESC
         """, (month_filter,)).fetchall()
         
-        monthly_summary = c.execute("""
+        monthly_summary = execute_query(c,"""
             SELECT 
                 COALESCE(SUM(amount), 0) AS total,
                 COUNT(*) AS transactions,
@@ -2381,7 +2414,7 @@ def revenue_report():
             WHERE strftime('%Y-%m', r.payment_date) = ?
         """, (month_filter,)).fetchone()
         
-        available_months = c.execute("""
+        available_months = execute_query(c,"""
             SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
             FROM rental_payments
             ORDER BY month DESC
@@ -2468,7 +2501,7 @@ def rental_history():
     
     query += " ORDER BY r.start_time DESC LIMIT 100"
     
-    rentals = c.execute(query, params).fetchall()
+    rentals = execute_query(c,query, params).fetchall()
     
     # Get summary stats
     total_rentals = len(rentals)
@@ -2509,7 +2542,7 @@ def rental_agreement_pdf(rental_id):
     conn = db()
     c = conn.cursor()
     
-    rental = c.execute("""
+    rental = execute_query(c,"""
         SELECT 
             r.*,
             c.full_name,
@@ -2655,7 +2688,7 @@ def edit_customer(customer_id):
     c = conn.cursor()
     
     # Get customer data
-    customer = c.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers"))
@@ -2676,7 +2709,7 @@ def edit_customer(customer_id):
         id_photo = request.files.get("id_photo") if request.files else None
         customer_photo = request.files.get("customer_photo") if request.files else None
         
-        c.execute("""
+        execute_query(c,"""
             UPDATE customers 
             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
                 verification_status = ?
@@ -2690,7 +2723,7 @@ def edit_customer(customer_id):
         if id_photo and id_photo.filename:
             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'id_copy', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2698,7 +2731,7 @@ def edit_customer(customer_id):
         if customer_photo and customer_photo.filename:
             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'customer_photo', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2710,7 +2743,7 @@ def edit_customer(customer_id):
         return redirect(url_for("customers"))
     
     # Get customer documents
-    documents = c.execute("""
+    documents = execute_query(c,"""
         SELECT * FROM customer_documents 
         WHERE customer_id = ? 
         ORDER BY uploaded_at DESC
@@ -2743,7 +2776,7 @@ def edit_maintenance(record_id):
     c = conn.cursor()
     
     # Get maintenance record
-    record = c.execute("""
+    record = execute_query(c,"""
         SELECT m.*, b.bike_code, b.brand, b.model
         FROM maintenance_records m
         JOIN bicycles b ON b.id = m.bicycle_id
@@ -2755,7 +2788,7 @@ def edit_maintenance(record_id):
         return redirect(url_for("maintenance_dashboard"))
     
     # Get all bicycles for dropdown
-    bicycles = c.execute(
+    bicycles = execute_query(c,
         "SELECT id, bike_code, brand, model FROM bicycles ORDER BY bike_code"
     ).fetchall()
     
@@ -2776,7 +2809,7 @@ def edit_maintenance(record_id):
         
         try:
             # Update maintenance record
-            c.execute("""
+            execute_query(c,"""
                 UPDATE maintenance_records 
                 SET bicycle_id = ?, maintenance_type = ?, description = ?, cost = ?,
                     status = ?, scheduled_date = ?, completed_date = ?, 
@@ -2787,9 +2820,9 @@ def edit_maintenance(record_id):
             
             # Update bicycle status based on maintenance status
             if status == "Completed":
-                c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (bicycle_id,))
+                execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (bicycle_id,))
             elif status in ["Scheduled", "In Progress"]:
-                c.execute("UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
+                execute_query(c,"UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
             
             conn.commit()
             flash("Maintenance record updated successfully!", "success")
@@ -2819,7 +2852,7 @@ def delete_maintenance(record_id):
     conn = db()
     c = conn.cursor()
     
-    record = c.execute(
+    record = execute_query(c,
         "SELECT bicycle_id FROM maintenance_records WHERE id = ?", 
         (record_id,)
     ).fetchone()
@@ -2829,9 +2862,9 @@ def delete_maintenance(record_id):
         return redirect(url_for("maintenance_dashboard"))
     
     try:
-        c.execute("DELETE FROM maintenance_records WHERE id = ?", (record_id,))
+        execute_query(c,"DELETE FROM maintenance_records WHERE id = ?", (record_id,))
         # Update bicycle status back to Available
-        c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
+        execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
         conn.commit()
         flash("Maintenance record deleted successfully.", "success")
     except Exception as e:
@@ -2856,14 +2889,14 @@ def delete_customer(customer_id):
     c = conn.cursor()
     
     # Check if customer exists
-    customer = c.execute("SELECT full_name, user_id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer = execute_query(c,"SELECT full_name, user_id FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers"))
     
     try:
         # ✅ STEP 1: Check if customer has active rentals
-        active_rental = c.execute(
+        active_rental = execute_query(c,
             "SELECT id FROM daily_rentals WHERE customer_id = ? AND status = 'Active'", 
             (customer_id,)
         ).fetchone()
@@ -2873,58 +2906,58 @@ def delete_customer(customer_id):
             return redirect(url_for("customers"))
         
         # ✅ STEP 2: Get all rental IDs for this customer
-        rentals = c.execute("SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
+        rentals = execute_query(c,"SELECT id FROM daily_rentals WHERE customer_id = ?", (customer_id,)).fetchall()
         
         # ✅ STEP 3: Delete rental payments (child of rentals)
         for rental in rentals:
-            c.execute("DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental["id"],))
+            execute_query(c,"DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental["id"],))
         
         # ✅ STEP 4: Delete reminder logs (child of rentals)
         for rental in rentals:
-            c.execute("DELETE FROM reminder_logs WHERE rental_id = ?", (rental["id"],))
+            execute_query(c,"DELETE FROM reminder_logs WHERE rental_id = ?", (rental["id"],))
         
         # ✅ STEP 5: Delete bike conditions (child of rentals)
         for rental in rentals:
-            c.execute("DELETE FROM bike_conditions WHERE rental_id = ?", (rental["id"],))
+            execute_query(c,"DELETE FROM bike_conditions WHERE rental_id = ?", (rental["id"],))
         
         # ✅ STEP 6: Delete rentals
-        c.execute("DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM daily_rentals WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 7: Delete customer documents
-        c.execute("DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 8: Delete discount usage
-        c.execute("DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM discount_usage WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 9: Delete loyalty points
-        c.execute("DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM loyalty_points WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 10: Delete points transactions
-        c.execute("DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM points_transactions WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 11: Delete verification requests
-        c.execute("DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM verification_requests WHERE customer_id = ?", (customer_id,))
         
         # ✅ STEP 12: Delete the customer
-        c.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        execute_query(c,"DELETE FROM customers WHERE id = ?", (customer_id,))
         
         # ✅ STEP 13: Delete the associated user (if exists)
         if customer["user_id"]:
             # Check if user has any other customers linked (shouldn't, but just in case)
-            other_customers = c.execute(
+            other_customers = execute_query(c,
                 "SELECT id FROM customers WHERE user_id = ? AND id != ?", 
                 (customer["user_id"], customer_id)
             ).fetchone()
             
             if not other_customers:
                 # Delete user's other records
-                c.execute("DELETE FROM announcement_comments WHERE user_id = ?", (customer["user_id"],))
-                c.execute("DELETE FROM announcements WHERE author_id = ?", (customer["user_id"],))
-                c.execute("DELETE FROM verification_requests WHERE verified_by = ?", (customer["user_id"],))
-                c.execute("DELETE FROM bike_conditions WHERE checked_by = ?", (customer["user_id"],))
+                execute_query(c,"DELETE FROM announcement_comments WHERE user_id = ?", (customer["user_id"],))
+                execute_query(c,"DELETE FROM announcements WHERE author_id = ?", (customer["user_id"],))
+                execute_query(c,"DELETE FROM verification_requests WHERE verified_by = ?", (customer["user_id"],))
+                execute_query(c,"DELETE FROM bike_conditions WHERE checked_by = ?", (customer["user_id"],))
                 
                 # Delete the user
-                c.execute("DELETE FROM users WHERE id = ?", (customer["user_id"],))
+                execute_query(c,"DELETE FROM users WHERE id = ?", (customer["user_id"],))
         
         conn.commit()
         flash(f"Customer '{customer['full_name']}' deleted successfully.", "success")
@@ -2956,7 +2989,7 @@ def bicycle_health_dashboard():
     c = conn.cursor()
     
     # Get all bicycles with health data
-    bicycles = c.execute("""
+    bicycles = execute_query(c,"""
         SELECT 
             b.*,
             bh.health_score,
@@ -2974,7 +3007,7 @@ def bicycle_health_dashboard():
     """).fetchall()
     
     # Health summary
-    health_summary = c.execute("""
+    health_summary = execute_query(c,"""
         SELECT 
             COUNT(*) AS total_bicycles,
             SUM(CASE WHEN bh.health_score >= 80 THEN 1 ELSE 0 END) AS excellent,
@@ -3006,7 +3039,7 @@ def bicycle_health_detail(bicycle_id):
     c = conn.cursor()
     
     # Get bicycle with health data
-    bicycle = c.execute("""
+    bicycle = execute_query(c,"""
         SELECT 
             b.*,
             bh.health_score,
@@ -3028,7 +3061,7 @@ def bicycle_health_detail(bicycle_id):
         return redirect(url_for("bicycle_health_dashboard"))
     
     # Get health history
-    health_history = c.execute("""
+    health_history = execute_query(c,"""
         SELECT * FROM bicycle_health_history
         WHERE bicycle_id = ?
         ORDER BY recorded_at DESC
@@ -3036,7 +3069,7 @@ def bicycle_health_detail(bicycle_id):
     """, (bicycle_id,)).fetchall()
     
     # Get maintenance records
-    maintenance = c.execute("""
+    maintenance = execute_query(c,"""
         SELECT * FROM maintenance_records
         WHERE bicycle_id = ?
         ORDER BY created_at DESC
@@ -3044,7 +3077,7 @@ def bicycle_health_detail(bicycle_id):
     """, (bicycle_id,)).fetchall()
     
     # Get rental history
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT 
             r.*,
             c.full_name
@@ -3075,13 +3108,13 @@ def update_bicycle_health(bicycle_id):
     conn = db()
     c = conn.cursor()
     
-    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
     if not bicycle:
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycle_health_dashboard"))
     
     # Get current health
-    health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
     
     if request.method == "POST":
         health_score = int(request.form.get("health_score", 100))
@@ -3096,20 +3129,20 @@ def update_bicycle_health(bicycle_id):
         try:
             if health:
                 # Update existing health record
-                c.execute("""
+                execute_query(c,"""
                     UPDATE bicycle_health 
                     SET health_score = ?, condition_rating = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE bicycle_id = ?
                 """, (health_score, condition_rating, notes, bicycle_id))
             else:
                 # Create new health record
-                c.execute("""
+                execute_query(c,"""
                     INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, notes)
                     VALUES (?, ?, ?, ?)
                 """, (bicycle_id, health_score, condition_rating, notes))
             
             # Record health history
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
                 VALUES (?, ?, ?, ?)
             """, (bicycle_id, health_score, condition_rating, notes or "Manual update"))
@@ -3145,13 +3178,13 @@ def calculate_bicycle_health(bicycle_id):
     c = conn.cursor()
     
     # Get bicycle data
-    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
     if not bicycle:
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycle_health_dashboard"))
     
     # Get maintenance data
-    maintenance = c.execute("""
+    maintenance = execute_query(c,"""
         SELECT 
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
@@ -3162,7 +3195,7 @@ def calculate_bicycle_health(bicycle_id):
     """, (bicycle_id,)).fetchone()
     
     # Get rental data
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT 
             COUNT(*) AS total,
             COALESCE(SUM(total_hours), 0) AS total_hours,
@@ -3214,25 +3247,25 @@ def calculate_bicycle_health(bicycle_id):
         condition_rating = "Critical"
     
     # Update health record
-    health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
     
     try:
         if health:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE bicycle_health 
                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
                     total_maintenance_count = ?, total_repair_cost = ?
                 WHERE bicycle_id = ?
             """, (health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0, bicycle_id))
         else:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
                     total_maintenance_count, total_repair_cost)
                 VALUES (?, ?, ?, ?, ?)
             """, (bicycle_id, health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0))
         
         # Record health history
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
             VALUES (?, ?, ?, ?)
         """, (bicycle_id, health_score, condition_rating, "Auto-calculated based on usage and maintenance"))
@@ -3259,7 +3292,7 @@ def calculate_all_bicycle_health():
     conn = db()
     c = conn.cursor()
     
-    bicycles = c.execute("SELECT id FROM bicycles").fetchall()
+    bicycles = execute_query(c,"SELECT id FROM bicycles").fetchall()
     
     count = 0
     
@@ -3267,7 +3300,7 @@ def calculate_all_bicycle_health():
         bike_id = bicycle["id"]
         
         # Maintenance data
-        maintenance = c.execute("""
+        maintenance = execute_query(c,"""
             SELECT 
                 COUNT(*) AS total,
                 SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
@@ -3278,7 +3311,7 @@ def calculate_all_bicycle_health():
         """, (bike_id,)).fetchone()
         
         # Rental data
-        rentals = c.execute("""
+        rentals = execute_query(c,"""
             SELECT 
                 COUNT(*) AS total,
                 COALESCE(SUM(total_hours), 0) AS total_hours,
@@ -3335,23 +3368,23 @@ def calculate_all_bicycle_health():
             condition_rating = "Critical"
         
         # Update or insert
-        health = c.execute("SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
+        health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
         if health:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE bicycle_health 
                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
                     total_maintenance_count = ?, total_repair_cost = ?
                 WHERE bicycle_id = ?
             """, (health_score, condition_rating, completed_maintenance, total_cost, bike_id))
         else:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
                     total_maintenance_count, total_repair_cost)
                 VALUES (?, ?, ?, ?, ?)
             """, (bike_id, health_score, condition_rating, completed_maintenance, total_cost))
         
         # Record history
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
             VALUES (?, ?, ?, ?)
         """, (bike_id, health_score, condition_rating, "Auto-calculated - batch update"))
@@ -3381,7 +3414,7 @@ def delete_bicycle(bicycle_id):
     c = conn.cursor()
     
     # Check if bicycle exists
-    bike = c.execute("SELECT bike_code, status FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    bike = execute_query(c,"SELECT bike_code, status FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
     if not bike:
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycles"))
@@ -3392,7 +3425,7 @@ def delete_bicycle(bicycle_id):
         return redirect(url_for("bicycles"))
     
     # Check if bicycle has maintenance records
-    maintenance = c.execute(
+    maintenance = execute_query(c,
         "SELECT id FROM maintenance_records WHERE bicycle_id = ? AND status != 'Completed'",
         (bicycle_id,)
     ).fetchone()
@@ -3403,7 +3436,7 @@ def delete_bicycle(bicycle_id):
     
     try:
         # Delete bicycle
-        c.execute("DELETE FROM bicycles WHERE id = ?", (bicycle_id,))
+        execute_query(c,"DELETE FROM bicycles WHERE id = ?", (bicycle_id,))
         conn.commit()
         flash(f"Bicycle '{bike['bike_code']}' deleted successfully.", "success")
     except Exception as e:
@@ -3430,7 +3463,7 @@ def announcements():
     user_role = session.get("role", "staff")
     
     # Get all active announcements with read status
-    announcements = c.execute("""
+    announcements = execute_query(c,"""
         SELECT 
             a.*,
             CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
@@ -3441,7 +3474,7 @@ def announcements():
     """, (user_id,)).fetchall()
     
     # Get unread count
-    unread_count = c.execute("""
+    unread_count = execute_query(c,"""
         SELECT COUNT(*) FROM announcements a
         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
         WHERE a.is_active = 1 AND ar.id IS NULL
@@ -3476,7 +3509,7 @@ def create_announcement():
         conn = db()
         c = conn.cursor()
         
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO announcements 
             (title, content, author_id, author_name, author_role, priority, category, is_pinned)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -3507,7 +3540,7 @@ def view_announcement(announcement_id):
     user_id = session["user_id"]
     
     # Get announcement
-    announcement = c.execute("""
+    announcement = execute_query(c,"""
         SELECT * FROM announcements WHERE id = ? AND is_active = 1
     """, (announcement_id,)).fetchone()
     
@@ -3516,13 +3549,13 @@ def view_announcement(announcement_id):
         return redirect(url_for("announcements"))
     
     # Mark as read
-    c.execute("""
+    execute_query(c,"""
         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
         VALUES (?, ?)
     """, (announcement_id, user_id))
     
     # Get comments
-    comments = c.execute("""
+    comments = execute_query(c,"""
         SELECT * FROM announcement_comments 
         WHERE announcement_id = ? 
         ORDER BY created_at ASC
@@ -3552,7 +3585,7 @@ def add_announcement_comment(announcement_id):
     conn = db()
     c = conn.cursor()
     
-    c.execute("""
+    execute_query(c,"""
         INSERT INTO announcement_comments 
         (announcement_id, user_id, user_name, user_role, comment)
         VALUES (?, ?, ?, ?, ?)
@@ -3580,7 +3613,7 @@ def delete_announcement(announcement_id):
     c = conn.cursor()
     
     # Soft delete - just mark as inactive
-    c.execute("UPDATE announcements SET is_active = 0 WHERE id = ?", (announcement_id,))
+    execute_query(c,"UPDATE announcements SET is_active = 0 WHERE id = ?", (announcement_id,))
     conn.commit()
     conn.close()
     
@@ -3596,10 +3629,10 @@ def toggle_pin_announcement(announcement_id):
     conn = db()
     c = conn.cursor()
     
-    announcement = c.execute("SELECT is_pinned FROM announcements WHERE id = ?", (announcement_id,)).fetchone()
+    announcement = execute_query(c,"SELECT is_pinned FROM announcements WHERE id = ?", (announcement_id,)).fetchone()
     if announcement:
         new_status = 0 if announcement["is_pinned"] == 1 else 1
-        c.execute("UPDATE announcements SET is_pinned = ? WHERE id = ?", (new_status, announcement_id))
+        execute_query(c,"UPDATE announcements SET is_pinned = ? WHERE id = ?", (new_status, announcement_id))
         conn.commit()
         flash("Announcement pin status updated.", "success")
     else:
@@ -3616,7 +3649,7 @@ def mark_all_read():
     conn = db()
     c = conn.cursor()
     
-    c.execute("""
+    execute_query(c,"""
         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
         SELECT id, ? FROM announcements WHERE is_active = 1
     """, (session["user_id"],))
@@ -3649,37 +3682,37 @@ def analytics_dashboard():
     # =============================================
     
     # Total Revenue
-    total_revenue = c.execute("""
+    total_revenue = execute_query(c,"""
         SELECT COALESCE(SUM(amount), 0) FROM rental_payments
     """).fetchone()[0]
     
     # Total Rentals
-    total_rentals = c.execute("""
+    total_rentals = execute_query(c,"""
         SELECT COUNT(*) FROM daily_rentals
     """).fetchone()[0]
     
     # Active Rentals
-    active_rentals = c.execute("""
+    active_rentals = execute_query(c,"""
         SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'
     """).fetchone()[0]
     
     # Total Customers
-    total_customers = c.execute("""
+    total_customers = execute_query(c,"""
         SELECT COUNT(*) FROM customers
     """).fetchone()[0]
     
     # Verified Customers
-    verified_customers = c.execute("""
+    verified_customers = execute_query(c,"""
         SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'
     """).fetchone()[0]
     
     # Total Bicycles
-    total_bicycles = c.execute("""
+    total_bicycles = execute_query(c,"""
         SELECT COUNT(*) FROM bicycles
     """).fetchone()[0]
     
     # Available Bicycles
-    available_bicycles = c.execute("""
+    available_bicycles = execute_query(c,"""
         SELECT COUNT(*) FROM bicycles WHERE status = 'Available'
     """).fetchone()[0]
     
@@ -3688,7 +3721,7 @@ def analytics_dashboard():
     # =============================================
     
     # Daily Revenue (Last 30 days)
-    daily_revenue = c.execute("""
+    daily_revenue = execute_query(c,"""
         SELECT 
             date(payment_date) AS date,
             COALESCE(SUM(amount), 0) AS revenue,
@@ -3700,7 +3733,7 @@ def analytics_dashboard():
     """).fetchall()
     
     # Weekly Revenue (Last 12 weeks)
-    weekly_revenue = c.execute("""
+    weekly_revenue = execute_query(c,"""
         SELECT 
             strftime('%W', payment_date) AS week,
             strftime('%Y', payment_date) AS year,
@@ -3713,7 +3746,7 @@ def analytics_dashboard():
     """).fetchall()
     
     # Monthly Revenue (Last 12 months)
-    monthly_revenue = c.execute("""
+    monthly_revenue = execute_query(c,"""
         SELECT 
             strftime('%Y-%m', payment_date) AS month,
             COALESCE(SUM(amount), 0) AS revenue,
@@ -3729,7 +3762,7 @@ def analytics_dashboard():
     # =============================================
     
     # Most Rented Bicycles
-    top_bicycles = c.execute("""
+    top_bicycles = execute_query(c,"""
         SELECT 
             b.bike_code,
             b.brand,
@@ -3746,7 +3779,7 @@ def analytics_dashboard():
     """).fetchall()
     
     # Bike Type Performance
-    bike_type_stats = c.execute("""
+    bike_type_stats = execute_query(c,"""
         SELECT 
             b.bike_type,
             COUNT(b.id) AS bike_count,
@@ -3764,7 +3797,7 @@ def analytics_dashboard():
     # =============================================
     
     # Top Customers
-    top_customers = c.execute("""
+    top_customers = execute_query(c,"""
         SELECT 
             c.id,
             c.full_name,
@@ -3781,7 +3814,7 @@ def analytics_dashboard():
     """).fetchall()
     
     # New Customers Over Time (Last 30 days)
-    new_customers = c.execute("""
+    new_customers = execute_query(c,"""
         SELECT 
             date(created_at) AS date,
             COUNT(*) AS count
@@ -3796,7 +3829,7 @@ def analytics_dashboard():
     # =============================================
     
     # Payment Method Breakdown
-    payment_methods = c.execute("""
+    payment_methods = execute_query(c,"""
         SELECT 
             payment_method,
             COUNT(*) AS count,
@@ -3807,7 +3840,7 @@ def analytics_dashboard():
     """).fetchall()
     
     # Average Rental Duration
-    avg_duration = c.execute("""
+    avg_duration = execute_query(c,"""
         SELECT 
             COALESCE(AVG(total_hours), 0) AS avg_hours,
             MIN(total_hours) AS min_hours,
@@ -3817,7 +3850,7 @@ def analytics_dashboard():
     """).fetchone()
     
     # Revenue by Day of Week
-    revenue_by_day = c.execute("""
+    revenue_by_day = execute_query(c,"""
         SELECT 
             CASE strftime('%w', payment_date)
                 WHEN '0' THEN 'Sunday'
@@ -3839,7 +3872,7 @@ def analytics_dashboard():
     # MAINTENANCE ANALYTICS
     # =============================================
     
-    maintenance_stats = c.execute("""
+    maintenance_stats = execute_query(c,"""
         SELECT 
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
@@ -3854,7 +3887,7 @@ def analytics_dashboard():
     # DISCOUNT ANALYTICS
     # =============================================
     
-    discount_stats = c.execute("""
+    discount_stats = execute_query(c,"""
         SELECT 
             COUNT(*) AS total_used,
             COALESCE(SUM(amount_discounted), 0) AS total_savings
@@ -3915,7 +3948,7 @@ def edit_bicycle(bicycle_id):
     conn = db()
     c = conn.cursor()
     
-    bicycle = c.execute("SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
     if not bicycle:
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycles"))
@@ -3935,7 +3968,7 @@ def edit_bicycle(bicycle_id):
             return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
         
         try:
-            c.execute("""
+            execute_query(c,"""
                 UPDATE bicycles 
                 SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
                     hourly_rate = ?, daily_cap = ?, deposit_amount = ?, notes = ?
@@ -3976,7 +4009,7 @@ def bicycles():
             return redirect(url_for("bicycles"))
         
         try:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO bicycles 
                 (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -3988,10 +4021,10 @@ def bicycles():
         
         return redirect(url_for("bicycles"))
     
-    #bicycles = c.execute("SELECT * FROM bicycles ORDER BY bike_code").fetchall()
+    #bicycles = execute_query(c,"SELECT * FROM bicycles ORDER BY bike_code").fetchall()
 
     # Get bicycles with health data
-    bicycles = c.execute("""
+    bicycles = execute_query(c,"""
         SELECT 
             b.*,
             bh.health_score,
@@ -4016,7 +4049,7 @@ def bicycle_utilization():
     # BICYCLE UTILIZATION SUMMARY
     # =============================================
     
-    bikes = c.execute("""
+    bikes = execute_query(c,"""
         SELECT 
             b.id,
             b.bike_code,
@@ -4063,7 +4096,7 @@ def bicycle_utilization():
     avg_revenue_per_bike = total_revenue / total_bikes if total_bikes > 0 else 0
     
     # Bike type breakdown
-    bike_types = c.execute("""
+    bike_types = execute_query(c,"""
         SELECT 
             bike_type,
             COUNT(*) AS count,
@@ -4169,7 +4202,7 @@ def send_reminder(rental_id):
     conn = db()
     c = conn.cursor()
     
-    rental = c.execute("""
+    rental = execute_query(c,"""
         SELECT 
             r.*,
             c.full_name,
@@ -4247,7 +4280,7 @@ def send_reminder(rental_id):
         send_sms_notification(rental["phone"], sms_message)
     
     # Log the reminder
-    c.execute("""
+    execute_query(c,"""
         INSERT INTO reminder_logs (rental_id, reminder_type, sent_to, sent_at)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     """, (rental_id, reminder_type, rental["phone"] or rental["email"]))
@@ -4277,7 +4310,7 @@ def check_reminders():
     c = conn.cursor()
     
     # Get active rentals
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT id FROM daily_rentals 
         WHERE status = 'Active'
         AND end_time IS NOT NULL
@@ -4301,7 +4334,7 @@ def reminder_logs():
     conn = db()
     c = conn.cursor()
     
-    logs = c.execute("""
+    logs = execute_query(c,"""
         SELECT 
             rl.*,
             c.full_name,
@@ -4335,7 +4368,7 @@ def discounts():
     conn = db()
     c = conn.cursor()
     
-    discounts = c.execute("""
+    discounts = execute_query(c,"""
         SELECT * FROM discount_codes 
         ORDER BY created_at DESC
     """).fetchall()
@@ -4367,7 +4400,7 @@ def add_discount():
         c = conn.cursor()
         
         try:
-            c.execute("""
+            execute_query(c,"""
                 INSERT INTO discount_codes 
                 (code, description, discount_type, discount_value, min_rental_amount, max_uses, start_date, end_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -4392,10 +4425,10 @@ def toggle_discount(discount_id):
     conn = db()
     c = conn.cursor()
     
-    discount = c.execute("SELECT is_active FROM discount_codes WHERE id = ?", (discount_id,)).fetchone()
+    discount = execute_query(c,"SELECT is_active FROM discount_codes WHERE id = ?", (discount_id,)).fetchone()
     if discount:
         new_status = 0 if discount["is_active"] == 1 else 1
-        c.execute("UPDATE discount_codes SET is_active = ? WHERE id = ?", (new_status, discount_id))
+        execute_query(c,"UPDATE discount_codes SET is_active = ? WHERE id = ?", (new_status, discount_id))
         conn.commit()
         flash("Discount code status updated.", "success")
     else:
@@ -4412,7 +4445,7 @@ def delete_discount(discount_id):
     """Delete a discount code."""
     conn = db()
     c = conn.cursor()
-    c.execute("DELETE FROM discount_codes WHERE id = ?", (discount_id,))
+    execute_query(c,"DELETE FROM discount_codes WHERE id = ?", (discount_id,))
     conn.commit()
     conn.close()
     
@@ -4430,7 +4463,7 @@ def validate_discount():
     conn = db()
     c = conn.cursor()
     
-    discount = c.execute("""
+    discount = execute_query(c,"""
         SELECT * FROM discount_codes 
         WHERE code = ? AND is_active = 1
         AND (start_date IS NULL OR date(start_date) <= date('now'))
@@ -4479,7 +4512,7 @@ def loyalty_dashboard():
     c = conn.cursor()
     
     # Get all customers with loyalty points
-    customers = c.execute("""
+    customers = execute_query(c,"""
         SELECT 
             c.id,
             c.full_name,
@@ -4495,9 +4528,9 @@ def loyalty_dashboard():
     """).fetchall()
     
     # Summary stats
-    total_points = c.execute("SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
-    total_customers_with_points = c.execute("SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
-    total_redeemed = c.execute("""
+    total_points = execute_query(c,"SELECT COALESCE(SUM(points), 0) FROM loyalty_points").fetchone()[0]
+    total_customers_with_points = execute_query(c,"SELECT COUNT(*) FROM loyalty_points WHERE points > 0").fetchone()[0]
+    total_redeemed = execute_query(c,"""
         SELECT COALESCE(SUM(-points), 0) FROM points_transactions WHERE transaction_type = 'redeemed'
     """).fetchone()[0]
     
@@ -4520,7 +4553,7 @@ def customer_loyalty(customer_id):
     conn = db()
     c = conn.cursor()
     
-    customer = c.execute("""
+    customer = execute_query(c,"""
         SELECT c.*, lp.*
         FROM customers c
         LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
@@ -4531,7 +4564,7 @@ def customer_loyalty(customer_id):
         flash("Customer not found.", "danger")
         return redirect(url_for("loyalty_dashboard"))
     
-    transactions = c.execute("""
+    transactions = execute_query(c,"""
         SELECT * FROM points_transactions 
         WHERE customer_id = ? 
         ORDER BY created_at DESC
@@ -4560,7 +4593,7 @@ def add_loyalty_points(customer_id, rental_id, amount):
         return
     
     # Check if loyalty record exists
-    lp = c.execute("SELECT id, points, total_spent, total_rentals FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
+    lp = execute_query(c,"SELECT id, points, total_spent, total_rentals FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
     
     if lp:
         new_points = lp["points"] + points_earned
@@ -4576,20 +4609,20 @@ def add_loyalty_points(customer_id, rental_id, amount):
         elif new_total_spent >= 1000:
             tier = "Silver"
         
-        c.execute("""
+        execute_query(c,"""
             UPDATE loyalty_points 
             SET points = ?, total_spent = ?, total_rentals = ?, tier = ?, updated_at = CURRENT_TIMESTAMP
             WHERE customer_id = ?
         """, (new_points, new_total_spent, new_total_rentals, tier, customer_id))
     else:
         tier = "Bronze"
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO loyalty_points (customer_id, points, total_spent, total_rentals, tier)
             VALUES (?, ?, ?, ?, ?)
         """, (customer_id, points_earned, amount, 1, tier))
     
     # Record transaction
-    c.execute("""
+    execute_query(c,"""
         INSERT INTO points_transactions (customer_id, points, transaction_type, description, rental_id)
         VALUES (?, ?, 'earned', ?, ?)
     """, (customer_id, points_earned, f"Earned {points_earned} points from rental #{rental_id}", rental_id))
@@ -4610,7 +4643,7 @@ def redeem_points():
     c = conn.cursor()
     
     # Check available points
-    lp = c.execute("SELECT points FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
+    lp = execute_query(c,"SELECT points FROM loyalty_points WHERE customer_id = ?", (customer_id,)).fetchone()
     
     if not lp or lp["points"] < points_to_redeem:
         flash("Insufficient points.", "danger")
@@ -4620,10 +4653,10 @@ def redeem_points():
     discount_amount = points_to_redeem * 0.50
     
     # Deduct points
-    c.execute("UPDATE loyalty_points SET points = points - ? WHERE customer_id = ?", (points_to_redeem, customer_id))
+    execute_query(c,"UPDATE loyalty_points SET points = points - ? WHERE customer_id = ?", (points_to_redeem, customer_id))
     
     # Record transaction
-    c.execute("""
+    execute_query(c,"""
         INSERT INTO points_transactions (customer_id, points, transaction_type, description, rental_id)
         VALUES (?, ?, 'redeemed', ?, ?)
     """, (customer_id, -points_to_redeem, f"Redeemed {points_to_redeem} points for N${discount_amount:.2f} discount", rental_id))
@@ -4647,7 +4680,7 @@ def maintenance_dashboard():
     conn = db()
     c = conn.cursor()
     
-    records = c.execute("""
+    records = execute_query(c,"""
         SELECT m.*, b.bike_code, b.brand, b.model
         FROM maintenance_records m
         JOIN bicycles b ON b.id = m.bicycle_id
@@ -4656,9 +4689,9 @@ def maintenance_dashboard():
     """).fetchall()
     
     # Summary
-    scheduled = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
-    in_progress = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
-    completed = c.execute("SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
+    scheduled = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Scheduled'").fetchone()[0]
+    in_progress = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'In Progress'").fetchone()[0]
+    completed = execute_query(c,"SELECT COUNT(*) FROM maintenance_records WHERE status = 'Completed'").fetchone()[0]
     
     conn.close()
     
@@ -4680,7 +4713,7 @@ def add_maintenance():
     conn = db()
     c = conn.cursor()
     
-    bicycles = c.execute("SELECT id, bike_code, brand, model FROM bicycles ORDER BY bike_code").fetchall()
+    bicycles = execute_query(c,"SELECT id, bike_code, brand, model FROM bicycles ORDER BY bike_code").fetchall()
     conn.close()
     
     if request.method == "POST":
@@ -4695,14 +4728,14 @@ def add_maintenance():
         conn = db()
         c = conn.cursor()
         
-        c.execute("""
+        execute_query(c,"""
             INSERT INTO maintenance_records 
             (bicycle_id, maintenance_type, description, cost, scheduled_date, performed_by, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (bicycle_id, maintenance_type, description, cost, scheduled_date, performed_by, notes))
         
         # Update bicycle status
-        c.execute("UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
+        execute_query(c,"UPDATE bicycles SET status = 'Maintenance' WHERE id = ?", (bicycle_id,))
         
         conn.commit()
         conn.close()
@@ -4724,7 +4757,7 @@ def update_maintenance(record_id):
     conn = db()
     c = conn.cursor()
     
-    c.execute("""
+    execute_query(c,"""
         UPDATE maintenance_records 
         SET status = ?, completed_date = ?
         WHERE id = ?
@@ -4732,9 +4765,9 @@ def update_maintenance(record_id):
     
     # If completed, update bicycle status back to Available
     if status == "Completed":
-        record = c.execute("SELECT bicycle_id FROM maintenance_records WHERE id = ?", (record_id,)).fetchone()
+        record = execute_query(c,"SELECT bicycle_id FROM maintenance_records WHERE id = ?", (record_id,)).fetchone()
         if record:
-            c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
+            execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (record["bicycle_id"],))
     
     conn.commit()
     conn.close()
@@ -4766,7 +4799,7 @@ def export_rentals_csv():
     conn = db()
     c = conn.cursor()
     
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT 
             r.id,
             c.full_name AS customer,
@@ -4829,7 +4862,7 @@ def export_revenue_csv():
     c = conn.cursor()
     
     if period == "daily":
-        revenue = c.execute("""
+        revenue = execute_query(c,"""
             SELECT 
                 date(payment_date) AS period_label,
                 COUNT(*) AS transactions,
@@ -4841,7 +4874,7 @@ def export_revenue_csv():
         period_label = "Daily"
         
     elif period == "weekly":
-        revenue = c.execute("""
+        revenue = execute_query(c,"""
             SELECT 
                 strftime('%W', payment_date) AS period_label,
                 strftime('%Y', payment_date) AS year,
@@ -4855,7 +4888,7 @@ def export_revenue_csv():
         period_label = "Weekly"
         
     else:  # monthly
-        revenue = c.execute("""
+        revenue = execute_query(c,"""
             SELECT 
                 strftime('%Y-%m', payment_date) AS period_label,
                 COUNT(*) AS transactions,
@@ -4926,7 +4959,7 @@ def generate_receipt(payment_id):
     c = conn.cursor()
     
     # Get payment details with customer and rental info
-    payment = c.execute("""
+    payment = execute_query(c,"""
         SELECT 
             p.*,
             r.id AS rental_id,
@@ -5096,7 +5129,7 @@ def export_bicycles_csv():
     conn = db()
     c = conn.cursor()
     
-    bicycles = c.execute("""
+    bicycles = execute_query(c,"""
         SELECT 
             b.bike_code,
             b.brand,
@@ -5149,7 +5182,7 @@ def export_customers_csv():
     conn = db()
     c = conn.cursor()
     
-    customers = c.execute("""
+    customers = execute_query(c,"""
         SELECT 
             c.full_name,
             c.phone,
@@ -5200,7 +5233,7 @@ def export_maintenance_csv():
     conn = db()
     c = conn.cursor()
     
-    records = c.execute("""
+    records = execute_query(c,"""
         SELECT 
             b.bike_code,
             m.maintenance_type,
@@ -5254,7 +5287,7 @@ def customer_portal():
     c = conn.cursor()
     
     # Get customer data
-    customer = c.execute(
+    customer = execute_query(c,
         "SELECT * FROM customers WHERE user_id = ?", 
         (session["user_id"],)
     ).fetchone()
@@ -5264,7 +5297,7 @@ def customer_portal():
         return redirect(url_for("profile"))
     
     # Get rental history
-    rentals = c.execute("""
+    rentals = execute_query(c,"""
         SELECT r.*, b.bike_code, b.brand, b.model
         FROM daily_rentals r
         JOIN bicycles b ON b.id = r.bicycle_id
@@ -5274,7 +5307,7 @@ def customer_portal():
     """, (customer["id"],)).fetchall()
     
     # Get loyalty points
-    points = c.execute(
+    points = execute_query(c,
         "SELECT * FROM loyalty_points WHERE customer_id = ?", 
         (customer["id"],)
     ).fetchone()
@@ -5334,7 +5367,7 @@ def end_rental(rental_id):
     conn = db()
     c = conn.cursor()
     
-    rental = c.execute("""
+    rental = execute_query(c,"""
         SELECT r.*, b.bike_code, c.full_name
         FROM daily_rentals r
         JOIN bicycles b ON b.id = r.bicycle_id
@@ -5370,7 +5403,7 @@ def end_rental(rental_id):
         condition_before = request.form.get("condition_before", "Good")
         condition_after = request.form.get("condition_after", "Good")
         
-        c.execute("""
+        execute_query(c,"""
             UPDATE daily_rentals 
             SET end_time = ?,
                 total_hours = ?,
@@ -5383,7 +5416,7 @@ def end_rental(rental_id):
         """, (end_time.isoformat(), total_hours, total_cost, late_fee, 
               condition_before, condition_after, rental_id))
         
-        c.execute("UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
         
         conn.commit()
         conn.close()
@@ -5439,7 +5472,7 @@ with app.app_context():
         # Check if tables exist
         conn = db()
         c = conn.cursor()
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        execute_query(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         table_exists = c.fetchone()
         conn.close()
         
