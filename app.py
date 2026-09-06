@@ -2586,20 +2586,102 @@ def rental_agreement_pdf(rental_id):
 
 
 
+# @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+# @login_required
+# def edit_customer(customer_id):
+#     """Edit customer details."""
+#     # ✅ Check if user has permission (admin or manager)
+#     if session.get("role") not in ['admin', 'manager']:
+#         flash("You don't have permission to access this page.", "danger")
+#         return redirect(url_for("customers"))
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get customer data
+#     customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+#     if not customer:
+#         flash("Customer not found.", "danger")
+#         return redirect(url_for("customers"))
+    
+#     if request.method == "POST":
+#         full_name = request.form.get("full_name", "").strip()
+#         id_number = request.form.get("id_number", "").strip()
+#         phone = request.form.get("phone", "").strip()
+#         email = request.form.get("email", "").strip()
+#         address = request.form.get("address", "").strip()
+#         verification_status = request.form.get("verification_status", "Pending")
+        
+#         if not full_name or not phone:
+#             flash("Name and phone are required.", "danger")
+#             return redirect(url_for("edit_customer", customer_id=customer_id))
+        
+#         # Handle file uploads
+#         id_photo = request.files.get("id_photo") if request.files else None
+#         customer_photo = request.files.get("customer_photo") if request.files else None
+        
+#         execute_query(c,"""
+#             UPDATE customers 
+#             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
+#                 verification_status = ?
+#             WHERE id = ?
+#         """, (full_name, id_number, phone, email, address, verification_status, customer_id))
+        
+#         # Handle document uploads
+#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
+#         if id_photo and id_photo.filename:
+#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c,"""
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'id_copy', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         if customer_photo and customer_photo.filename:
+#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c,"""
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'customer_photo', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         flash(f"Customer '{full_name}' updated successfully!", "success")
+#         return redirect(url_for("customers"))
+    
+#     # Get customer documents
+#     documents = execute_query(c,"""
+#         SELECT * FROM customer_documents 
+#         WHERE customer_id = ? 
+#         ORDER BY uploaded_at DESC
+#     """, (customer_id,)).fetchall()
+    
+#     conn.close()
+    
+#     return render_template(
+#         "edit_customer.html",
+#         title="Edit Customer",
+#         customer=customer,
+#         documents=documents
+#     )
+
+
 @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
 @login_required
+@manager_required
 def edit_customer(customer_id):
     """Edit customer details."""
-    # ✅ Check if user has permission (admin or manager)
-    if session.get("role") not in ['admin', 'manager']:
-        flash("You don't have permission to access this page.", "danger")
-        return redirect(url_for("customers"))
+    from datetime import datetime  # ✅ Add this import
     
     conn = db()
     c = conn.cursor()
     
     # Get customer data
-    customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    customer = execute_query(c, "SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         flash("Customer not found.", "danger")
         return redirect(url_for("customers"))
@@ -2620,7 +2702,7 @@ def edit_customer(customer_id):
         id_photo = request.files.get("id_photo") if request.files else None
         customer_photo = request.files.get("customer_photo") if request.files else None
         
-        execute_query(c,"""
+        execute_query(c, """
             UPDATE customers 
             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
                 verification_status = ?
@@ -2628,13 +2710,16 @@ def edit_customer(customer_id):
         """, (full_name, id_number, phone, email, address, verification_status, customer_id))
         
         # Handle document uploads
+        import os
+        from werkzeug.utils import secure_filename
+        
         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         
         if id_photo and id_photo.filename:
             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'id_copy', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2642,7 +2727,7 @@ def edit_customer(customer_id):
         if customer_photo and customer_photo.filename:
             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'customer_photo', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -2654,11 +2739,19 @@ def edit_customer(customer_id):
         return redirect(url_for("customers"))
     
     # Get customer documents
-    documents = execute_query(c,"""
+    documents = execute_query(c, """
         SELECT * FROM customer_documents 
         WHERE customer_id = ? 
         ORDER BY uploaded_at DESC
     """, (customer_id,)).fetchall()
+    
+    # ✅ FIX: Format uploaded_at datetime
+    for doc in documents:
+        if doc.get("uploaded_at"):
+            if isinstance(doc["uploaded_at"], datetime):
+                doc["uploaded_at"] = doc["uploaded_at"].strftime("%Y-%m-%d %H:%M")
+            elif isinstance(doc["uploaded_at"], str):
+                doc["uploaded_at"] = doc["uploaded_at"]
     
     conn.close()
     
