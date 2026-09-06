@@ -3488,7 +3488,43 @@ def view_announcement(announcement_id):
     )
 
 
-
+@app.route("/announcements/create", methods=["GET", "POST"])
+@login_required
+def create_announcement():
+    """Create a new announcement."""
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        content = request.form.get("content", "").strip()
+        priority = request.form.get("priority", "normal")
+        category = request.form.get("category", "general")
+        is_pinned = 1 if request.form.get("is_pinned") else 0
+        
+        if not title or not content:
+            flash("Title and content are required.", "danger")
+            return redirect(url_for("create_announcement"))
+        
+        conn = db()
+        c = conn.cursor()
+        
+        execute_query(c, """
+            INSERT INTO announcements 
+            (title, content, author_id, author_name, author_role, priority, category, is_pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            title, content, 
+            session["user_id"], 
+            session.get("full_name", session["username"]),
+            session.get("role", "staff"),
+            priority, category, is_pinned
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        flash("Announcement created successfully!", "success")
+        return redirect(url_for("announcements"))
+    
+    return render_template("create_announcement.html", title="Create Announcement")
 
 
 @app.route("/announcements/<int:announcement_id>/comment", methods=["POST"])
