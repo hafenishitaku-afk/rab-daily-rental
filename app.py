@@ -4316,18 +4316,6 @@ def debug_twilio():
     }
 
 
-@app.route("/debug-twilio")
-@login_required
-def debug_twilio():
-    """Debug Twilio configuration."""
-    return {
-        "sms_enabled": SMS_ENABLED,
-        "account_sid": TWILIO_ACCOUNT_SID[:5] + "..." if TWILIO_ACCOUNT_SID else "Not set",
-        "auth_token_set": bool(TWILIO_AUTH_TOKEN),
-        "phone_number": TWILIO_PHONE_NUMBER or "Not set",
-        "twilio_configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER)
-    }
-
 
 
 
