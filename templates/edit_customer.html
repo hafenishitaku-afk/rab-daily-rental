@@ -68,7 +68,9 @@
             <div style="font-weight:bold;">{{ doc.document_type.replace('_', ' ').title() }}</div>
             <div style="color:#667085;font-size:12px;">{{ doc.uploaded_at }}</div>
             <br>
-            <a href="{{ url_for('static', filename=doc.file_path) }}" target="_blank" class="btn small">View Document</a>
+            <!-- <a href="{{ url_for('static', filename=doc.file_path) }}" target="_blank" class="btn small">View Document</a> -->
+            <!-- After - Option B: Use url_for with correct path -->
+<a href="{{ url_for('static', filename='uploads/' + doc.file_path.split('/')[-1]) }}" target="_blank" class="btn small">View Document</a>
         </div>
         {% endfor %}
     </div>
