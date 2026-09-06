@@ -87,8 +87,8 @@
                         <br>
                         <small>{{ rental.brand or '' }} {{ rental.model or '' }}</small>
                     </td>
-                    <td>{{ rental.start_time[:16] }}</td>
-                    <td>{{ rental.end_time[:16] if rental.end_time else '—' }}</td>
+                    <td>{{ start_time_str }}</td>
+                    <td>{{ rental.end_time if rental.end_time else '—' }}</td>
                     <td>{{ "%.1f"|format(rental.total_hours or 0) }}</td>
                     <td><b>N$ {{ "%.2f"|format(rental.total_cost or 0) }}</b></td>
                     <td>

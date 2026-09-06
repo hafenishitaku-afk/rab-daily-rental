@@ -2599,10 +2599,101 @@ def revenue_report():
 
 
 
+# @app.route("/rentals/history")
+# @login_required
+# @staff_required
+# def rental_history():
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get filter parameters
+#     status_filter = request.args.get("status", "")
+#     date_from = request.args.get("date_from", "")
+#     date_to = request.args.get("date_to", "")
+#     search = request.args.get("search", "").strip()
+    
+#     # Build query
+#     query = """
+#         SELECT 
+#             r.id,
+#             r.start_time,
+#             r.end_time,
+#             r.total_hours,
+#             r.total_cost,
+#             r.payment_status,
+#             r.status AS rental_status,
+#             c.full_name,
+#             c.phone,
+#             b.bike_code,
+#             b.brand,
+#             b.model,
+#             (SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = r.id) AS payment_count
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE 1=1
+#     """
+    
+#     params = []
+    
+#     if status_filter:
+#         query += " AND r.status = ?"
+#         params.append(status_filter)
+    
+#     if date_from:
+#         query += " AND date(r.start_time) >= ?"
+#         params.append(date_from)
+    
+#     if date_to:
+#         query += " AND date(r.start_time) <= ?"
+#         params.append(date_to)
+    
+#     if search:
+#         query += """ AND (
+#             c.full_name LIKE ? OR 
+#             b.bike_code LIKE ? OR 
+#             c.phone LIKE ?
+#         )"""
+#         search_term = f"%{search}%"
+#         params.extend([search_term, search_term, search_term])
+    
+#     query += " ORDER BY r.start_time DESC LIMIT 100"
+    
+#     rentals = execute_query(c,query, params).fetchall()
+    
+#     # Get summary stats
+#     total_rentals = len(rentals)
+#     total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
+#     paid_count = sum(1 for r in rentals if r["payment_status"] == "Paid")
+#     unpaid_count = sum(1 for r in rentals if r["payment_status"] != "Paid")
+#     active_count = sum(1 for r in rentals if r["rental_status"] == "Active")
+#     completed_count = sum(1 for r in rentals if r["rental_status"] == "Completed")
+    
+#     conn.close()
+    
+#     return render_template(
+#         "rental_history.html",
+#         title="Rental History",
+#         rentals=rentals,
+#         total_rentals=total_rentals,
+#         total_revenue=total_revenue,
+#         paid_count=paid_count,
+#         unpaid_count=unpaid_count,
+#         active_count=active_count,
+#         completed_count=completed_count,
+#         status_filter=status_filter,
+#         date_from=date_from,
+#         date_to=date_to,
+#         search=search
+#     )
+
+
 @app.route("/rentals/history")
 @login_required
 @staff_required
 def rental_history():
+    from datetime import datetime  # ✅ Add this import
+    
     conn = db()
     c = conn.cursor()
     
@@ -2659,7 +2750,21 @@ def rental_history():
     
     query += " ORDER BY r.start_time DESC LIMIT 100"
     
-    rentals = execute_query(c,query, params).fetchall()
+    rentals = execute_query(c, query, params).fetchall()
+    
+    # ✅ FIX: Format datetime for each rental
+    for rental in rentals:
+        if rental.get("start_time"):
+            if isinstance(rental["start_time"], datetime):
+                rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+            elif isinstance(rental["start_time"], str):
+                rental["start_time"] = rental["start_time"][:16]
+        
+        if rental.get("end_time"):
+            if isinstance(rental["end_time"], datetime):
+                rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+            elif isinstance(rental["end_time"], str):
+                rental["end_time"] = rental["end_time"][:16]
     
     # Get summary stats
     total_rentals = len(rentals)
@@ -2686,6 +2791,105 @@ def rental_history():
         date_to=date_to,
         search=search
     )
+
+
+# @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
+# @login_required
+# @staff_required
+# def end_rental(rental_id):
+#     """End a rental and calculate the total cost."""
+#     from datetime import datetime
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c, """
+#         SELECT r.*, b.bike_code, c.full_name
+#         FROM daily_rentals r
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         JOIN customers c ON c.id = r.customer_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         flash("Rental not found.", "danger")
+#         return redirect(url_for("dashboard"))
+    
+#     # ✅ FIX: Handle start_time as datetime or string
+#     if isinstance(rental["start_time"], datetime):
+#         start_time = rental["start_time"]
+#     else:
+#         start_time = datetime.fromisoformat(rental["start_time"])
+    
+#     if request.method == "POST":
+#         end_time = datetime.now()
+#         total_hours = (end_time - start_time).total_seconds() / 3600
+#         total_hours = round(total_hours, 2)
+        
+#         hourly_rate = rental["hourly_rate"]
+#         daily_cap = rental["daily_cap"]
+        
+#         # Calculate cost
+#         raw_cost = total_hours * hourly_rate
+#         total_cost = min(raw_cost, daily_cap)
+        
+#         # Late fee (after 6pm)
+#         late_fee = 0
+#         if end_time.hour >= 18:
+#             late_fee = 10 * (end_time.hour - 18)
+#         total_cost += late_fee
+        
+#         # Get condition values
+#         condition_before = request.form.get("condition_before", "Good")
+#         condition_after = request.form.get("condition_after", "Good")
+        
+#         execute_query(c, """
+#             UPDATE daily_rentals 
+#             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
+#                 condition_before = ?, condition_after = ?, status = 'Completed'
+#             WHERE id = ?
+#         """, (end_time.isoformat(), total_hours, total_cost, late_fee,
+#               condition_before, condition_after, rental_id))
+        
+#         execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+#         return redirect(url_for("record_payment", rental_id=rental_id))
+    
+#     # Calculate preview for display
+#     now = datetime.now()
+#     preview_hours = round((now - start_time).total_seconds() / 3600, 2)
+    
+#     hourly_rate = rental["hourly_rate"]
+#     daily_cap = rental["daily_cap"]
+#     preview_raw = preview_hours * hourly_rate
+#     preview_capped = min(preview_raw, daily_cap)
+#     preview_late = 10 * (now.hour - 18) if now.hour >= 18 else 0
+#     preview_total = preview_capped + preview_late
+    
+#     # ✅ FIX: Format dates for display
+#     start_time_str = start_time.strftime("%Y-%m-%d %H:%M") if isinstance(start_time, datetime) else start_time
+    
+#     conn.close()
+    
+#     return render_template(
+#         "end_rental.html",
+#         title="End Rental",
+#         rental=rental,
+#         start_time_str=start_time_str,
+#         preview_hours=preview_hours,
+#         hourly_rate=hourly_rate,
+#         daily_cap=daily_cap,
+#         preview_raw=preview_raw,
+#         preview_capped=preview_capped,
+#         preview_late=preview_late,
+#         preview_total=preview_total
+#     )
+
+
 
 
 
@@ -5826,14 +6030,111 @@ def staff_required(f):
     return wrapper
 
 
+# @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
+# @login_required
+# @staff_required
+# def end_rental(rental_id):
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c,"""
+#         SELECT r.*, b.bike_code, c.full_name
+#         FROM daily_rentals r
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         JOIN customers c ON c.id = r.customer_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         flash("Rental not found.", "danger")
+#         return redirect(url_for("dashboard"))
+    
+#     if request.method == "POST":
+#         end_time = datetime.now()
+#         start_time = datetime.fromisoformat(rental["start_time"])
+#         total_hours = (end_time - start_time).total_seconds() / 3600
+#         total_hours = round(total_hours, 2)
+        
+#         hourly_rate = rental["hourly_rate"]
+#         daily_cap = rental["daily_cap"]
+        
+#         # Calculate cost
+#         raw_cost = total_hours * hourly_rate
+#         total_cost = min(raw_cost, daily_cap)
+        
+#         # Check for late return (after 6pm)
+#         late_fee = 0
+#         if end_time.hour >= 18:
+#             late_fee = 10 * (end_time.hour - 18)
+        
+#         total_cost += late_fee
+        
+#         # Get condition values
+#         condition_before = request.form.get("condition_before", "Good")
+#         condition_after = request.form.get("condition_after", "Good")
+        
+#         execute_query(c,"""
+#             UPDATE daily_rentals 
+#             SET end_time = ?,
+#                 total_hours = ?,
+#                 total_cost = ?,
+#                 late_fee = ?,
+#                 condition_before = ?,
+#                 condition_after = ?,
+#                 status = 'Completed'
+#             WHERE id = ?
+#         """, (end_time.isoformat(), total_hours, total_cost, late_fee, 
+#               condition_before, condition_after, rental_id))
+        
+#         execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        
+#         conn.commit()
+#         conn.close()
+        
+    
+#         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+#         return redirect(url_for("record_payment", rental_id=rental_id))
+
+
+#     conn.close()
+    
+#     # Calculate preview for display
+#     now = datetime.now()
+#     start = datetime.fromisoformat(rental["start_time"])
+#     preview_hours = round((now - start).total_seconds() / 3600, 2)
+    
+#     hourly_rate = rental["hourly_rate"]
+#     daily_cap = rental["daily_cap"]
+#     preview_raw = preview_hours * hourly_rate
+#     preview_capped = min(preview_raw, daily_cap)
+#     preview_late = 10 * (now.hour - 18) if now.hour >= 18 else 0
+#     preview_total = preview_capped + preview_late
+    
+#     return render_template(
+#         "end_rental.html",
+#         title="End Rental",
+#         rental=rental,
+#         preview_hours=preview_hours,
+#         hourly_rate=hourly_rate,
+#         daily_cap=daily_cap,
+#         preview_raw=preview_raw,
+#         preview_capped=preview_capped,
+#         preview_late=preview_late,
+#         preview_total=preview_total
+#     )
+
+
 @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
 @login_required
 @staff_required
 def end_rental(rental_id):
+    """End a rental and calculate the total cost."""
+    from datetime import datetime
+    
     conn = db()
     c = conn.cursor()
     
-    rental = execute_query(c,"""
+    rental = execute_query(c, """
         SELECT r.*, b.bike_code, c.full_name
         FROM daily_rentals r
         JOIN bicycles b ON b.id = r.bicycle_id
@@ -5845,9 +6146,14 @@ def end_rental(rental_id):
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
+    # ✅ FIX: Handle start_time as datetime or string
+    if isinstance(rental["start_time"], datetime):
+        start_time = rental["start_time"]
+    else:
+        start_time = datetime.fromisoformat(rental["start_time"])
+    
     if request.method == "POST":
         end_time = datetime.now()
-        start_time = datetime.fromisoformat(rental["start_time"])
         total_hours = (end_time - start_time).total_seconds() / 3600
         total_hours = round(total_hours, 2)
         
@@ -5858,46 +6164,35 @@ def end_rental(rental_id):
         raw_cost = total_hours * hourly_rate
         total_cost = min(raw_cost, daily_cap)
         
-        # Check for late return (after 6pm)
+        # Late fee (after 6pm)
         late_fee = 0
         if end_time.hour >= 18:
             late_fee = 10 * (end_time.hour - 18)
-        
         total_cost += late_fee
         
         # Get condition values
         condition_before = request.form.get("condition_before", "Good")
         condition_after = request.form.get("condition_after", "Good")
         
-        execute_query(c,"""
+        execute_query(c, """
             UPDATE daily_rentals 
-            SET end_time = ?,
-                total_hours = ?,
-                total_cost = ?,
-                late_fee = ?,
-                condition_before = ?,
-                condition_after = ?,
-                status = 'Completed'
+            SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
+                condition_before = ?, condition_after = ?, status = 'Completed'
             WHERE id = ?
-        """, (end_time.isoformat(), total_hours, total_cost, late_fee, 
+        """, (end_time.isoformat(), total_hours, total_cost, late_fee,
               condition_before, condition_after, rental_id))
         
-        execute_query(c,"UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
         
         conn.commit()
         conn.close()
         
-    
         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
         return redirect(url_for("record_payment", rental_id=rental_id))
-
-
-    conn.close()
     
     # Calculate preview for display
     now = datetime.now()
-    start = datetime.fromisoformat(rental["start_time"])
-    preview_hours = round((now - start).total_seconds() / 3600, 2)
+    preview_hours = round((now - start_time).total_seconds() / 3600, 2)
     
     hourly_rate = rental["hourly_rate"]
     daily_cap = rental["daily_cap"]
@@ -5906,10 +6201,16 @@ def end_rental(rental_id):
     preview_late = 10 * (now.hour - 18) if now.hour >= 18 else 0
     preview_total = preview_capped + preview_late
     
+    # ✅ FIX: Format dates for display
+    start_time_str = start_time.strftime("%Y-%m-%d %H:%M") if isinstance(start_time, datetime) else start_time
+    
+    conn.close()
+    
     return render_template(
         "end_rental.html",
         title="End Rental",
         rental=rental,
+        start_time_str=start_time_str,
         preview_hours=preview_hours,
         hourly_rate=hourly_rate,
         daily_cap=daily_cap,
