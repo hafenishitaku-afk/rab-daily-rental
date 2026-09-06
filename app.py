@@ -1689,12 +1689,125 @@ def start_rental():
 #     return render_template("customers.html", title="Customers", customers=customers)
 
 
+# @app.route("/customers", methods=["GET", "POST"])
+# @login_required
+# @staff_required
+# def customers():
+#     conn = db()
+#     c = conn.cursor()
+    
+#     if request.method == "POST":
+#         full_name = request.form.get("full_name", "").strip()
+#         phone = request.form.get("phone", "").strip()
+#         id_number = request.form.get("id_number", "").strip()
+#         email = request.form.get("email", "").strip()
+#         address = request.form.get("address", "").strip()
+#         id_photo = request.files.get("id_photo") if request.files else None
+#         customer_photo = request.files.get("customer_photo") if request.files else None
+        
+#         # ✅ FIX: Convert checkbox to integer (1 or 0) for PostgreSQL
+#         terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
+#         signature_data = request.form.get("signature_data", "").strip()
+        
+#         if not full_name or not phone:
+#             flash("Name and phone are required.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         if not terms_accepted:
+#             flash("You must accept the Terms & Conditions.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         # ✅ STEP 1: Create a user account for the customer
+#         # Use phone as username (or email if phone exists)
+#         username = phone
+        
+#         # Check if username already exists
+#         existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+#         if existing_user:
+#             # If phone exists, try email
+#             if email:
+#                 username = email
+#             else:
+#                 username = f"cust_{phone}"
+        
+#         # Generate a random password (customer can change it later)
+#         import secrets
+#         import string
+#         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+#         password_hash = generate_password_hash(temp_password)
+        
+#         # Insert user with role 'customer'
+#         try:
+#             execute_query(c, """
+#                 INSERT INTO users (username, password_hash, role, full_name, email)
+#                 VALUES (?, ?, 'customer', ?, ?)
+#             """, (username, password_hash, full_name, email))
+#             user_id = c.lastrowid
+#         except sqlite3.IntegrityError:
+#             flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         # ✅ STEP 2: Insert customer with user_id
+#         # terms_accepted is now 1 or 0 (integer), not boolean
+#         execute_query(c, """
+#             INSERT INTO customers (
+#                 full_name, id_number, phone, email, address, user_id,
+#                 terms_accepted, terms_accepted_date, signature_data, verification_status
+#             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
+#         """, (full_name, id_number, phone, email, address, user_id, 
+#               terms_accepted, signature_data))
+        
+#         customer_id = c.lastrowid
+#         session["customer_id"] = customer_id
+        
+#         # Save uploaded files
+#         import os
+#         from werkzeug.utils import secure_filename
+        
+#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
+#         if id_photo and id_photo.filename:
+#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c, """
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'id_copy', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         if customer_photo and customer_photo.filename:
+#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c, """
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'customer_photo', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         # ✅ STEP 3: Show credentials to staff
+#         flash(f"Customer '{full_name}' registered successfully!", "success")
+#         flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
+#         flash("📌 Please give these credentials to the customer.", "info")
+        
+#         return redirect(url_for("customers"))
+    
+#     # GET request - show customers list
+#     customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
+#     conn.close()
+    
+#     return render_template("customers.html", title="Customers", customers=customers)
+
+
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
 @staff_required
 def customers():
     conn = db()
     c = conn.cursor()
+    
+    is_postgres = os.environ.get("DATABASE_URL") is not None
     
     if request.method == "POST":
         full_name = request.form.get("full_name", "").strip()
@@ -1717,38 +1830,43 @@ def customers():
             flash("You must accept the Terms & Conditions.", "danger")
             return redirect(url_for("customers"))
         
-        # ✅ STEP 1: Create a user account for the customer
-        # Use phone as username (or email if phone exists)
+        # Create username
         username = phone
         
         # Check if username already exists
         existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing_user:
-            # If phone exists, try email
             if email:
                 username = email
             else:
                 username = f"cust_{phone}"
         
-        # Generate a random password (customer can change it later)
+        # Generate a random password
         import secrets
         import string
         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
         password_hash = generate_password_hash(temp_password)
         
-        # Insert user with role 'customer'
+        # ✅ Insert user with role 'customer'
         try:
             execute_query(c, """
                 INSERT INTO users (username, password_hash, role, full_name, email)
                 VALUES (?, ?, 'customer', ?, ?)
             """, (username, password_hash, full_name, email))
-            user_id = c.lastrowid
+            
+            # ✅ FIX: Get the user ID after insert (works for both SQLite and PostgreSQL)
+            user_result = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if user_result:
+                user_id = user_result['id'] if isinstance(user_result, dict) else user_result[0]
+            else:
+                flash("Error: User created but ID not found.", "danger")
+                return redirect(url_for("customers"))
+                
         except sqlite3.IntegrityError:
             flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
             return redirect(url_for("customers"))
         
-        # ✅ STEP 2: Insert customer with user_id
-        # terms_accepted is now 1 or 0 (integer), not boolean
+        # ✅ Insert customer with user_id
         execute_query(c, """
             INSERT INTO customers (
                 full_name, id_number, phone, email, address, user_id,
@@ -1758,6 +1876,13 @@ def customers():
               terms_accepted, signature_data))
         
         customer_id = c.lastrowid
+        
+        # If PostgreSQL, get the customer ID differently
+        if is_postgres:
+            customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+            if customer_result:
+                customer_id = customer_result['id'] if isinstance(customer_result, dict) else customer_result[0]
+        
         session["customer_id"] = customer_id
         
         # Save uploaded files
@@ -1786,7 +1911,6 @@ def customers():
         conn.commit()
         conn.close()
         
-        # ✅ STEP 3: Show credentials to staff
         flash(f"Customer '{full_name}' registered successfully!", "success")
         flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
         flash("📌 Please give these credentials to the customer.", "info")
@@ -1798,6 +1922,7 @@ def customers():
     conn.close()
     
     return render_template("customers.html", title="Customers", customers=customers)
+
 
 
 
@@ -3485,6 +3610,65 @@ def create_announcement():
 #     )
 
 
+# @app.route("/announcements/<int:announcement_id>")
+# @login_required
+# def view_announcement(announcement_id):
+#     """View a single announcement with comments."""
+#     from datetime import datetime
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     user_id = session["user_id"]
+    
+#     # Get announcement
+#     announcement = execute_query(c, """
+#         SELECT * FROM announcements WHERE id = ? AND is_active = 1
+#     """, (announcement_id,)).fetchone()
+    
+#     if not announcement:
+#         flash("Announcement not found.", "danger")
+#         return redirect(url_for("announcements"))
+    
+#     # ✅ FIX: Format datetime for announcement
+#     if announcement.get("created_at"):
+#         if isinstance(announcement["created_at"], datetime):
+#             announcement["created_at"] = announcement["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+#     if announcement.get("updated_at"):
+#         if isinstance(announcement["updated_at"], datetime):
+#             announcement["updated_at"] = announcement["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+#     # Mark as read
+#     execute_query(c, """
+#         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+#         VALUES (?, ?)
+#     """, (announcement_id, user_id))
+    
+#     # Get comments
+#     comments = execute_query(c, """
+#         SELECT * FROM announcement_comments 
+#         WHERE announcement_id = ? 
+#         ORDER BY created_at ASC
+#     """, (announcement_id,)).fetchall()
+    
+#     # ✅ FIX: Format datetime for comments
+#     for comment in comments:
+#         if comment.get("created_at"):
+#             if isinstance(comment["created_at"], datetime):
+#                 comment["created_at"] = comment["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+#     conn.commit()
+#     conn.close()
+    
+#     return render_template(
+#         "view_announcement.html",
+#         title=announcement["title"],
+#         announcement=announcement,
+#         comments=comments
+#     )
+
+
 @app.route("/announcements/<int:announcement_id>")
 @login_required
 def view_announcement(announcement_id):
@@ -3493,6 +3677,8 @@ def view_announcement(announcement_id):
     
     conn = db()
     c = conn.cursor()
+    
+    is_postgres = os.environ.get("DATABASE_URL") is not None
     
     user_id = session["user_id"]
     
@@ -3514,11 +3700,20 @@ def view_announcement(announcement_id):
         if isinstance(announcement["updated_at"], datetime):
             announcement["updated_at"] = announcement["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
     
-    # Mark as read
-    execute_query(c, """
-        INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
-        VALUES (?, ?)
-    """, (announcement_id, user_id))
+    # ✅ FIX: Mark as read - handle PostgreSQL vs SQLite
+    if is_postgres:
+        # PostgreSQL syntax
+        execute_query(c, """
+            INSERT INTO announcement_reads (announcement_id, user_id)
+            VALUES (%s, %s)
+            ON CONFLICT (announcement_id, user_id) DO NOTHING
+        """, (announcement_id, user_id))
+    else:
+        # SQLite syntax
+        execute_query(c, """
+            INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+            VALUES (?, ?)
+        """, (announcement_id, user_id))
     
     # Get comments
     comments = execute_query(c, """
@@ -3542,6 +3737,8 @@ def view_announcement(announcement_id):
         announcement=announcement,
         comments=comments
     )
+
+
 
 
 
@@ -3615,6 +3812,24 @@ def toggle_pin_announcement(announcement_id):
     return redirect(url_for("announcements"))
 
 
+# @app.route("/announcements/mark-all-read")
+# @login_required
+# def mark_all_read():
+#     """Mark all announcements as read."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     execute_query(c,"""
+#         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+#         SELECT id, ? FROM announcements WHERE is_active = 1
+#     """, (session["user_id"],))
+    
+#     conn.commit()
+#     conn.close()
+    
+#     flash("All announcements marked as read.", "success")
+#     return redirect(url_for("announcements"))
+
 @app.route("/announcements/mark-all-read")
 @login_required
 def mark_all_read():
@@ -3622,18 +3837,29 @@ def mark_all_read():
     conn = db()
     c = conn.cursor()
     
-    execute_query(c,"""
-        INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
-        SELECT id, ? FROM announcements WHERE is_active = 1
-    """, (session["user_id"],))
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+    user_id = session["user_id"]
+    
+    if is_postgres:
+        # PostgreSQL syntax
+        execute_query(c, """
+            INSERT INTO announcement_reads (announcement_id, user_id)
+            SELECT id, %s FROM announcements WHERE is_active = 1
+            ON CONFLICT (announcement_id, user_id) DO NOTHING
+        """, (user_id,))
+    else:
+        # SQLite syntax
+        execute_query(c, """
+            INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+            SELECT id, ? FROM announcements WHERE is_active = 1
+        """, (user_id,))
     
     conn.commit()
     conn.close()
     
     flash("All announcements marked as read.", "success")
     return redirect(url_for("announcements"))
-
-
 
 
 
