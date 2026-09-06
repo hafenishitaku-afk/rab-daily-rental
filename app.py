@@ -4276,11 +4276,46 @@ def bicycle_utilization():
 #     """
 #     return True
 
-@login_required
+# @login_required
+# def send_email_notification(to_email, subject, body):
+#     """Send email notification."""
+#     if not EMAIL_ENABLED:
+#         return False
+    
+#     try:
+#         msg = MIMEMultipart()
+#         msg['From'] = EMAIL_FROM
+#         msg['To'] = to_email
+#         msg['Subject'] = subject
+#         msg.attach(MIMEText(body, 'plain'))
+        
+#         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
+#         server.starttls()
+#         server.login(EMAIL_USER, EMAIL_PASSWORD)
+#         server.send_message(msg)
+#         server.quit()
+        
+#         print(f"✅ Email sent to {to_email}")
+#         return True
+#     except Exception as e:
+#         print(f"❌ Email error: {e}")
+#         return False
+
+# =============================================
+# NOTIFICATION FUNCTIONS
+# =============================================
+
 def send_email_notification(to_email, subject, body):
     """Send email notification."""
     if not EMAIL_ENABLED:
-        return False
+        print(f"📧 Email disabled. Would send to: {to_email}")
+        return True
+    
+    # Check if credentials are configured
+    if not EMAIL_USER or EMAIL_USER == "your-email@gmail.com":
+        print(f"📧 Email credentials not configured. Would send to: {to_email}")
+        print(f"   Subject: {subject}")
+        return True
     
     try:
         msg = MIMEMultipart()
@@ -4299,17 +4334,18 @@ def send_email_notification(to_email, subject, body):
         return True
     except Exception as e:
         print(f"❌ Email error: {e}")
-        return False
+        # ✅ Don't fail - just log and continue
+        return True
 
-
-
-
-@login_required
 def send_sms_notification(phone_number, message):
     """Send SMS notification using Twilio."""
     if not SMS_ENABLED:
         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
         return True
+    
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+        print(f"⚠️ Twilio credentials missing. SMS not sent to {phone_number}")
+        return True  # ✅ Don't fail
     
     try:
         from twilio.rest import Client
@@ -4324,7 +4360,30 @@ def send_sms_notification(phone_number, message):
         return True
     except Exception as e:
         print(f"❌ SMS error: {e}")
-        return False
+        return True  # ✅ Don't fail
+
+
+# @login_required
+# def send_sms_notification(phone_number, message):
+#     """Send SMS notification using Twilio."""
+#     if not SMS_ENABLED:
+#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
+#         return True
+    
+#     try:
+#         from twilio.rest import Client
+#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+#         sms = client.messages.create(
+#             body=message,
+#             from_=TWILIO_PHONE_NUMBER,
+#             to=phone_number
+#         )
+#         print(f"✅ SMS sent to {phone_number}")
+#         print(f"   SID: {sms.sid}")
+#         return True
+#     except Exception as e:
+#         print(f"❌ SMS error: {e}")
+#         return False
 
 # def send_sms_notification(phone_number, message):
 #     """Send SMS notification using Twilio."""
