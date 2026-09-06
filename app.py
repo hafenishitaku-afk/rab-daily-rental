@@ -4291,13 +4291,108 @@ def send_sms_notification(phone_number, message):
     """
     return True
 
-@login_required
+# @login_required
+# def send_reminder(rental_id):
+#     """Send a reminder for a specific rental."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c,"""
+#         SELECT 
+#             r.*,
+#             c.full_name,
+#             c.phone,
+#             c.email,
+#             b.bike_code,
+#             b.brand,
+#             b.model
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         conn.close()
+#         return False
+    
+#     # Calculate time remaining
+#     from datetime import datetime, timedelta
+#     start_time = datetime.fromisoformat(rental["start_time"])
+#     end_time = start_time + timedelta(hours=rental["total_hours"] or 1)
+#     now = datetime.now()
+    
+#     if now > end_time:
+#         # Overdue reminder
+#         reminder_type = "overdue"
+#         message = f"""
+#         ⚠️ OVERDUE REMINDER
+        
+#         Dear {rental['full_name']},
+        
+#         Your rental of {rental['bike_code']} is now OVERDUE.
+        
+#         Rental started: {rental['start_time']}
+#         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
+        
+#         Please return the bicycle immediately to avoid additional charges.
+        
+#         Thank you,
+#         RAB - Rent A Bike
+#         """
+#         subject = "🚲 OVERDUE: Bicycle Rental - Please Return"
+#     else:
+#         # Upcoming return reminder
+#         time_left = end_time - now
+#         hours_left = time_left.total_seconds() / 3600
+        
+#         reminder_type = "upcoming"
+#         message = f"""
+#         🔔 RETURN REMINDER
+        
+#         Dear {rental['full_name']},
+        
+#         Your rental of {rental['bike_code']} will be due in approximately {hours_left:.1f} hours.
+        
+#         Rental started: {rental['start_time']}
+#         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
+        
+#         Please return the bicycle on time to avoid late fees.
+        
+#         Thank you,
+#         RAB - Rent A Bike
+#         """
+#         subject = "🚲 Return Reminder: Bicycle Due Soon"
+    
+#     # Send email
+#     if rental["email"]:
+#         send_email_notification(rental["email"], subject, message)
+    
+#     # Send SMS
+#     if rental["phone"]:
+#         # Shorten message for SMS
+#         sms_message = f"RAB: {rental['full_name']}, your rental of {rental['bike_code']} is due soon. Please return to avoid late fees."
+#         send_sms_notification(rental["phone"], sms_message)
+    
+#     # Log the reminder
+#     execute_query(c,"""
+#         INSERT INTO reminder_logs (rental_id, reminder_type, sent_to, sent_at)
+#         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+#     """, (rental_id, reminder_type, rental["phone"] or rental["email"]))
+    
+#     conn.commit()
+#     conn.close()
+    
+#     return True
+
 def send_reminder(rental_id):
     """Send a reminder for a specific rental."""
+    from datetime import datetime, timedelta  # ✅ Add timedelta
+    
     conn = db()
     c = conn.cursor()
     
-    rental = execute_query(c,"""
+    rental = execute_query(c, """
         SELECT 
             r.*,
             c.full_name,
@@ -4316,9 +4411,13 @@ def send_reminder(rental_id):
         conn.close()
         return False
     
+    # ✅ FIX: Handle start_time as datetime or string
+    if isinstance(rental["start_time"], datetime):
+        start_time = rental["start_time"]
+    else:
+        start_time = datetime.fromisoformat(rental["start_time"])
+    
     # Calculate time remaining
-    from datetime import datetime, timedelta
-    start_time = datetime.fromisoformat(rental["start_time"])
     end_time = start_time + timedelta(hours=rental["total_hours"] or 1)
     now = datetime.now()
     
@@ -4332,7 +4431,7 @@ def send_reminder(rental_id):
         
         Your rental of {rental['bike_code']} is now OVERDUE.
         
-        Rental started: {rental['start_time']}
+        Rental started: {start_time.strftime('%Y-%m-%d %H:%M')}
         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
         
         Please return the bicycle immediately to avoid additional charges.
@@ -4354,7 +4453,7 @@ def send_reminder(rental_id):
         
         Your rental of {rental['bike_code']} will be due in approximately {hours_left:.1f} hours.
         
-        Rental started: {rental['start_time']}
+        Rental started: {start_time.strftime('%Y-%m-%d %H:%M')}
         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
         
         Please return the bicycle on time to avoid late fees.
@@ -4370,12 +4469,11 @@ def send_reminder(rental_id):
     
     # Send SMS
     if rental["phone"]:
-        # Shorten message for SMS
         sms_message = f"RAB: {rental['full_name']}, your rental of {rental['bike_code']} is due soon. Please return to avoid late fees."
         send_sms_notification(rental["phone"], sms_message)
     
     # Log the reminder
-    execute_query(c,"""
+    execute_query(c, """
         INSERT INTO reminder_logs (rental_id, reminder_type, sent_to, sent_at)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     """, (rental_id, reminder_type, rental["phone"] or rental["email"]))
@@ -4384,6 +4482,18 @@ def send_reminder(rental_id):
     conn.close()
     
     return True
+
+
+
+# @app.route("/rentals/<int:rental_id>/send-reminder")
+# @login_required
+# def send_reminder_route(rental_id):
+#     """Manually send a reminder for a rental."""
+#     if send_reminder(rental_id):
+#         flash("Reminder sent successfully!", "success")
+#     else:
+#         flash("Failed to send reminder. Rental not found.", "danger")
+#     return redirect(url_for("rental_history"))
 
 
 @app.route("/rentals/<int:rental_id>/send-reminder")
@@ -4397,6 +4507,31 @@ def send_reminder_route(rental_id):
     return redirect(url_for("rental_history"))
 
 
+
+# @app.route("/rentals/check-reminders")
+# @login_required
+# def check_reminders():
+#     """Check all active rentals and send reminders if needed."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get active rentals
+#     rentals = execute_query(c,"""
+#         SELECT id FROM daily_rentals 
+#         WHERE status = 'Active'
+#         AND end_time IS NOT NULL
+#     """).fetchall()
+    
+#     sent_count = 0
+#     for rental in rentals:
+#         if send_reminder(rental["id"]):
+#             sent_count += 1
+    
+#     conn.close()
+    
+#     flash(f"Checked {len(rentals)} active rentals. Sent {sent_count} reminders.", "success")
+#     return redirect(url_for("rental_history"))
+
 @app.route("/rentals/check-reminders")
 @login_required
 def check_reminders():
@@ -4405,8 +4540,8 @@ def check_reminders():
     c = conn.cursor()
     
     # Get active rentals
-    rentals = execute_query(c,"""
-        SELECT id FROM daily_rentals 
+    rentals = execute_query(c, """
+        SELECT id FROM daily_rentals
         WHERE status = 'Active'
         AND end_time IS NOT NULL
     """).fetchall()
