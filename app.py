@@ -4237,69 +4237,7 @@ def bicycle_utilization():
 
 
 
-# # =============================================
-# # NOTIFICATION FUNCTIONS
-# # =============================================
-# @login_required
-# def send_email_notification(to_email, subject, body):
-#     """Send email notification (development mode - prints to console)."""
-#     if not EMAIL_ENABLED:
-#         return False
-    
-#     print("\n" + "=" * 60)
-#     print("📧 EMAIL NOTIFICATION")
-#     print("=" * 60)
-#     print(f"To: {to_email}")
-#     print(f"Subject: {subject}")
-#     print("-" * 60)
-#     print(body)
-#     print("=" * 60 + "\n")
-    
-#     # For production, uncomment this:
-#     """
-#     try:
-#         msg = MIMEMultipart()
-#         msg['From'] = EMAIL_FROM
-#         msg['To'] = to_email
-#         msg['Subject'] = subject
-#         msg.attach(MIMEText(body, 'plain'))
-        
-#         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
-#         server.starttls()
-#         server.login(EMAIL_USER, EMAIL_PASSWORD)
-#         server.send_message(msg)
-#         server.quit()
-#         return True
-#     except Exception as e:
-#         print(f"Email error: {e}")
-#         return False
-#     """
-#     return True
 
-# @login_required
-# def send_email_notification(to_email, subject, body):
-#     """Send email notification."""
-#     if not EMAIL_ENABLED:
-#         return False
-    
-#     try:
-#         msg = MIMEMultipart()
-#         msg['From'] = EMAIL_FROM
-#         msg['To'] = to_email
-#         msg['Subject'] = subject
-#         msg.attach(MIMEText(body, 'plain'))
-        
-#         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
-#         server.starttls()
-#         server.login(EMAIL_USER, EMAIL_PASSWORD)
-#         server.send_message(msg)
-#         server.quit()
-        
-#         print(f"✅ Email sent to {to_email}")
-#         return True
-#     except Exception as e:
-#         print(f"❌ Email error: {e}")
-#         return False
 
 # =============================================
 # NOTIFICATION FUNCTIONS
@@ -4363,168 +4301,35 @@ def send_sms_notification(phone_number, message):
         return True  # ✅ Don't fail
 
 
-# @login_required
-# def send_sms_notification(phone_number, message):
-#     """Send SMS notification using Twilio."""
-#     if not SMS_ENABLED:
-#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
-#         return True
-    
-#     try:
-#         from twilio.rest import Client
-#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-#         sms = client.messages.create(
-#             body=message,
-#             from_=TWILIO_PHONE_NUMBER,
-#             to=phone_number
-#         )
-#         print(f"✅ SMS sent to {phone_number}")
-#         print(f"   SID: {sms.sid}")
-#         return True
-#     except Exception as e:
-#         print(f"❌ SMS error: {e}")
-#         return False
 
-# def send_sms_notification(phone_number, message):
-#     """Send SMS notification using Twilio."""
-#     if not SMS_ENABLED:
-#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
-#         return True
-    
-#     try:
-#         from twilio.rest import Client
-#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-#         sms = client.messages.create(
-#             body=message,
-#             from_=TWILIO_PHONE_NUMBER,
-#             to=phone_number
-#         )
-#         print(f"✅ SMS sent to {phone_number}")
-#         return True
-#     except Exception as e:
-#         print(f"❌ SMS error: {e}")
-#         return False
-# def send_sms_notification(phone_number, message):
-#     """Send SMS notification (development mode - prints to console)."""
-#     if not SMS_ENABLED:
-#         print("\n" + "=" * 60)
-#         print("📱 SMS NOTIFICATION (Simulated)")
-#         print("=" * 60)
-#         print(f"To: {phone_number}")
-#         print("-" * 60)
-#         print(message)
-#         print("=" * 60 + "\n")
-#         return True
-    
-#     # For production, uncomment this:
-#     """
-#     try:
-#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-#         message = client.messages.create(
-#             body=message,
-#             from_=TWILIO_PHONE_NUMBER,
-#             to=phone_number
-#         )
-#         return True
-#     except Exception as e:
-#         print(f"SMS error: {e}")
-#         return False
-#     """
-#     return True
 
-# @login_required
-# def send_reminder(rental_id):
-#     """Send a reminder for a specific rental."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     rental = execute_query(c,"""
-#         SELECT 
-#             r.*,
-#             c.full_name,
-#             c.phone,
-#             c.email,
-#             b.bike_code,
-#             b.brand,
-#             b.model
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.id = ?
-#     """, (rental_id,)).fetchone()
-    
-#     if not rental:
-#         conn.close()
-#         return False
-    
-#     # Calculate time remaining
-#     from datetime import datetime, timedelta
-#     start_time = datetime.fromisoformat(rental["start_time"])
-#     end_time = start_time + timedelta(hours=rental["total_hours"] or 1)
-#     now = datetime.now()
-    
-#     if now > end_time:
-#         # Overdue reminder
-#         reminder_type = "overdue"
-#         message = f"""
-#         ⚠️ OVERDUE REMINDER
-        
-#         Dear {rental['full_name']},
-        
-#         Your rental of {rental['bike_code']} is now OVERDUE.
-        
-#         Rental started: {rental['start_time']}
-#         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
-        
-#         Please return the bicycle immediately to avoid additional charges.
-        
-#         Thank you,
-#         RAB - Rent A Bike
-#         """
-#         subject = "🚲 OVERDUE: Bicycle Rental - Please Return"
-#     else:
-#         # Upcoming return reminder
-#         time_left = end_time - now
-#         hours_left = time_left.total_seconds() / 3600
-        
-#         reminder_type = "upcoming"
-#         message = f"""
-#         🔔 RETURN REMINDER
-        
-#         Dear {rental['full_name']},
-        
-#         Your rental of {rental['bike_code']} will be due in approximately {hours_left:.1f} hours.
-        
-#         Rental started: {rental['start_time']}
-#         Expected return: {end_time.strftime('%Y-%m-%d %H:%M')}
-        
-#         Please return the bicycle on time to avoid late fees.
-        
-#         Thank you,
-#         RAB - Rent A Bike
-#         """
-#         subject = "🚲 Return Reminder: Bicycle Due Soon"
-    
-#     # Send email
-#     if rental["email"]:
-#         send_email_notification(rental["email"], subject, message)
-    
-#     # Send SMS
-#     if rental["phone"]:
-#         # Shorten message for SMS
-#         sms_message = f"RAB: {rental['full_name']}, your rental of {rental['bike_code']} is due soon. Please return to avoid late fees."
-#         send_sms_notification(rental["phone"], sms_message)
-    
-#     # Log the reminder
-#     execute_query(c,"""
-#         INSERT INTO reminder_logs (rental_id, reminder_type, sent_to, sent_at)
-#         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-#     """, (rental_id, reminder_type, rental["phone"] or rental["email"]))
-    
-#     conn.commit()
-#     conn.close()
-    
-#     return True
+@app.route("/debug-twilio")
+@login_required
+def debug_twilio():
+    """Debug Twilio configuration."""
+    return {
+        "sms_enabled": SMS_ENABLED,
+        "account_sid": TWILIO_ACCOUNT_SID[:5] + "..." if TWILIO_ACCOUNT_SID else "Not set",
+        "auth_token_set": bool(TWILIO_AUTH_TOKEN),
+        "phone_number": TWILIO_PHONE_NUMBER or "Not set",
+        "twilio_configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER)
+    }
+
+
+@app.route("/debug-twilio")
+@login_required
+def debug_twilio():
+    """Debug Twilio configuration."""
+    return {
+        "sms_enabled": SMS_ENABLED,
+        "account_sid": TWILIO_ACCOUNT_SID[:5] + "..." if TWILIO_ACCOUNT_SID else "Not set",
+        "auth_token_set": bool(TWILIO_AUTH_TOKEN),
+        "phone_number": TWILIO_PHONE_NUMBER or "Not set",
+        "twilio_configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER)
+    }
+
+
+
 
 def send_reminder(rental_id):
     """Send a reminder for a specific rental."""
