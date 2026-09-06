@@ -3218,6 +3218,62 @@ def delete_bicycle(bicycle_id):
 
 
 
+@app.route("/announcements")
+@login_required
+def announcements():
+    """View all announcements."""
+    from datetime import datetime
+    
+    conn = db()
+    c = conn.cursor()
+    
+    user_id = session["user_id"]
+    user_role = session.get("role", "staff")
+    
+    # Get all active announcements with read status
+    announcements_list = execute_query(c, """
+        SELECT 
+            a.*,
+            CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
+        FROM announcements a
+        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+        WHERE a.is_active = 1
+        ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
+    """, (user_id,)).fetchall()
+    
+    # ✅ FIX: Format datetime for each announcement (PostgreSQL returns datetime objects)
+    for announcement in announcements_list:
+        if announcement.get("created_at"):
+            if isinstance(announcement["created_at"], datetime):
+                announcement["created_at"] = announcement["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(announcement["created_at"], str):
+                announcement["created_at"] = announcement["created_at"]
+        
+        if announcement.get("updated_at"):
+            if isinstance(announcement["updated_at"], datetime):
+                announcement["updated_at"] = announcement["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(announcement["updated_at"], str):
+                announcement["updated_at"] = announcement["updated_at"]
+    
+    # ✅ FIX: Get unread count as integer
+    unread_result = execute_query(c, """
+        SELECT COUNT(*) as count FROM announcements a
+        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+        WHERE a.is_active = 1 AND ar.id IS NULL
+    """, (user_id,)).fetchone()
+    
+    unread_count = unread_result['count'] if isinstance(unread_result, dict) else unread_result[0] if unread_result else 0
+    
+    conn.close()
+    
+    return render_template(
+        "announcements.html",
+        title="Announcements",
+        announcements=announcements_list,
+        unread_count=unread_count,
+        user_role=user_role
+    )
+
 
 
 @app.route("/announcements/<int:announcement_id>")
