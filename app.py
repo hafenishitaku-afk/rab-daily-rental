@@ -103,15 +103,36 @@ def get_single_value(cursor, query, params=None):
         return result[0] if result else 0
 
 
+# def format_date(date_value, format_str="%Y-%m-%d"):
+#     """Format a date value for display (handles both string and datetime)."""
+#     if date_value is None:
+#         return ""
+#     if isinstance(date_value, datetime):
+#         return date_value.strftime(format_str)
+#     if isinstance(date_value, str):
+#         return date_value[:10]
+#     return str(date_value)
+
 def format_date(date_value, format_str="%Y-%m-%d"):
     """Format a date value for display (handles both string and datetime)."""
+    from datetime import datetime
+    
     if date_value is None:
         return ""
     if isinstance(date_value, datetime):
         return date_value.strftime(format_str)
     if isinstance(date_value, str):
-        return date_value[:10]
+        # ✅ Return as is, or truncate safely
+        try:
+            # Try to parse as datetime
+            dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+            return dt.strftime(format_str)
+        except:
+            # If parsing fails, return the string as is
+            return date_value
     return str(date_value)
+
+
 
 
 def get_duration_sql():
@@ -1062,12 +1083,21 @@ def users():
     conn.close()
     
     # ✅ Format datetime for each user
+    # for user in users_list:
+    #     if user.get("created_at"):
+    #         if isinstance(user["created_at"], datetime):
+    #             user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
+    #         elif isinstance(user["created_at"], str):
+    #             user["created_at"] = user["created_at"][:10]
+
+
+# ✅ Format datetime for each user
     for user in users_list:
         if user.get("created_at"):
             if isinstance(user["created_at"], datetime):
                 user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
             elif isinstance(user["created_at"], str):
-                user["created_at"] = user["created_at"][:10]
+                user["created_at"] = user["created_at"]  # ✅ Return as is    
     
     return render_template("users.html", title="User Management", users=users_list)
 
@@ -1818,11 +1848,11 @@ def view_document_file(customer_id, doc_id):
 
 
 
-
-
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
 @login_required
 def record_payment(rental_id):
+    from datetime import datetime  # ✅ Add this import
+    
     conn = db()
     c = conn.cursor()
     
@@ -1838,6 +1868,11 @@ def record_payment(rental_id):
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
+    # ✅ FIX: Format datetime for display
+    if rental.get("start_time"):
+        if isinstance(rental["start_time"], datetime):
+            rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+    
     if request.method == "POST":
         amount = float(request.form.get("amount", 0))
         payment_method = request.form.get("payment_method", "Cash")
@@ -1846,13 +1881,11 @@ def record_payment(rental_id):
             flash("Payment amount must be greater than zero.", "danger")
             return redirect(url_for("record_payment", rental_id=rental_id))
         
-        # Record the payment
         execute_query(c, """
             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
             VALUES (?, ?, ?, 'Completed')
         """, (rental_id, amount, payment_method))
         
-        # Update rental payment status
         execute_query(c, """
             UPDATE daily_rentals 
             SET payment_status = 'Paid' 
@@ -1865,15 +1898,13 @@ def record_payment(rental_id):
         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
         return redirect(url_for("payment_history"))
     
-    # ✅ FIX: Use rental_id, not user_id
-    # Get total payments for this rental (if needed)
+    # Get total payments for this rental
     total_paid = get_single_value(c, """
         SELECT COALESCE(SUM(amount), 0) 
         FROM rental_payments 
         WHERE daily_rental_id = ?
     """, (rental_id,))
     
-    # If rental has a total_cost, calculate remaining balance
     remaining_balance = rental["total_cost"] - total_paid if rental["total_cost"] else 0
     
     conn.close()
@@ -1886,14 +1917,115 @@ def record_payment(rental_id):
         remaining_balance=remaining_balance
     )
 
+# @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
+# @login_required
+# def record_payment(rental_id):
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c, """
+#         SELECT r.*, c.full_name, b.bike_code
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         flash("Rental not found.", "danger")
+#         return redirect(url_for("dashboard"))
+    
+#     if request.method == "POST":
+#         amount = float(request.form.get("amount", 0))
+#         payment_method = request.form.get("payment_method", "Cash")
+        
+#         if amount <= 0:
+#             flash("Payment amount must be greater than zero.", "danger")
+#             return redirect(url_for("record_payment", rental_id=rental_id))
+        
+#         # Record the payment
+#         execute_query(c, """
+#             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
+#             VALUES (?, ?, ?, 'Completed')
+#         """, (rental_id, amount, payment_method))
+        
+#         # Update rental payment status
+#         execute_query(c, """
+#             UPDATE daily_rentals 
+#             SET payment_status = 'Paid' 
+#             WHERE id = ?
+#         """, (rental_id,))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
+#         return redirect(url_for("payment_history"))
+    
+#     # ✅ FIX: Use rental_id, not user_id
+#     # Get total payments for this rental (if needed)
+#     total_paid = get_single_value(c, """
+#         SELECT COALESCE(SUM(amount), 0) 
+#         FROM rental_payments 
+#         WHERE daily_rental_id = ?
+#     """, (rental_id,))
+    
+#     # If rental has a total_cost, calculate remaining balance
+#     remaining_balance = rental["total_cost"] - total_paid if rental["total_cost"] else 0
+    
+#     conn.close()
+    
+#     return render_template(
+#         "record_payment.html",
+#         title="Record Payment",
+#         rental=rental,
+#         total_paid=total_paid,
+#         remaining_balance=remaining_balance
+#     )
 
 
 
+
+
+# @app.route("/payments")
+# @login_required
+# def payment_history():
+#     """Payment history - shows all payments."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     payments = execute_query(c, """
+#         SELECT 
+#             p.*,
+#             r.id AS rental_id,
+#             b.bike_code,
+#             c.full_name
+#         FROM rental_payments p
+#         JOIN daily_rentals r ON r.id = p.daily_rental_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         JOIN customers c ON c.id = r.customer_id
+#         ORDER BY p.payment_date DESC
+#         LIMIT 50
+#     """).fetchall()
+    
+#     # Get total revenue
+#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
+    
+#     conn.close()
+    
+#     return render_template(
+#         "payment_history.html",
+#         title="Payment History",
+#         payments=payments,
+#         total_revenue=total_revenue
+#     )
 
 @app.route("/payments")
 @login_required
 def payment_history():
     """Payment history - shows all payments."""
+    from datetime import datetime  # ✅ Add this import
+    
     conn = db()
     c = conn.cursor()
     
@@ -1911,6 +2043,16 @@ def payment_history():
         LIMIT 50
     """).fetchall()
     
+    # # ✅ FIX: Format datetime for each payment
+    for payment in payments: 
+        # ✅ Format datetime properly
+        if payment.get("payment_date"):
+            if isinstance(payment["payment_date"], datetime):
+                payment["payment_date"] = payment["payment_date"].strftime("%Y-%m-%d %H:%M")
+            elif isinstance(payment["payment_date"], str):
+                payment["payment_date"] = payment["payment_date"]  # Return as is
+
+
     # Get total revenue
     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
     
@@ -2260,13 +2402,13 @@ def rental_history():
             if isinstance(rental["start_time"], datetime):
                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
             elif isinstance(rental["start_time"], str):
-                rental["start_time"] = rental["start_time"][:16]
+                rental["start_time"] = rental["start_time"]
         
         if rental.get("end_time"):
             if isinstance(rental["end_time"], datetime):
                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
             elif isinstance(rental["end_time"], str):
-                rental["end_time"] = rental["end_time"][:16]
+                rental["end_time"] = rental["end_time"]
     
     # Get summary stats
     total_rentals = len(rentals)
@@ -4770,6 +4912,182 @@ def export_revenue_csv():
 # RECEIPT GENERATION
 # =============================================
 
+# @app.route("/receipt/<int:payment_id>")
+# @login_required
+# def generate_receipt(payment_id):
+#     """Generate a PDF receipt for a payment."""
+#     from reportlab.lib.pagesizes import A4
+#     from reportlab.lib import colors
+#     from reportlab.lib.units import mm
+#     from reportlab.pdfgen import canvas
+#     from io import BytesIO
+#     from datetime import datetime
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get payment details with customer and rental info
+#     payment = execute_query(c,"""
+#         SELECT 
+#             p.*,
+#             r.id AS rental_id,
+#             r.start_time,
+#             r.end_time,
+#             r.total_hours,
+#             r.total_cost,
+#             r.bicycle_id,
+#             c.full_name,
+#             c.phone,
+#             c.email,
+#             c.id_number,
+#             b.bike_code,
+#             b.brand,
+#             b.model
+#         FROM rental_payments p
+#         JOIN daily_rentals r ON r.id = p.daily_rental_id
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE p.id = ?
+#     """, (payment_id,)).fetchone()
+    
+#     conn.close()
+    
+#     if not payment:
+#         flash("Payment not found.", "danger")
+#         return redirect(url_for("payment_history"))
+    
+#     # Create PDF
+#     buf = BytesIO()
+#     pdf = canvas.Canvas(buf, pagesize=A4)
+#     width, height = A4
+    
+#     # Settings
+#     x = 25 * mm
+#     y = height - 25 * mm
+    
+#     # =============================================
+#     # HEADER
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "RAB RENT A BIKE")
+    
+#     y -= 8 * mm
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Daily Rental Receipt")
+    
+#     y -= 5 * mm
+#     pdf.setFont("Helvetica", 8)
+#     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
+#     pdf.drawString(x + 120 * mm, y, f"Date: {payment['payment_date'][:16]}")
+    
+#     y -= 8 * mm
+#     pdf.line(x, y, width - x, y)
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # CUSTOMER DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Customer Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # RENTAL DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Rental Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Start: {payment['start_time']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"End: {payment['end_time'] if payment['end_time'] else 'Active'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # PAYMENT DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Payment Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment['payment_date']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
+    
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # SUMMARY BOX
+#     # =============================================
+#     # Draw a box for the total
+#     box_height = 25 * mm
+#     box_y = y - box_height
+    
+#     pdf.setFillColor(colors.HexColor("#ffe500"))
+#     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
+    
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.setFont("Helvetica-Bold", 14)
+#     pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
+    
+#     y -= box_height + 15 * mm
+    
+#     # =============================================
+#     # TERMS & CONDITIONS
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
+#     y -= 5 * mm
+#     pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
+    
+#     # =============================================
+#     # FOOTER
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#999999"))
+#     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
+#     pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+#     pdf.save()
+#     buf.seek(0)
+    
+#     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
+#     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
 @app.route("/receipt/<int:payment_id>")
 @login_required
 def generate_receipt(payment_id):
@@ -4785,7 +5103,7 @@ def generate_receipt(payment_id):
     c = conn.cursor()
     
     # Get payment details with customer and rental info
-    payment = execute_query(c,"""
+    payment = execute_query(c, """
         SELECT 
             p.*,
             r.id AS rental_id,
@@ -4814,6 +5132,28 @@ def generate_receipt(payment_id):
         flash("Payment not found.", "danger")
         return redirect(url_for("payment_history"))
     
+    # =============================================
+    # ✅ FIX: Format all datetime values
+    # =============================================
+    def fmt_datetime(value):
+        """Format datetime for display in PDF."""
+        if value is None:
+            return "N/A"
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M")
+        if isinstance(value, str):
+            try:
+                dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                return dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                return value[:16] if len(value) >= 16 else value
+        return str(value)
+    
+    # Format payment date
+    payment_date_str = fmt_datetime(payment.get("payment_date"))
+    start_time_str = fmt_datetime(payment.get("start_time"))
+    end_time_str = fmt_datetime(payment.get("end_time"))
+    
     # Create PDF
     buf = BytesIO()
     pdf = canvas.Canvas(buf, pagesize=A4)
@@ -4838,7 +5178,8 @@ def generate_receipt(payment_id):
     y -= 5 * mm
     pdf.setFont("Helvetica", 8)
     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
-    pdf.drawString(x + 120 * mm, y, f"Date: {payment['payment_date'][:16]}")
+    # ✅ FIXED: Use formatted payment_date_str
+    pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
     
     y -= 8 * mm
     pdf.line(x, y, width - x, y)
@@ -4876,9 +5217,11 @@ def generate_receipt(payment_id):
     pdf.setFillColor(colors.HexColor("#111111"))
     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
     y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"Start: {payment['start_time']}")
+    # ✅ FIXED: Use formatted start_time_str
+    pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
     y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"End: {payment['end_time'] if payment['end_time'] else 'Active'}")
+    # ✅ FIXED: Use formatted end_time_str
+    pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
     
@@ -4898,7 +5241,8 @@ def generate_receipt(payment_id):
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
     y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment['payment_date']}")
+    # ✅ FIXED: Use formatted payment_date_str
+    pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
     
@@ -4944,6 +5288,8 @@ def generate_receipt(payment_id):
     
     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
 
 
 
