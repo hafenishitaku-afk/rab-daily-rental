@@ -166,7 +166,7 @@ def get_count(cursor, query, params=None):
 # =============================================
 # NOTIFICATION CONFIGURATION
 # =============================================
-EMAIL_ENABLED = True
+EMAIL_ENABLED = False
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_USER = os.environ.get("EMAIL_USER", "")
@@ -177,7 +177,7 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
 # TWILIO SMS CONFIGURATION
 # =============================================
 
-SMS_ENABLED = True  # ✅ Enable SMS
+SMS_ENABLED = False  # ✅ Enable SMS
 
 # ✅ These MUST be set in Render environment variables
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
