@@ -1582,6 +1582,113 @@ def start_rental():
 
 
 
+# @app.route("/customers", methods=["GET", "POST"])
+# @login_required
+# @staff_required
+# def customers():
+#     conn = db()
+#     c = conn.cursor()
+    
+#     if request.method == "POST":
+#         full_name = request.form.get("full_name", "").strip()
+#         phone = request.form.get("phone", "").strip()
+#         id_number = request.form.get("id_number", "").strip()
+#         email = request.form.get("email", "").strip()
+#         address = request.form.get("address", "").strip()
+#         id_photo = request.files.get("id_photo") if request.files else None
+#         customer_photo = request.files.get("customer_photo") if request.files else None
+#         terms_accepted = request.form.get("terms_accepted") == "on"
+#         signature_data = request.form.get("signature_data", "").strip()
+        
+#         if not full_name or not phone:
+#             flash("Name and phone are required.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         if not terms_accepted:
+#             flash("You must accept the Terms & Conditions.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         # ✅ STEP 1: Create a user account for the customer
+#         # Use phone as username (or email if phone exists)
+#         username = phone
+        
+#         # Check if username already exists
+#         existing_user = execute_query(c,"SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+#         if existing_user:
+#             # If phone exists, try email
+#             if email:
+#                 username = email
+#             else:
+#                 username = f"cust_{phone}"
+        
+#         # Generate a random password (customer can change it later)
+#         import secrets
+#         import string
+#         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+#         password_hash = generate_password_hash(temp_password)
+        
+#         # Insert user with role 'customer'
+#         try:
+#             execute_query(c,"""
+#                 INSERT INTO users (username, password_hash, role, full_name, email)
+#                 VALUES (?, ?, 'customer', ?, ?)
+#             """, (username, password_hash, full_name, email))
+#             user_id = c.lastrowid
+#         except sqlite3.IntegrityError:
+#             flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
+#             return redirect(url_for("customers"))
+        
+#         # ✅ STEP 2: Insert customer with user_id
+#         execute_query(c,"""
+#             INSERT INTO customers (
+#                 full_name, id_number, phone, email, address, user_id,
+#                 terms_accepted, terms_accepted_date, signature_data, verification_status
+#             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
+#         """, (full_name, id_number, phone, email, address, user_id, 
+#               terms_accepted, signature_data))
+        
+#         customer_id = c.lastrowid
+#         session["customer_id"] = customer_id
+        
+#         # Save uploaded files
+#         import os
+#         from werkzeug.utils import secure_filename
+        
+#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        
+#         if id_photo and id_photo.filename:
+#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c,"""
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'id_copy', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         if customer_photo and customer_photo.filename:
+#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+#             execute_query(c,"""
+#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                 VALUES (?, 'customer_photo', ?)
+#             """, (customer_id, f"uploads/{filename}"))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         # ✅ STEP 3: Show credentials to staff
+#         flash(f"Customer '{full_name}' registered successfully!", "success")
+#         flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
+#         flash("📌 Please give these credentials to the customer.", "info")
+        
+#         return redirect(url_for("customers"))
+    
+#     customers = execute_query(c,"SELECT * FROM customers ORDER BY full_name").fetchall()
+#     conn.close()
+    
+#     return render_template("customers.html", title="Customers", customers=customers)
+
+
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
 @staff_required
@@ -1597,7 +1704,9 @@ def customers():
         address = request.form.get("address", "").strip()
         id_photo = request.files.get("id_photo") if request.files else None
         customer_photo = request.files.get("customer_photo") if request.files else None
-        terms_accepted = request.form.get("terms_accepted") == "on"
+        
+        # ✅ FIX: Convert checkbox to integer (1 or 0) for PostgreSQL
+        terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
         signature_data = request.form.get("signature_data", "").strip()
         
         if not full_name or not phone:
@@ -1613,7 +1722,7 @@ def customers():
         username = phone
         
         # Check if username already exists
-        existing_user = execute_query(c,"SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing_user:
             # If phone exists, try email
             if email:
@@ -1629,7 +1738,7 @@ def customers():
         
         # Insert user with role 'customer'
         try:
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO users (username, password_hash, role, full_name, email)
                 VALUES (?, ?, 'customer', ?, ?)
             """, (username, password_hash, full_name, email))
@@ -1639,7 +1748,8 @@ def customers():
             return redirect(url_for("customers"))
         
         # ✅ STEP 2: Insert customer with user_id
-        execute_query(c,"""
+        # terms_accepted is now 1 or 0 (integer), not boolean
+        execute_query(c, """
             INSERT INTO customers (
                 full_name, id_number, phone, email, address, user_id,
                 terms_accepted, terms_accepted_date, signature_data, verification_status
@@ -1660,7 +1770,7 @@ def customers():
         if id_photo and id_photo.filename:
             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'id_copy', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -1668,7 +1778,7 @@ def customers():
         if customer_photo and customer_photo.filename:
             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO customer_documents (customer_id, document_type, file_path)
                 VALUES (?, 'customer_photo', ?)
             """, (customer_id, f"uploads/{filename}"))
@@ -1683,13 +1793,11 @@ def customers():
         
         return redirect(url_for("customers"))
     
-    customers = execute_query(c,"SELECT * FROM customers ORDER BY full_name").fetchall()
+    # GET request - show customers list
+    customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
     conn.close()
     
     return render_template("customers.html", title="Customers", customers=customers)
-
-
-
 
 
 
@@ -1925,166 +2033,6 @@ def payment_history():
     )
 
 
-# @app.route("/reports/revenue")
-# @login_required
-# @staff_required
-# def revenue_report():
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get date range from query parameters
-#     period = request.args.get("period", "daily")  # daily, weekly, monthly
-#     date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
-    
-#     # =============================================
-#     # DAILY REVENUE
-#     # =============================================
-#     if period == "daily":
-#         daily_revenue = execute_query(c,"""
-#             SELECT 
-#                 date(r.payment_date) AS date,
-#                 COUNT(*) AS transactions,
-#                 COALESCE(SUM(r.amount), 0) AS total,
-#                 GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
-#             FROM rental_payments r
-#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-#             JOIN bicycles b ON b.id = dr.bicycle_id
-#             WHERE date(r.payment_date) = ?
-#             GROUP BY date(r.payment_date)
-#             ORDER BY date(r.payment_date) DESC
-#         """, (date_filter,)).fetchall()
-        
-#         # Get daily summary
-#         daily_summary = execute_query(c,"""
-#             SELECT 
-#                 COALESCE(SUM(amount), 0) AS total,
-#                 COUNT(*) AS transactions,
-#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
-#             FROM rental_payments r
-#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-#             WHERE date(r.payment_date) = ?
-#         """, (date_filter,)).fetchone()
-        
-#         # Get all available dates for dropdown
-#         available_dates = execute_query(c,"""
-#             SELECT DISTINCT date(payment_date) AS date
-#             FROM rental_payments
-#             ORDER BY date DESC
-#         """).fetchall()
-        
-#         # Get last 7 days trend
-#         weekly_trend = execute_query(c,"""
-#             SELECT 
-#                 date(r.payment_date) AS date,
-#                 COALESCE(SUM(r.amount), 0) AS total
-#             FROM rental_payments r
-#             WHERE date(r.payment_date) >= date('now', '-7 days')
-#             GROUP BY date(r.payment_date)
-#             ORDER BY date(r.payment_date) ASC
-#         """).fetchall()
-        
-#         report_title = f"Revenue Report - {date_filter}"
-    
-#     # =============================================
-#     # WEEKLY REVENUE
-#     # =============================================
-#     elif period == "weekly":
-#         # Get week number and year
-#         year = request.args.get("year", datetime.now().strftime("%Y"))
-#         week = request.args.get("week", datetime.now().strftime("%W"))
-        
-#         weekly_revenue = execute_query(c,"""
-#             SELECT 
-#                 strftime('%W', r.payment_date) AS week,
-#                 strftime('%Y', r.payment_date) AS year,
-#                 COUNT(*) AS transactions,
-#                 COALESCE(SUM(r.amount), 0) AS total
-#             FROM rental_payments r
-#             WHERE strftime('%W', r.payment_date) = ? 
-#             AND strftime('%Y', r.payment_date) = ?
-#             GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
-#             ORDER BY year DESC, week DESC
-#         """, (week, year)).fetchall()
-        
-#         weekly_summary = execute_query(c,"""
-#             SELECT 
-#                 COALESCE(SUM(amount), 0) AS total,
-#                 COUNT(*) AS transactions,
-#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
-#             FROM rental_payments r
-#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-#             WHERE strftime('%W', r.payment_date) = ? 
-#             AND strftime('%Y', r.payment_date) = ?
-#         """, (week, year)).fetchone()
-        
-#         available_weeks = execute_query(c,"""
-#             SELECT DISTINCT 
-#                 strftime('%W', payment_date) AS week,
-#                 strftime('%Y', payment_date) AS year
-#             FROM rental_payments
-#             ORDER BY year DESC, week DESC
-#             LIMIT 20
-#         """).fetchall()
-        
-#         report_title = f"Weekly Revenue Report - Week {week}, {year}"
-#         daily_revenue = weekly_revenue
-#         available_dates = available_weeks
-    
-#     # =============================================
-#     # MONTHLY REVENUE
-#     # =============================================
-#     else:  # monthly
-#         month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
-        
-#         monthly_revenue = execute_query(c,"""
-#             SELECT 
-#                 strftime('%Y-%m', r.payment_date) AS month,
-#                 COUNT(*) AS transactions,
-#                 COALESCE(SUM(r.amount), 0) AS total,
-#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
-#             FROM rental_payments r
-#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-#             WHERE strftime('%Y-%m', r.payment_date) = ?
-#             GROUP BY strftime('%Y-%m', r.payment_date)
-#             ORDER BY month DESC
-#         """, (month_filter,)).fetchall()
-        
-#         monthly_summary = execute_query(c,"""
-#             SELECT 
-#                 COALESCE(SUM(amount), 0) AS total,
-#                 COUNT(*) AS transactions,
-#                 COUNT(DISTINCT dr.customer_id) AS unique_customers
-#             FROM rental_payments r
-#             JOIN daily_rentals dr ON dr.id = r.daily_rental_id
-#             WHERE strftime('%Y-%m', r.payment_date) = ?
-#         """, (month_filter,)).fetchone()
-        
-#         available_months = execute_query(c,"""
-#             SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
-#             FROM rental_payments
-#             ORDER BY month DESC
-#         """).fetchall()
-        
-#         report_title = f"Monthly Revenue Report - {month_filter}"
-#         daily_revenue = monthly_revenue
-#         available_dates = available_months
-    
-#     conn.close()
-    
-#     return render_template(
-#         "revenue_report.html",
-#         title="Revenue Report",
-#         report_title=report_title,
-#         period=period,
-#         date_filter=date_filter,
-#         daily_revenue=daily_revenue,
-#         daily_summary=daily_summary if 'daily_summary' in locals() else None,
-#         weekly_summary=weekly_summary if 'weekly_summary' in locals() else None,
-#         monthly_summary=monthly_summary if 'monthly_summary' in locals() else None,
-#         available_dates=available_dates,
-#         weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
-#         report_type=period
-#     )
 
 @app.route("/reports/revenue")
 @login_required
@@ -3358,9 +3306,6 @@ def delete_bicycle(bicycle_id):
     return redirect(url_for("bicycles"))
 
 
-# # =============================================
-# # ANNOUNCEMENTS / COMMUNICATION
-# # =============================================
 
 # @app.route("/announcements")
 # @login_required
@@ -3373,7 +3318,7 @@ def delete_bicycle(bicycle_id):
 #     user_role = session.get("role", "staff")
     
 #     # Get all active announcements with read status
-#     announcements = execute_query(c,"""
+#     announcements_list = execute_query(c, """
 #         SELECT 
 #             a.*,
 #             CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS is_read
@@ -3382,36 +3327,22 @@ def delete_bicycle(bicycle_id):
 #         WHERE a.is_active = 1
 #         ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
 #     """, (user_id,)).fetchall()
-
-#     # """, (user_id,)).fetchone()[0]
-#     # Get unread count
-#     # unread_count = execute_query(c,"""
-#     #     SELECT COUNT(*) FROM announcements a
-#     #     LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
-#     #     WHERE a.is_active = 1 AND ar.id IS NULL
-
-#     # """, (user_id,))
-
+    
+#     # ✅ FIX: Get unread count as integer
 #     unread_result = execute_query(c, """
 #         SELECT COUNT(*) as count FROM announcements a
 #         LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
 #         WHERE a.is_active = 1 AND ar.id IS NULL
 #     """, (user_id,)).fetchone()
-
-#     # ✅ Extract the count properly
+    
 #     unread_count = unread_result['count'] if isinstance(unread_result, dict) else unread_result[0] if unread_result else 0
-
-#     total = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?", (user_id,))
-
-
-
-
+    
 #     conn.close()
     
 #     return render_template(
 #         "announcements.html",
 #         title="Announcements",
-#         announcements=announcements,
+#         announcements=announcements_list,
 #         unread_count=unread_count,
 #         user_role=user_role
 #     )
@@ -3420,6 +3351,8 @@ def delete_bicycle(bicycle_id):
 @login_required
 def announcements():
     """View all announcements."""
+    from datetime import datetime
+    
     conn = db()
     c = conn.cursor()
     
@@ -3436,6 +3369,20 @@ def announcements():
         WHERE a.is_active = 1
         ORDER BY a.is_pinned DESC, a.priority DESC, a.created_at DESC
     """, (user_id,)).fetchall()
+    
+    # ✅ FIX: Format datetime for each announcement (PostgreSQL returns datetime objects)
+    for announcement in announcements_list:
+        if announcement.get("created_at"):
+            if isinstance(announcement["created_at"], datetime):
+                announcement["created_at"] = announcement["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(announcement["created_at"], str):
+                announcement["created_at"] = announcement["created_at"]
+        
+        if announcement.get("updated_at"):
+            if isinstance(announcement["updated_at"], datetime):
+                announcement["updated_at"] = announcement["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(announcement["updated_at"], str):
+                announcement["updated_at"] = announcement["updated_at"]
     
     # ✅ FIX: Get unread count as integer
     unread_result = execute_query(c, """
@@ -3455,8 +3402,6 @@ def announcements():
         unread_count=unread_count,
         user_role=user_role
     )
-
-
 
 
 @app.route("/announcements/create", methods=["GET", "POST"])
@@ -3498,17 +3443,61 @@ def create_announcement():
     return render_template("create_announcement.html", title="Create Announcement")
 
 
+# @app.route("/announcements/<int:announcement_id>")
+# @login_required
+# def view_announcement(announcement_id):
+#     """View a single announcement with comments."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     user_id = session["user_id"]
+    
+#     # Get announcement
+#     announcement = execute_query(c,"""
+#         SELECT * FROM announcements WHERE id = ? AND is_active = 1
+#     """, (announcement_id,)).fetchone()
+    
+#     if not announcement:
+#         flash("Announcement not found.", "danger")
+#         return redirect(url_for("announcements"))
+    
+#     # Mark as read
+#     execute_query(c,"""
+#         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
+#         VALUES (?, ?)
+#     """, (announcement_id, user_id))
+    
+#     # Get comments
+#     comments = execute_query(c,"""
+#         SELECT * FROM announcement_comments 
+#         WHERE announcement_id = ? 
+#         ORDER BY created_at ASC
+#     """, (announcement_id,)).fetchall()
+    
+#     conn.commit()
+#     conn.close()
+    
+#     return render_template(
+#         "view_announcement.html",
+#         title=announcement["title"],
+#         announcement=announcement,
+#         comments=comments
+#     )
+
+
 @app.route("/announcements/<int:announcement_id>")
 @login_required
 def view_announcement(announcement_id):
     """View a single announcement with comments."""
+    from datetime import datetime
+    
     conn = db()
     c = conn.cursor()
     
     user_id = session["user_id"]
     
     # Get announcement
-    announcement = execute_query(c,"""
+    announcement = execute_query(c, """
         SELECT * FROM announcements WHERE id = ? AND is_active = 1
     """, (announcement_id,)).fetchone()
     
@@ -3516,18 +3505,33 @@ def view_announcement(announcement_id):
         flash("Announcement not found.", "danger")
         return redirect(url_for("announcements"))
     
+    # ✅ FIX: Format datetime for announcement
+    if announcement.get("created_at"):
+        if isinstance(announcement["created_at"], datetime):
+            announcement["created_at"] = announcement["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+    if announcement.get("updated_at"):
+        if isinstance(announcement["updated_at"], datetime):
+            announcement["updated_at"] = announcement["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
     # Mark as read
-    execute_query(c,"""
+    execute_query(c, """
         INSERT OR IGNORE INTO announcement_reads (announcement_id, user_id)
         VALUES (?, ?)
     """, (announcement_id, user_id))
     
     # Get comments
-    comments = execute_query(c,"""
+    comments = execute_query(c, """
         SELECT * FROM announcement_comments 
         WHERE announcement_id = ? 
         ORDER BY created_at ASC
     """, (announcement_id,)).fetchall()
+    
+    # ✅ FIX: Format datetime for comments
+    for comment in comments:
+        if comment.get("created_at"):
+            if isinstance(comment["created_at"], datetime):
+                comment["created_at"] = comment["created_at"].strftime("%Y-%m-%d %H:%M:%S")
     
     conn.commit()
     conn.close()
@@ -3538,6 +3542,7 @@ def view_announcement(announcement_id):
         announcement=announcement,
         comments=comments
     )
+
 
 
 @app.route("/announcements/<int:announcement_id>/comment", methods=["POST"])
@@ -3630,283 +3635,6 @@ def mark_all_read():
 
 
 
-
-# # =============================================
-# # ANALYTICS DASHBOARD
-# # =============================================
-
-# @app.route("/analytics")
-# @login_required
-# @staff_required
-# @manager_required
-# def analytics_dashboard():
-#     """Comprehensive analytics dashboard for admin and managers."""
-#     from datetime import datetime  # 👈 Add this import at the top of the function
-#     conn = db()
-#     c = conn.cursor()
-
-
-
-    
-#     # =============================================
-#     # OVERVIEW METRICS
-#     # =============================================
-    
-#     # # Total Revenue
-
-#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
-
-
-
-#     # # Total Rentals
-
-#     total_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals")
-
-    
-#     # # Active Rentals
-
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-    
-#     # # Total Customers
-
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-    
-#     # # Verified Customers
-
-#     verified_customers = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Verified'")
-    
-#     # # Total Bicycles
-
-#     total_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles")
-    
-#     # # Available Bicycles
-
-#     available_bicycles = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-    
-#     # =============================================
-#     # REVENUE TRENDS
-#     # =============================================
-  
-
-#     # Daily Revenue (Last 30 days)
-#     daily_revenue = execute_query(c,"""
-#         SELECT 
-#             date(payment_date) AS date,
-#             COALESCE(SUM(amount), 0) AS revenue,
-#             COUNT(*) AS transactions
-#         FROM rental_payments
-#         WHERE date(payment_date) >= date('now', '-30 days')
-#         GROUP BY date(payment_date)
-#         ORDER BY date(payment_date) ASC
-#     """).fetchall()
-    
-#     # Weekly Revenue (Last 12 weeks)
-#     weekly_revenue = execute_query(c,"""
-#         SELECT 
-#             strftime('%W', payment_date) AS week,
-#             strftime('%Y', payment_date) AS year,
-#             COALESCE(SUM(amount), 0) AS revenue,
-#             COUNT(*) AS transactions
-#         FROM rental_payments
-#         WHERE date(payment_date) >= date('now', '-84 days')
-#         GROUP BY week, year
-#         ORDER BY year ASC, week ASC
-#     """).fetchall()
-    
-#     # Monthly Revenue (Last 12 months)
-#     monthly_revenue = execute_query(c,"""
-#         SELECT 
-#             strftime('%Y-%m', payment_date) AS month,
-#             COALESCE(SUM(amount), 0) AS revenue,
-#             COUNT(*) AS transactions
-#         FROM rental_payments
-#         WHERE date(payment_date) >= date('now', '-365 days')
-#         GROUP BY month
-#         ORDER BY month ASC
-#     """).fetchall()
-    
-#     # =============================================
-#     # BICYCLE ANALYTICS
-#     # =============================================
-    
-#     # Most Rented Bicycles
-#     top_bicycles = execute_query(c,"""
-#         SELECT 
-#             b.bike_code,
-#             b.brand,
-#             b.model,
-#             b.bike_type,
-#             COUNT(r.id) AS rental_count,
-#             COALESCE(SUM(r.total_cost), 0) AS total_revenue,
-#             COALESCE(SUM(r.total_hours), 0) AS total_hours
-#         FROM bicycles b
-#         LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
-#         GROUP BY b.id
-#         ORDER BY rental_count DESC
-#         LIMIT 10
-#     """).fetchall()
-    
-#     # Bike Type Performance
-#     bike_type_stats = execute_query(c,"""
-#         SELECT 
-#             b.bike_type,
-#             COUNT(b.id) AS bike_count,
-#             COUNT(r.id) AS rental_count,
-#             COALESCE(SUM(r.total_cost), 0) AS total_revenue,
-#             COALESCE(AVG(r.total_cost), 0) AS avg_revenue
-#         FROM bicycles b
-#         LEFT JOIN daily_rentals r ON r.bicycle_id = b.id
-#         GROUP BY b.bike_type
-#         ORDER BY total_revenue DESC
-#     """).fetchall()
-    
-#     # =============================================
-#     # CUSTOMER ANALYTICS
-#     # =============================================
-    
-#     # Top Customers
-#     top_customers = execute_query(c,"""
-#         SELECT 
-#             c.id,
-#             c.full_name,
-#             c.phone,
-#             COUNT(r.id) AS rental_count,
-#             COALESCE(SUM(r.total_cost), 0) AS total_spent,
-#             COALESCE(lp.points, 0) AS points
-#         FROM customers c
-#         LEFT JOIN daily_rentals r ON r.customer_id = c.id
-#         LEFT JOIN loyalty_points lp ON lp.customer_id = c.id
-#         GROUP BY c.id
-#         ORDER BY total_spent DESC
-#         LIMIT 10
-#     """).fetchall()
-    
-#     # New Customers Over Time (Last 30 days)
-#     new_customers = execute_query(c,"""
-#         SELECT 
-#             date(created_at) AS date,
-#             COUNT(*) AS count
-#         FROM customers
-#         WHERE date(created_at) >= date('now', '-30 days')
-#         GROUP BY date(created_at)
-#         ORDER BY date(created_at) ASC
-#     """).fetchall()
-    
-#     # =============================================
-#     # PAYMENT ANALYTICS
-#     # =============================================
-    
-#     # Payment Method Breakdown
-#     payment_methods = execute_query(c,"""
-#         SELECT 
-#             payment_method,
-#             COUNT(*) AS count,
-#             COALESCE(SUM(amount), 0) AS total
-#         FROM rental_payments
-#         GROUP BY payment_method
-#         ORDER BY total DESC
-#     """).fetchall()
-    
-#     # Average Rental Duration
-#     avg_duration = execute_query(c,"""
-#         SELECT 
-#             COALESCE(AVG(total_hours), 0) AS avg_hours,
-#             MIN(total_hours) AS min_hours,
-#             MAX(total_hours) AS max_hours
-#         FROM daily_rentals
-#         WHERE status = 'Completed' AND total_hours > 0
-#     """).fetchone()
-    
-#     # Revenue by Day of Week
-#     revenue_by_day = execute_query(c,"""
-#         SELECT 
-#             CASE strftime('%w', payment_date)
-#                 WHEN '0' THEN 'Sunday'
-#                 WHEN '1' THEN 'Monday'
-#                 WHEN '2' THEN 'Tuesday'
-#                 WHEN '3' THEN 'Wednesday'
-#                 WHEN '4' THEN 'Thursday'
-#                 WHEN '5' THEN 'Friday'
-#                 WHEN '6' THEN 'Saturday'
-#             END AS day_name,
-#             COALESCE(SUM(amount), 0) AS revenue,
-#             COUNT(*) AS transactions
-#         FROM rental_payments
-#         GROUP BY strftime('%w', payment_date)
-#         ORDER BY strftime('%w', payment_date)
-#     """).fetchall()
-
-
-#     # =============================================
-#     # MAINTENANCE ANALYTICS
-#     # =============================================
-    
-#     maintenance_stats = execute_query(c,"""
-#         SELECT 
-#             COUNT(*) AS total,
-#             SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
-#             SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) AS in_progress,
-#             SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
-#             SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
-#             COALESCE(SUM(cost), 0) AS total_cost
-#         FROM maintenance_records
-#     """).fetchone()
-    
-#     # =============================================
-#     # DISCOUNT ANALYTICS
-#     # =============================================
-    
-#     discount_stats = execute_query(c,"""
-#         SELECT 
-#             COUNT(*) AS total_used,
-#             COALESCE(SUM(amount_discounted), 0) AS total_savings
-#         FROM discount_usage
-#     """).fetchone()
-    
-#     conn.close()
-    
-#     #Prepare data for charts
-#     chart_data = {
-#         "daily_dates": [row["date"] for row in daily_revenue],
-#         "daily_revenue": [row["revenue"] for row in daily_revenue],
-#         "daily_transactions": [row["transactions"] for row in daily_revenue],
-#         "monthly_months": [row["month"] for row in monthly_revenue],
-#         "monthly_revenue": [row["revenue"] for row in monthly_revenue],
-#         "new_customers_dates": [row["date"] for row in new_customers],
-#         "new_customers_count": [row["count"] for row in new_customers],
-#         "week_days": [row["day_name"] for row in revenue_by_day],
-#         "week_revenue": [row["revenue"] for row in revenue_by_day],
-
-
-
-   
-#     }
-    
-#     return render_template(
-#         "analytics.html",
-#         title="Analytics Dashboard",
-#         now=datetime.now(),  # 👈 Pass datetime to template
-#         total_revenue=total_revenue,
-#         total_rentals=total_rentals,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         verified_customers=verified_customers,
-#         total_bicycles=total_bicycles,
-#         available_bicycles=available_bicycles,
-#         daily_revenue=daily_revenue,
-#         weekly_revenue=weekly_revenue,
-#         monthly_revenue=monthly_revenue,
-#         top_bicycles=top_bicycles,
-#         bike_type_stats=bike_type_stats,
-#         top_customers=top_customers,
-#         new_customers=new_customers,
-#         payment_methods=payment_methods,
-#         avg_duration=avg_duration,
-#         revenue_by_day=revenue_by_day,
-#         maintenance_stats=maintenance_stats,
-#         discount_stats=discount_stats,
-#         chart_data=chart_data
-#     )
 
 
 

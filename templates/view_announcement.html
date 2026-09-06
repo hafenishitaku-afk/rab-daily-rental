@@ -18,7 +18,7 @@
         <h1 style="margin:0;">{{ announcement.title }}</h1>
         <p style="color:#667085;font-size:14px;margin:5px 0 0 0;">
             Posted by <b>{{ announcement.author_name }}</b> ({{ announcement.author_role }}) 
-            on {{ announcement.created_at[:16] }}
+            on {{ announcement.created_at }}
             {% if announcement.updated_at != announcement.created_at %}
             · Updated: {{ announcement.updated_at[:16] }}
             {% endif %}
@@ -66,7 +66,7 @@
                     <b>{{ c.user_name }}</b>
                     <span style="color:#667085;font-size:12px;">({{ c.user_role }})</span>
                 </div>
-                <span style="color:#667085;font-size:12px;">{{ c.created_at[:16] }}</span>
+                <span style="color:#667085;font-size:12px;">{{ c.created_at }}</span>
             </div>
             <p style="margin:5px 0 0 0;white-space:pre-wrap;">{{ c.comment }}</p>
         </div>
