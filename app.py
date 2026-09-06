@@ -159,21 +159,35 @@ def get_count(cursor, query, params=None):
 
 
 
+
+
+
+
 # =============================================
 # NOTIFICATION CONFIGURATION
 # =============================================
 EMAIL_ENABLED = True
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
-EMAIL_USER = os.environ.get("EMAIL_USER", "your-email@gmail.com")
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "your-app-password")
+EMAIL_USER = os.environ.get("EMAIL_USER", "")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@rab.com")
 
-# SMS settings
-SMS_ENABLED = False  # Set to True when Twilio is configured
+# =============================================
+# TWILIO SMS CONFIGURATION
+# =============================================
 
+SMS_ENABLED = True  # ✅ Enable SMS
 
+# ✅ These MUST be set in Render environment variables
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
 
+# Optional: Check if credentials are set
+if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+    print("⚠️ Warning: Twilio credentials not fully configured")
+    SMS_ENABLED = False  # Disable SMS if credentials missing
 
 
 def login_required(f):
@@ -4223,26 +4237,51 @@ def bicycle_utilization():
 
 
 
-# =============================================
-# NOTIFICATION FUNCTIONS
-# =============================================
+# # =============================================
+# # NOTIFICATION FUNCTIONS
+# # =============================================
+# @login_required
+# def send_email_notification(to_email, subject, body):
+#     """Send email notification (development mode - prints to console)."""
+#     if not EMAIL_ENABLED:
+#         return False
+    
+#     print("\n" + "=" * 60)
+#     print("📧 EMAIL NOTIFICATION")
+#     print("=" * 60)
+#     print(f"To: {to_email}")
+#     print(f"Subject: {subject}")
+#     print("-" * 60)
+#     print(body)
+#     print("=" * 60 + "\n")
+    
+#     # For production, uncomment this:
+#     """
+#     try:
+#         msg = MIMEMultipart()
+#         msg['From'] = EMAIL_FROM
+#         msg['To'] = to_email
+#         msg['Subject'] = subject
+#         msg.attach(MIMEText(body, 'plain'))
+        
+#         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
+#         server.starttls()
+#         server.login(EMAIL_USER, EMAIL_PASSWORD)
+#         server.send_message(msg)
+#         server.quit()
+#         return True
+#     except Exception as e:
+#         print(f"Email error: {e}")
+#         return False
+#     """
+#     return True
+
 @login_required
 def send_email_notification(to_email, subject, body):
-    """Send email notification (development mode - prints to console)."""
+    """Send email notification."""
     if not EMAIL_ENABLED:
         return False
     
-    print("\n" + "=" * 60)
-    print("📧 EMAIL NOTIFICATION")
-    print("=" * 60)
-    print(f"To: {to_email}")
-    print(f"Subject: {subject}")
-    print("-" * 60)
-    print(body)
-    print("=" * 60 + "\n")
-    
-    # For production, uncomment this:
-    """
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_FROM
@@ -4255,41 +4294,84 @@ def send_email_notification(to_email, subject, body):
         server.login(EMAIL_USER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
+        
+        print(f"✅ Email sent to {to_email}")
         return True
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"❌ Email error: {e}")
         return False
-    """
-    return True
+
+
+
 
 @login_required
 def send_sms_notification(phone_number, message):
-    """Send SMS notification (development mode - prints to console)."""
+    """Send SMS notification using Twilio."""
     if not SMS_ENABLED:
-        print("\n" + "=" * 60)
-        print("📱 SMS NOTIFICATION (Simulated)")
-        print("=" * 60)
-        print(f"To: {phone_number}")
-        print("-" * 60)
-        print(message)
-        print("=" * 60 + "\n")
+        print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
         return True
     
-    # For production, uncomment this:
-    """
     try:
+        from twilio.rest import Client
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        message = client.messages.create(
+        sms = client.messages.create(
             body=message,
             from_=TWILIO_PHONE_NUMBER,
             to=phone_number
         )
+        print(f"✅ SMS sent to {phone_number}")
+        print(f"   SID: {sms.sid}")
         return True
     except Exception as e:
-        print(f"SMS error: {e}")
+        print(f"❌ SMS error: {e}")
         return False
-    """
-    return True
+
+# def send_sms_notification(phone_number, message):
+#     """Send SMS notification using Twilio."""
+#     if not SMS_ENABLED:
+#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
+#         return True
+    
+#     try:
+#         from twilio.rest import Client
+#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+#         sms = client.messages.create(
+#             body=message,
+#             from_=TWILIO_PHONE_NUMBER,
+#             to=phone_number
+#         )
+#         print(f"✅ SMS sent to {phone_number}")
+#         return True
+#     except Exception as e:
+#         print(f"❌ SMS error: {e}")
+#         return False
+# def send_sms_notification(phone_number, message):
+#     """Send SMS notification (development mode - prints to console)."""
+#     if not SMS_ENABLED:
+#         print("\n" + "=" * 60)
+#         print("📱 SMS NOTIFICATION (Simulated)")
+#         print("=" * 60)
+#         print(f"To: {phone_number}")
+#         print("-" * 60)
+#         print(message)
+#         print("=" * 60 + "\n")
+#         return True
+    
+#     # For production, uncomment this:
+#     """
+#     try:
+#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+#         message = client.messages.create(
+#             body=message,
+#             from_=TWILIO_PHONE_NUMBER,
+#             to=phone_number
+#         )
+#         return True
+#     except Exception as e:
+#         print(f"SMS error: {e}")
+#         return False
+#     """
+#     return True
 
 # @login_required
 # def send_reminder(rental_id):
