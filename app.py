@@ -1376,26 +1376,68 @@ def profile():
 
 
 
+# @app.route("/customer-rentals")
+# @login_required
+# @customer_required
+# def customer_rentals():
+#     """Customer view - only their own rentals."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get customer ID
+#     customer = execute_query(c,
+#         "SELECT id FROM customers WHERE user_id = ?", 
+#         (session["user_id"],)
+#     ).fetchone()
+    
+#     if not customer:
+#         flash("Customer profile not found.", "danger")
+#         return redirect(url_for("customer_portal"))
+    
+#     # Get customer's rentals only
+#     rentals = execute_query(c,"""
+#         SELECT 
+#             r.*,
+#             b.bike_code,
+#             b.brand,
+#             b.model
+#         FROM daily_rentals r
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.customer_id = ?
+#         ORDER BY r.start_time DESC
+#     """, (customer["id"],)).fetchall()
+    
+#     conn.close()
+    
+#     return render_template(
+#         "customer_rentals.html",
+#         title="My Rentals",
+#         rentals=rentals
+#     )
+
+
+
 @app.route("/customer-rentals")
 @login_required
 @customer_required
 def customer_rentals():
     """Customer view - only their own rentals."""
+    from datetime import datetime  # ✅ Add this import
+    
     conn = db()
     c = conn.cursor()
     
     # Get customer ID
-    customer = execute_query(c,
-        "SELECT id FROM customers WHERE user_id = ?", 
-        (session["user_id"],)
-    ).fetchone()
+    customer = execute_query(c, """
+        SELECT id FROM customers WHERE user_id = ?
+    """, (session["user_id"],)).fetchone()
     
     if not customer:
         flash("Customer profile not found.", "danger")
         return redirect(url_for("customer_portal"))
     
     # Get customer's rentals only
-    rentals = execute_query(c,"""
+    rentals = execute_query(c, """
         SELECT 
             r.*,
             b.bike_code,
@@ -1407,6 +1449,15 @@ def customer_rentals():
         ORDER BY r.start_time DESC
     """, (customer["id"],)).fetchall()
     
+    # ✅ FIX: Format datetime for each rental
+    for rental in rentals:
+        if rental.get("start_time"):
+            if isinstance(rental["start_time"], datetime):
+                rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+        if rental.get("end_time"):
+            if isinstance(rental["end_time"], datetime):
+                rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+    
     conn.close()
     
     return render_template(
@@ -1414,6 +1465,9 @@ def customer_rentals():
         title="My Rentals",
         rentals=rentals
     )
+
+
+
 
 
 @app.route("/customer-rent")
@@ -5635,26 +5689,71 @@ def export_maintenance_csv():
 
 
 
+# @app.route("/customer-portal")
+# @login_required
+# @customer_required
+# def customer_portal():
+#     """Customer self-service portal."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get customer data
+#     customer = execute_query(c,
+#         "SELECT * FROM customers WHERE user_id = ?", 
+#         (session["user_id"],)
+#     ).fetchone()
+    
+#     if not customer:
+#         flash("Customer profile not found. Please contact staff.", "warning")
+#         return redirect(url_for("profile"))
+    
+#     # Get rental history
+#     rentals = execute_query(c,"""
+#         SELECT r.*, b.bike_code, b.brand, b.model
+#         FROM daily_rentals r
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.customer_id = ?
+#         ORDER BY r.start_time DESC
+#         LIMIT 10
+#     """, (customer["id"],)).fetchall()
+    
+#     # Get loyalty points
+#     points = execute_query(c,
+#         "SELECT * FROM loyalty_points WHERE customer_id = ?", 
+#         (customer["id"],)
+#     ).fetchone()
+    
+#     conn.close()
+    
+#     return render_template(
+#         "customer_portal.html",
+#         title="My Account",
+#         customer=customer,
+#         rentals=rentals,
+#         points=points
+#     )
+
 @app.route("/customer-portal")
 @login_required
 @customer_required
 def customer_portal():
     """Customer self-service portal."""
+    from datetime import datetime  # ✅ Add this import
+    
     conn = db()
     c = conn.cursor()
     
     # Get customer data
-    customer = execute_query(c,
-        "SELECT * FROM customers WHERE user_id = ?", 
-        (session["user_id"],)
-    ).fetchone()
+    customer = execute_query(c, """
+        SELECT * FROM customers WHERE user_id = ?
+    """, (session["user_id"],)).fetchone()
     
     if not customer:
         flash("Customer profile not found. Please contact staff.", "warning")
         return redirect(url_for("profile"))
     
     # Get rental history
-    rentals = execute_query(c,"""
+    rentals = execute_query(c, """
         SELECT r.*, b.bike_code, b.brand, b.model
         FROM daily_rentals r
         JOIN bicycles b ON b.id = r.bicycle_id
@@ -5663,11 +5762,19 @@ def customer_portal():
         LIMIT 10
     """, (customer["id"],)).fetchall()
     
+    # ✅ FIX: Format datetime for each rental
+    for rental in rentals:
+        if rental.get("start_time"):
+            if isinstance(rental["start_time"], datetime):
+                rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+        if rental.get("end_time"):
+            if isinstance(rental["end_time"], datetime):
+                rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+    
     # Get loyalty points
-    points = execute_query(c,
-        "SELECT * FROM loyalty_points WHERE customer_id = ?", 
-        (customer["id"],)
-    ).fetchone()
+    points = execute_query(c, """
+        SELECT * FROM loyalty_points WHERE customer_id = ?
+    """, (customer["id"],)).fetchone()
     
     conn.close()
     
@@ -5678,6 +5785,8 @@ def customer_portal():
         rentals=rentals,
         points=points
     )
+
+
 
 
 
