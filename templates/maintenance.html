@@ -74,7 +74,7 @@
                             {{ r.status }}
                         </span>
                     </td>
-                    <td>{{ r.scheduled_date[:10] if r.scheduled_date else '—' }}</td>
+                    <td>{{ r.scheduled_date if r.scheduled_date else '—' }}</td>
                     <td>
                         <div style="display:flex;gap:5px;flex-wrap:wrap;">
                             {% if session.role == 'admin' or session.role == 'manager' %}

@@ -69,12 +69,12 @@
     <div class="grid">
         <div class="metric">
             <div class="label">Last Maintenance</div>
-            <div class="value" style="font-size:18px;">{{ bicycle.last_maintenance_date[:10] if bicycle.last_maintenance_date else 'Never' }}</div>
+            <div class="value" style="font-size:18px;">{{ bicycle.last_maintenance_date if bicycle.last_maintenance_date else 'Never' }}</div>
         </div>
         <div class="metric">
             <div class="label">Next Maintenance Due</div>
             <div class="value" style="font-size:18px;color:{% if bicycle.next_maintenance_due and bicycle.next_maintenance_due <= now %} #dc3545 {% else %} #0d1f46 {% endif %};">
-                {{ bicycle.next_maintenance_due[:10] if bicycle.next_maintenance_due else 'Not scheduled' }}
+                {{ bicycle.next_maintenance_due if bicycle.next_maintenance_due else 'Not scheduled' }}
             </div>
         </div>
         <div class="metric">
@@ -98,7 +98,7 @@
             </tr>
             {% for h in health_history %}
             <tr>
-                <td>{{ h.recorded_at[:16] }}</td>
+                <td>{{ h.recorded_at }}</td>
                 <td>
                     <span style="color:{% if h.health_score >= 80 %}#16834b{% elif h.health_score >= 60 %}#17a2b8{% elif h.health_score >= 40 %}#ffd700{% elif h.health_score >= 20 %}#dc3545{% else %}#8b0000{% endif %};font-weight:bold;">
                         {{ h.health_score }}/100
@@ -134,7 +134,7 @@
             </tr>
             {% for m in maintenance %}
             <tr>
-                <td>{{ m.created_at[:10] }}</td>
+                <td>{{ m.created_at }}</td>
                 <td><span class="badge blue">{{ m.maintenance_type }}</span></td>
                 <td>{{ m.description or '—' }}</td>
                 <td>N$ {{ "%.2f"|format(m.cost or 0) }}</td>
@@ -167,7 +167,7 @@
             </tr>
             {% for r in rentals %}
             <tr>
-                <td>{{ r.start_time[:16] }}</td>
+                <td>{{ r.start_time }}</td>
                 <td>{{ r.full_name }}</td>
                 <td>{{ "%.1f"|format(r.total_hours or 0) }}</td>
                 <td>N$ {{ "%.2f"|format(r.total_cost or 0) }}</td>

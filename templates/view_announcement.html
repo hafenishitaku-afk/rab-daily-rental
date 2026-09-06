@@ -20,7 +20,7 @@
             Posted by <b>{{ announcement.author_name }}</b> ({{ announcement.author_role }}) 
             on {{ announcement.created_at }}
             {% if announcement.updated_at != announcement.created_at %}
-            · Updated: {{ announcement.updated_at[:16] }}
+            · Updated: {{ announcement.updated_at }}
             {% endif %}
         </p>
     </div>

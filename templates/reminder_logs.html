@@ -18,7 +18,7 @@
             {% if logs %}
                 {% for log in logs %}
                 <tr>
-                    <td>{{ log.sent_at[:16] }}</td>
+                    <td>{{ log.sent_at }}</td>
                     <td><b>{{ log.full_name }}</b></td>
                     <td>{{ log.bike_code }}</td>
                     <td>

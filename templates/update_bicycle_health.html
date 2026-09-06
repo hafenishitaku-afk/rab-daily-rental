@@ -73,7 +73,7 @@
         </div>
         <div class="metric">
             <div class="label">Last Updated</div>
-            <div class="value" style="font-size:18px;">{{ health.updated_at[:16] if health and health.updated_at else 'Never' }}</div>
+            <div class="value" style="font-size:18px;">{{ health.updated_at if health and health.updated_at else 'Never' }}</div>
         </div>
     </div>
 </div>

@@ -26,8 +26,8 @@
                         <br>
                         <small>{{ r.brand or '' }} {{ r.model or '' }}</small>
                     </td>
-                    <td>{{ r.start_time[:16] }}</td>
-                    <td>{{ r.end_time[:16] if r.end_time else '—' }}</td>
+                    <td>{{ r.start_time }}</td>
+                    <td>{{ r.end_time if r.end_time else '—' }}</td>
                     <td>{{ "%.1f"|format(r.total_hours or 0) }}</td>
                     <td>N$ {{ "%.2f"|format(r.total_cost or 0) }}</td>
                     <td>
