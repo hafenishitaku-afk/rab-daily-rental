@@ -4275,6 +4275,31 @@ def send_email_notification(to_email, subject, body):
         # ✅ Don't fail - just log and continue
         return True
 
+# def send_sms_notification(phone_number, message):
+#     """Send SMS notification using Twilio."""
+#     if not SMS_ENABLED:
+#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
+#         return True
+    
+#     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+#         print(f"⚠️ Twilio credentials missing. SMS not sent to {phone_number}")
+#         return True  # ✅ Don't fail
+    
+#     try:
+#         from twilio.rest import Client
+#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+#         sms = client.messages.create(
+#             body=message,
+#             from_=TWILIO_PHONE_NUMBER,
+#             to=phone_number
+#         )
+#         print(f"✅ SMS sent to {phone_number}")
+#         print(f"   SID: {sms.sid}")
+#         return True
+#     except Exception as e:
+#         print(f"❌ SMS error: {e}")
+#         return True  # ✅ Don't fail
+
 def send_sms_notification(phone_number, message):
     """Send SMS notification using Twilio."""
     if not SMS_ENABLED:
@@ -4283,24 +4308,35 @@ def send_sms_notification(phone_number, message):
     
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
         print(f"⚠️ Twilio credentials missing. SMS not sent to {phone_number}")
-        return True  # ✅ Don't fail
+        return True
     
     try:
         from twilio.rest import Client
+        
+        # ✅ Simplify for trial account
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        
+        # ✅ Remove any extra parameters that trial accounts don't support
         sms = client.messages.create(
-            body=message,
+            body=message[:160],  # Truncate to 160 chars for SMS
             from_=TWILIO_PHONE_NUMBER,
             to=phone_number
+            # Remove any other parameters like status_callback, etc.
         )
+        
         print(f"✅ SMS sent to {phone_number}")
         print(f"   SID: {sms.sid}")
         return True
     except Exception as e:
         print(f"❌ SMS error: {e}")
-        return True  # ✅ Don't fail
-
-
+        
+        # ✅ Check if it's a trial account restriction
+        if "trial accounts have limited parameter access" in str(e):
+            print("📱 Trial account restriction. Upgrade to send more SMS.")
+            # Simulate success so the app doesn't break
+            return True
+        
+        return True
 
 
 @app.route("/debug-twilio")
