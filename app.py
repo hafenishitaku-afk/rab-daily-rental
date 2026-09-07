@@ -2273,10 +2273,102 @@ def view_documents(customer_id):
 #             customer_id=customer_id
 #         )
 
+# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
+# @login_required
+# def view_document_file(customer_id, doc_id):
+#     """View a customer document."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     doc = execute_query(c, """
+#         SELECT * FROM customer_documents 
+#         WHERE id = ? AND customer_id = ?
+#     """, (doc_id, customer_id)).fetchone()
+    
+#     conn.close()
+    
+#     if not doc:
+#         flash("Document not found.", "danger")
+#         return redirect(url_for("customers"))
+    
+#     # ✅ Check if it's a Cloudinary URL or local file
+#     if doc["file_path"].startswith("http"):
+#         # Cloudinary URL - redirect directly
+#         return redirect(doc["file_path"])
+#     else:
+#         # Local file - render the view template
+#         return render_template(
+#             "view_document.html",
+#             title="View Document",
+#             doc=doc,
+#             customer_id=customer_id
+#         )
+
+
+
+# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
+# @login_required
+# def view_document_file(customer_id, doc_id):
+#     """View a customer document."""
+#     import os
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     doc = execute_query(c, """
+#         SELECT * FROM customer_documents 
+#         WHERE id = ? AND customer_id = ?
+#     """, (doc_id, customer_id)).fetchone()
+    
+#     conn.close()
+    
+#     if not doc:
+#         flash("Document not found.", "danger")
+#         return redirect(url_for("customers"))
+    
+#     file_path = doc["file_path"]
+    
+#     # ✅ Check if it's a Cloudinary URL
+#     if file_path.startswith("http"):
+#         return redirect(file_path)
+    
+#     # ✅ For local files - extract just the filename
+#     # file_path is like "uploads/id_6_xxx.png"
+#     filename = file_path.split('/')[-1]  # Get just the filename
+#     full_path = os.path.join('uploads', filename)  # Make sure it's in uploads folder
+    
+#     # Check if file exists
+#     full_file_path = os.path.join(BASE, 'static', full_path)
+#     if not os.path.exists(full_file_path):
+#         # Try alternative locations
+#         alt_paths = [
+#             file_path,  # Original path
+#             f"uploads/{filename}",  # uploads/filename
+#             filename,  # Just filename
+#         ]
+#         for alt in alt_paths:
+#             alt_full = os.path.join(BASE, 'static', alt)
+#             if os.path.exists(alt_full):
+#                 full_path = alt
+#                 break
+#         else:
+#             flash(f"Document file not found: {filename}", "danger")
+#             return redirect(url_for("view_documents", customer_id=customer_id))
+    
+#     return render_template(
+#         "view_document.html",
+#         title="View Document",
+#         doc=doc,
+#         customer_id=customer_id,
+#         file_path=full_path  # Pass the correct path to template
+#     )
+
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
 @login_required
 def view_document_file(customer_id, doc_id):
     """View a customer document."""
+    import os
+    
     conn = db()
     c = conn.cursor()
     
@@ -2291,18 +2383,41 @@ def view_document_file(customer_id, doc_id):
         flash("Document not found.", "danger")
         return redirect(url_for("customers"))
     
-    # ✅ Check if it's a Cloudinary URL or local file
-    if doc["file_path"].startswith("http"):
-        # Cloudinary URL - redirect directly
-        return redirect(doc["file_path"])
-    else:
-        # Local file - render the view template
-        return render_template(
-            "view_document.html",
-            title="View Document",
-            doc=doc,
-            customer_id=customer_id
-        )
+    file_path = doc["file_path"]
+    
+    # ✅ Check if it's a Cloudinary URL
+    if file_path.startswith("http"):
+        return redirect(file_path)
+    
+    # ✅ For local files - extract just the filename
+    filename = file_path.split('/')[-1]
+    full_path = os.path.join('uploads', filename)
+    
+    # Check if file exists
+    full_file_path = os.path.join(BASE, 'static', full_path)
+    if not os.path.exists(full_file_path):
+        alt_paths = [
+            file_path,
+            f"uploads/{filename}",
+            filename,
+        ]
+        for alt in alt_paths:
+            alt_full = os.path.join(BASE, 'static', alt)
+            if os.path.exists(alt_full):
+                full_path = alt
+                break
+        else:
+            flash(f"Document file not found: {filename}", "danger")
+            return redirect(url_for("view_documents", customer_id=customer_id))
+    
+    return render_template(
+        "view_document.html",
+        title="View Document",
+        doc=doc,
+        customer_id=customer_id,
+        file_path=full_path
+    )
+
 
 
 

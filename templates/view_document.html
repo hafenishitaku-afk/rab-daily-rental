@@ -6,7 +6,7 @@
     <a href="{{ url_for('view_documents', customer_id=customer_id) }}" class="btn">
         ← Back to Documents
     </a>
-    <a href="{{ doc.file_path }}" target="_blank" class="btn yellow">
+    <a href="{{ url_for('static', filename=file_path) }}" target="_blank" class="btn yellow">
         Open Full Size
     </a>
 </div>
@@ -17,9 +17,9 @@
     
     <div style="margin-top:20px;">
         {% if doc.file_path.endswith('.pdf') %}
-            <embed src="{{ doc.file_path }}" type="application/pdf" style="width:100%;height:500px;">
+            <embed src="{{ url_for('static', filename=file_path) }}" type="application/pdf" style="width:100%;height:500px;">
         {% else %}
-            <img src="{{ doc.file_path }}" alt="Document" style="max-width:100%;max-height:600px;border-radius:8px;border:1px solid #ddd;">
+            <img src="{{ url_for('static', filename=file_path) }}" alt="Document" style="max-width:100%;max-height:600px;border-radius:8px;border:1px solid #ddd;">
         {% endif %}
     </div>
 </div>
