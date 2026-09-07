@@ -5740,6 +5740,35 @@ with app.app_context():
             print(f"Failed to initialize database: {e2}")
 
 
+
+@app.route("/backup-uploads")
+@login_required
+@admin_required
+def backup_uploads():
+    """Download all uploaded files as a zip."""
+    import zipfile
+    from io import BytesIO
+    import os
+    
+    # Create a zip file in memory
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        for root, dirs, files in os.walk(UPLOAD_FOLDER):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, UPLOAD_FOLDER)
+                zip_file.write(file_path, arcname)
+    
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        as_attachment=True,
+        download_name="uploads_backup.zip",
+        mimetype="application/zip"
+    )
+
+
+
 if __name__ == "__main__":
     init_db()
     app.run(debug=True, port=5000)
