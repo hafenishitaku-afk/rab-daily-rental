@@ -2421,6 +2421,107 @@ def view_document_file(customer_id, doc_id):
 
 
 
+# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
+# @login_required
+# @admin_required
+# def delete_document(customer_id, doc_id):
+#     """Delete a customer document."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get the document
+#     doc = execute_query(c, """
+#         SELECT * FROM customer_documents 
+#         WHERE id = ? AND customer_id = ?
+#     """, (doc_id, customer_id)).fetchone()
+    
+#     if not doc:
+#         flash("Document not found.", "danger")
+#         return redirect(url_for("view_documents", customer_id=customer_id))
+    
+#     # Delete the document record from database
+#     execute_query(c, "DELETE FROM customer_documents WHERE id = ?", (doc_id,))
+    
+#     # ✅ Try to delete the physical file if it exists locally
+#     import os
+#     file_path = doc["file_path"]
+    
+#     # Check if it's a local file (not Cloudinary)
+#     if not file_path.startswith("http"):
+#         # Try to find and delete the file
+#         filename = file_path.split('/')[-1]
+#         possible_paths = [
+#             os.path.join(BASE, 'static', file_path),
+#             os.path.join(BASE, 'static', 'uploads', filename),
+#             os.path.join(BASE, 'static', filename),
+#         ]
+        
+#         for path in possible_paths:
+#             if os.path.exists(path):
+#                 try:
+#                     os.remove(path)
+#                     print(f"✅ Deleted file: {path}")
+#                 except Exception as e:
+#                     print(f"❌ Could not delete file: {e}")
+#                 break
+    
+#     conn.commit()
+#     conn.close()
+    
+#     flash("Document deleted successfully!", "success")
+#     return redirect(url_for("view_documents", customer_id=customer_id))
+
+@app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_document(customer_id, doc_id):
+    """Delete a customer document."""
+    conn = db()
+    c = conn.cursor()
+    
+    # Get the document
+    doc = execute_query(c, """
+        SELECT * FROM customer_documents 
+        WHERE id = ? AND customer_id = ?
+    """, (doc_id, customer_id)).fetchone()
+    
+    if not doc:
+        flash("Document not found.", "danger")
+        return redirect(url_for("view_documents", customer_id=customer_id))
+    
+    # Delete the document record from database
+    execute_query(c, "DELETE FROM customer_documents WHERE id = ?", (doc_id,))
+    
+    # ✅ Try to delete the physical file if it exists locally
+    import os
+    file_path = doc["file_path"]
+    
+    # Check if it's a local file (not Cloudinary)
+    if not file_path.startswith("http"):
+        # Try to find and delete the file
+        filename = file_path.split('/')[-1]
+        possible_paths = [
+            os.path.join(BASE, 'static', file_path),
+            os.path.join(BASE, 'static', 'uploads', filename),
+            os.path.join(BASE, 'static', filename),
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"✅ Deleted file: {path}")
+                except Exception as e:
+                    print(f"❌ Could not delete file: {e}")
+                break
+    
+    conn.commit()
+    conn.close()
+    
+    flash("Document deleted successfully!", "success")
+    return redirect(url_for("view_documents", customer_id=customer_id))
+
+
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
 @login_required
 def record_payment(rental_id):
