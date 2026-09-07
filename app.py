@@ -2054,6 +2054,37 @@ def view_documents(customer_id):
 #         doc=doc,
 #         customer_id=customer_id
 #     )
+# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
+# @login_required
+# def view_document_file(customer_id, doc_id):
+#     """View a customer document."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     doc = execute_query(c, """
+#         SELECT * FROM customer_documents 
+#         WHERE id = ? AND customer_id = ?
+#     """, (doc_id, customer_id)).fetchone()
+    
+#     conn.close()
+    
+#     if not doc:
+#         flash("Document not found.", "danger")
+#         return redirect(url_for("customers"))
+    
+#     # ✅ Check if it's a Cloudinary URL or local file
+#     if doc["file_path"].startswith("http"):
+#         # Cloudinary URL - redirect directly
+#         return redirect(doc["file_path"])
+#     else:
+#         # Local file - render the view template
+#         return render_template(
+#             "view_document.html",
+#             title="View Document",
+#             doc=doc,
+#             customer_id=customer_id
+#         )
+
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
 @login_required
 def view_document_file(customer_id, doc_id):
@@ -2084,6 +2115,7 @@ def view_document_file(customer_id, doc_id):
             doc=doc,
             customer_id=customer_id
         )
+
 
 
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
