@@ -1064,9 +1064,6 @@ def manager_required(f):
     """Decorator for manager and admin access."""
     return role_required(['admin', 'manager'])(f)
 
-# def staff_required(f):
-#     """Decorator for all logged-in users."""
-#     return login_required(f)
 
 
 def staff_required(f):
@@ -1126,13 +1123,6 @@ def users():
     
     conn.close()
     
-    # ✅ Format datetime for each user
-    # for user in users_list:
-    #     if user.get("created_at"):
-    #         if isinstance(user["created_at"], datetime):
-    #             user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
-    #         elif isinstance(user["created_at"], str):
-    #             user["created_at"] = user["created_at"][:10]
 
 
 # ✅ Format datetime for each user
@@ -1643,141 +1633,39 @@ def start_rental():
 
 
 
-# @app.route("/customers", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def customers():
-#     import os  # ✅ Add this import
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     if request.method == "POST":
-#         full_name = request.form.get("full_name", "").strip()
-#         phone = request.form.get("phone", "").strip()
-#         id_number = request.form.get("id_number", "").strip()
-#         email = request.form.get("email", "").strip()
-#         address = request.form.get("address", "").strip()
-#         id_photo = request.files.get("id_photo") if request.files else None
-#         customer_photo = request.files.get("customer_photo") if request.files else None
-        
-#         # ✅ FIX: Convert checkbox to integer (1 or 0) for PostgreSQL
-#         terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
-#         signature_data = request.form.get("signature_data", "").strip()
-        
-#         if not full_name or not phone:
-#             flash("Name and phone are required.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         if not terms_accepted:
-#             flash("You must accept the Terms & Conditions.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         # Create username
-#         username = phone
-        
-#         # Check if username already exists
-#         existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-#         if existing_user:
-#             if email:
-#                 username = email
-#             else:
-#                 username = f"cust_{phone}"
-        
-#         # Generate a random password
-#         import secrets
-#         import string
-#         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-#         password_hash = generate_password_hash(temp_password)
-        
-#         # Insert user with role 'customer'
-#         try:
-#             execute_query(c, """
-#                 INSERT INTO users (username, password_hash, role, full_name, email)
-#                 VALUES (?, ?, 'customer', ?, ?)
-#             """, (username, password_hash, full_name, email))
-            
-#             # Get the user ID after insert
-#             user_result = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-#             if user_result:
-#                 user_id = user_result['id'] if isinstance(user_result, dict) else user_result[0]
-#             else:
-#                 flash("Error: User created but ID not found.", "danger")
-#                 return redirect(url_for("customers"))
-                
-#         except sqlite3.IntegrityError:
-#             flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         # Insert customer with user_id
-#         execute_query(c, """
-#             INSERT INTO customers (
-#                 full_name, id_number, phone, email, address, user_id,
-#                 terms_accepted, terms_accepted_date, signature_data, verification_status
-#             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
-#         """, (full_name, id_number, phone, email, address, user_id, 
-#               terms_accepted, signature_data))
-        
-#         customer_id = c.lastrowid
-        
-#         # If PostgreSQL, get the customer ID differently
-#         if is_postgres:
-#             customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
-#             if customer_result:
-#                 customer_id = customer_result['id'] if isinstance(customer_result, dict) else customer_result[0]
-        
-#         session["customer_id"] = customer_id
-        
-#         # Save uploaded files
-#         from werkzeug.utils import secure_filename
-        
-#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
-#         if id_photo and id_photo.filename:
-#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c, """
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'id_copy', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         if customer_photo and customer_photo.filename:
-#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c, """
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'customer_photo', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Customer '{full_name}' registered successfully!", "success")
-#         flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
-#         flash("📌 Please give these credentials to the customer.", "info")
-        
-#         return redirect(url_for("customers"))
-    
-#     # GET request - show customers list
-#     customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
-#     conn.close()
-    
-#     return render_template("customers.html", title="Customers", customers=customers)
+
+
 
 # @app.route("/customers", methods=["GET", "POST"])
 # @login_required
 # @staff_required
 # def customers():
 #     import os
-#     import cloudinary
-#     import cloudinary.uploader
-    
 #     conn = db()
 #     c = conn.cursor()
     
 #     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     # ✅ Check if Cloudinary is configured
+#     use_cloudinary = all([
+#         os.environ.get("CLOUDINARY_CLOUD_NAME"),
+#         os.environ.get("CLOUDINARY_API_KEY"),
+#         os.environ.get("CLOUDINARY_API_SECRET")
+#     ])
+    
+#     if use_cloudinary:
+#         try:
+#             import cloudinary
+#             import cloudinary.uploader
+#             cloudinary.config(
+#                 cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+#                 api_key=os.environ.get("CLOUDINARY_API_KEY"),
+#                 api_secret=os.environ.get("CLOUDINARY_API_SECRET")
+#             )
+#             print("✅ Cloudinary configured successfully!")
+#         except Exception as e:
+#             print(f"❌ Cloudinary config error: {e}")
+#             use_cloudinary = False
     
 #     if request.method == "POST":
 #         full_name = request.form.get("full_name", "").strip()
@@ -1788,7 +1676,6 @@ def start_rental():
 #         id_photo = request.files.get("id_photo") if request.files else None
 #         customer_photo = request.files.get("customer_photo") if request.files else None
         
-#         # Convert checkbox to integer (1 or 0) for PostgreSQL
 #         terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
 #         signature_data = request.form.get("signature_data", "").strip()
         
@@ -1802,8 +1689,6 @@ def start_rental():
         
 #         # Create username
 #         username = phone
-        
-#         # Check if username already exists
 #         existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
 #         if existing_user:
 #             if email:
@@ -1811,32 +1696,30 @@ def start_rental():
 #             else:
 #                 username = f"cust_{phone}"
         
-#         # Generate a random password
+#         # Generate random password
 #         import secrets
 #         import string
 #         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
 #         password_hash = generate_password_hash(temp_password)
         
-#         # Insert user with role 'customer'
+#         # Insert user
 #         try:
 #             execute_query(c, """
 #                 INSERT INTO users (username, password_hash, role, full_name, email)
 #                 VALUES (?, ?, 'customer', ?, ?)
 #             """, (username, password_hash, full_name, email))
             
-#             # Get the user ID after insert
 #             user_result = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
 #             if user_result:
 #                 user_id = user_result['id'] if isinstance(user_result, dict) else user_result[0]
 #             else:
 #                 flash("Error: User created but ID not found.", "danger")
 #                 return redirect(url_for("customers"))
-                
 #         except sqlite3.IntegrityError:
-#             flash(f"Username '{username}' already exists. Please use a different phone or email.", "danger")
+#             flash(f"Username '{username}' already exists.", "danger")
 #             return redirect(url_for("customers"))
         
-#         # Insert customer with user_id
+#         # Insert customer
 #         execute_query(c, """
 #             INSERT INTO customers (
 #                 full_name, id_number, phone, email, address, user_id,
@@ -1846,8 +1729,6 @@ def start_rental():
 #               terms_accepted, signature_data))
         
 #         customer_id = c.lastrowid
-        
-#         # If PostgreSQL, get the customer ID differently
 #         if is_postgres:
 #             customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
 #             if customer_result:
@@ -1855,19 +1736,17 @@ def start_rental():
         
 #         session["customer_id"] = customer_id
         
-#         # ✅ Save uploaded files to Cloudinary
+#         # ✅ Save documents - try Cloudinary first, fallback to local
 #         from werkzeug.utils import secure_filename
+#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         
-#         # Check if Cloudinary is configured
-#         use_cloudinary = all([
-#             os.environ.get("CLOUDINARY_CLOUD_NAME"),
-#             os.environ.get("CLOUDINARY_API_KEY"),
-#             os.environ.get("CLOUDINARY_API_SECRET")
-#         ])
-        
-#         if use_cloudinary:
-#             # Upload to Cloudinary
-#             if id_photo and id_photo.filename:
+#         # Handle ID Photo
+#         if id_photo and id_photo.filename:
+#             uploaded = False
+            
+#             # Try Cloudinary first
+#             if use_cloudinary:
 #                 try:
 #                     upload_result = cloudinary.uploader.upload(id_photo)
 #                     file_url = upload_result['secure_url']
@@ -1876,12 +1755,32 @@ def start_rental():
 #                         VALUES (?, 'id_copy', ?)
 #                     """, (customer_id, file_url))
 #                     print(f"✅ ID uploaded to Cloudinary: {file_url}")
+#                     uploaded = True
 #                 except Exception as e:
-#                     print(f"❌ Cloudinary upload error: {e}")
+#                     print(f"❌ Cloudinary upload failed: {e}")
+            
+#             # Fallback to local storage
+#             if not uploaded:
+#                 try:
+#                     filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+#                     filepath = os.path.join(UPLOAD_FOLDER, filename)
+#                     id_photo.save(filepath)
+#                     execute_query(c, """
+#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                         VALUES (?, 'id_copy', ?)
+#                     """, (customer_id, f"uploads/{filename}"))
+#                     print(f"✅ ID saved locally: {filename}")
+#                 except Exception as e:
+#                     print(f"❌ Local save failed: {e}")
 #                     flash("Error uploading ID document.", "danger")
 #                     return redirect(url_for("customers"))
+        
+#         # Handle Customer Photo
+#         if customer_photo and customer_photo.filename:
+#             uploaded = False
             
-#             if customer_photo and customer_photo.filename:
+#             # Try Cloudinary first
+#             if use_cloudinary:
 #                 try:
 #                     upload_result = cloudinary.uploader.upload(customer_photo)
 #                     file_url = upload_result['secure_url']
@@ -1890,30 +1789,25 @@ def start_rental():
 #                         VALUES (?, 'customer_photo', ?)
 #                     """, (customer_id, file_url))
 #                     print(f"✅ Photo uploaded to Cloudinary: {file_url}")
+#                     uploaded = True
 #                 except Exception as e:
-#                     print(f"❌ Cloudinary upload error: {e}")
+#                     print(f"❌ Cloudinary upload failed: {e}")
+            
+#             # Fallback to local storage
+#             if not uploaded:
+#                 try:
+#                     filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+#                     filepath = os.path.join(UPLOAD_FOLDER, filename)
+#                     customer_photo.save(filepath)
+#                     execute_query(c, """
+#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
+#                         VALUES (?, 'customer_photo', ?)
+#                     """, (customer_id, f"uploads/{filename}"))
+#                     print(f"✅ Photo saved locally: {filename}")
+#                 except Exception as e:
+#                     print(f"❌ Local save failed: {e}")
 #                     flash("Error uploading customer photo.", "danger")
 #                     return redirect(url_for("customers"))
-#         else:
-#             # Fallback to local storage
-#             UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#             os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            
-#             if id_photo and id_photo.filename:
-#                 filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#                 id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#                 execute_query(c, """
-#                     INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                     VALUES (?, 'id_copy', ?)
-#                 """, (customer_id, f"uploads/{filename}"))
-            
-#             if customer_photo and customer_photo.filename:
-#                 filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#                 customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#                 execute_query(c, """
-#                     INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                     VALUES (?, 'customer_photo', ?)
-#                 """, (customer_id, f"uploads/{filename}"))
         
 #         conn.commit()
 #         conn.close()
@@ -1924,19 +1818,20 @@ def start_rental():
         
 #         return redirect(url_for("customers"))
     
-#     # GET request - show customers list
 #     customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
 #     conn.close()
     
 #     return render_template("customers.html", title="Customers", customers=customers)
-
-
 
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
 @staff_required
 def customers():
     import os
+    import cloudinary
+    import cloudinary.uploader
+    from werkzeug.utils import secure_filename
+    
     conn = db()
     c = conn.cursor()
     
@@ -1951,8 +1846,6 @@ def customers():
     
     if use_cloudinary:
         try:
-            import cloudinary
-            import cloudinary.uploader
             cloudinary.config(
                 cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
                 api_key=os.environ.get("CLOUDINARY_API_KEY"),
@@ -2032,8 +1925,7 @@ def customers():
         
         session["customer_id"] = customer_id
         
-        # ✅ Save documents - try Cloudinary first, fallback to local
-        from werkzeug.utils import secure_filename
+        # ✅ Save documents
         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         
@@ -2051,9 +1943,11 @@ def customers():
                         VALUES (?, 'id_copy', ?)
                     """, (customer_id, file_url))
                     print(f"✅ ID uploaded to Cloudinary: {file_url}")
+                    flash("ID document uploaded successfully!", "success")
                     uploaded = True
                 except Exception as e:
                     print(f"❌ Cloudinary upload failed: {e}")
+                    flash("Cloudinary upload failed, saving locally.", "warning")
             
             # Fallback to local storage
             if not uploaded:
@@ -2066,6 +1960,7 @@ def customers():
                         VALUES (?, 'id_copy', ?)
                     """, (customer_id, f"uploads/{filename}"))
                     print(f"✅ ID saved locally: {filename}")
+                    flash("ID document saved locally!", "success")
                 except Exception as e:
                     print(f"❌ Local save failed: {e}")
                     flash("Error uploading ID document.", "danger")
@@ -2085,9 +1980,11 @@ def customers():
                         VALUES (?, 'customer_photo', ?)
                     """, (customer_id, file_url))
                     print(f"✅ Photo uploaded to Cloudinary: {file_url}")
+                    flash("Customer photo uploaded successfully!", "success")
                     uploaded = True
                 except Exception as e:
                     print(f"❌ Cloudinary upload failed: {e}")
+                    flash("Cloudinary upload failed, saving locally.", "warning")
             
             # Fallback to local storage
             if not uploaded:
@@ -2100,6 +1997,7 @@ def customers():
                         VALUES (?, 'customer_photo', ?)
                     """, (customer_id, f"uploads/{filename}"))
                     print(f"✅ Photo saved locally: {filename}")
+                    flash("Customer photo saved locally!", "success")
                 except Exception as e:
                     print(f"❌ Local save failed: {e}")
                     flash("Error uploading customer photo.", "danger")
@@ -2118,6 +2016,9 @@ def customers():
     conn.close()
     
     return render_template("customers.html", title="Customers", customers=customers)
+
+
+
 
 
 @app.route("/customers/<int:customer_id>/verify", methods=["GET"])
@@ -2223,92 +2124,6 @@ def view_documents(customer_id):
 # @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
 # @login_required
 # def view_document_file(customer_id, doc_id):
-#     conn = db()
-#     c = conn.cursor()
-    
-#     doc = execute_query(c,"""
-#         SELECT * FROM customer_documents 
-#         WHERE id = ? AND customer_id = ?
-#     """, (doc_id, customer_id)).fetchone()
-#     conn.close()
-    
-#     if not doc:
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     return render_template(
-#         "view_document.html",
-#         title="View Document",
-#         doc=doc,
-#         customer_id=customer_id
-#     )
-# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
-# @login_required
-# def view_document_file(customer_id, doc_id):
-#     """View a customer document."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     doc = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE id = ? AND customer_id = ?
-#     """, (doc_id, customer_id)).fetchone()
-    
-#     conn.close()
-    
-#     if not doc:
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     # ✅ Check if it's a Cloudinary URL or local file
-#     if doc["file_path"].startswith("http"):
-#         # Cloudinary URL - redirect directly
-#         return redirect(doc["file_path"])
-#     else:
-#         # Local file - render the view template
-#         return render_template(
-#             "view_document.html",
-#             title="View Document",
-#             doc=doc,
-#             customer_id=customer_id
-#         )
-
-# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
-# @login_required
-# def view_document_file(customer_id, doc_id):
-#     """View a customer document."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     doc = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE id = ? AND customer_id = ?
-#     """, (doc_id, customer_id)).fetchone()
-    
-#     conn.close()
-    
-#     if not doc:
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     # ✅ Check if it's a Cloudinary URL or local file
-#     if doc["file_path"].startswith("http"):
-#         # Cloudinary URL - redirect directly
-#         return redirect(doc["file_path"])
-#     else:
-#         # Local file - render the view template
-#         return render_template(
-#             "view_document.html",
-#             title="View Document",
-#             doc=doc,
-#             customer_id=customer_id
-#         )
-
-
-
-# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
-# @login_required
-# def view_document_file(customer_id, doc_id):
 #     """View a customer document."""
 #     import os
     
@@ -2333,18 +2148,16 @@ def view_documents(customer_id):
 #         return redirect(file_path)
     
 #     # ✅ For local files - extract just the filename
-#     # file_path is like "uploads/id_6_xxx.png"
-#     filename = file_path.split('/')[-1]  # Get just the filename
-#     full_path = os.path.join('uploads', filename)  # Make sure it's in uploads folder
+#     filename = file_path.split('/')[-1]
+#     full_path = os.path.join('uploads', filename)
     
 #     # Check if file exists
 #     full_file_path = os.path.join(BASE, 'static', full_path)
 #     if not os.path.exists(full_file_path):
-#         # Try alternative locations
 #         alt_paths = [
-#             file_path,  # Original path
-#             f"uploads/{filename}",  # uploads/filename
-#             filename,  # Just filename
+#             file_path,
+#             f"uploads/{filename}",
+#             filename,
 #         ]
 #         for alt in alt_paths:
 #             alt_full = os.path.join(BASE, 'static', alt)
@@ -2360,7 +2173,7 @@ def view_documents(customer_id):
 #         title="View Document",
 #         doc=doc,
 #         customer_id=customer_id,
-#         file_path=full_path  # Pass the correct path to template
+#         file_path=full_path
 #     )
 
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
@@ -2381,43 +2194,47 @@ def view_document_file(customer_id, doc_id):
     
     if not doc:
         flash("Document not found.", "danger")
-        return redirect(url_for("customers"))
+        return redirect(url_for("view_documents", customer_id=customer_id))
     
     file_path = doc["file_path"]
     
-    # ✅ Check if it's a Cloudinary URL
+    # ✅ If it's a Cloudinary URL, redirect directly
     if file_path.startswith("http"):
         return redirect(file_path)
     
-    # ✅ For local files - extract just the filename
+    # ✅ For local files, try multiple paths
     filename = file_path.split('/')[-1]
-    full_path = os.path.join('uploads', filename)
     
-    # Check if file exists
-    full_file_path = os.path.join(BASE, 'static', full_path)
-    if not os.path.exists(full_file_path):
-        alt_paths = [
-            file_path,
-            f"uploads/{filename}",
-            filename,
-        ]
-        for alt in alt_paths:
-            alt_full = os.path.join(BASE, 'static', alt)
-            if os.path.exists(alt_full):
-                full_path = alt
-                break
-        else:
-            flash(f"Document file not found: {filename}", "danger")
-            return redirect(url_for("view_documents", customer_id=customer_id))
+    # Try to find the file in different locations
+    possible_paths = [
+        file_path,
+        f"uploads/{filename}",
+        filename,
+        f"static/uploads/{filename}",
+        os.path.join('uploads', filename)
+    ]
     
+    for path in possible_paths:
+        full_path = os.path.join(BASE, 'static', path)
+        if os.path.exists(full_path):
+            return render_template(
+                "view_document.html",
+                title="View Document",
+                doc=doc,
+                customer_id=customer_id,
+                file_path=path
+            )
+    
+    # If file not found, show error and delete option
+    flash(f"Document file not found: {filename}. The file may have been deleted.", "danger")
     return render_template(
         "view_document.html",
         title="View Document",
         doc=doc,
         customer_id=customer_id,
-        file_path=full_path
+        file_path=None,
+        file_not_found=True
     )
-
 
 
 
@@ -2471,6 +2288,7 @@ def view_document_file(customer_id, doc_id):
 #     flash("Document deleted successfully!", "success")
 #     return redirect(url_for("view_documents", customer_id=customer_id))
 
+
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
 @admin_required
@@ -2520,6 +2338,7 @@ def delete_document(customer_id, doc_id):
     
     flash("Document deleted successfully!", "success")
     return redirect(url_for("view_documents", customer_id=customer_id))
+
 
 
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
@@ -2591,108 +2410,6 @@ def record_payment(rental_id):
         remaining_balance=remaining_balance
     )
 
-# @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
-# @login_required
-# def record_payment(rental_id):
-#     conn = db()
-#     c = conn.cursor()
-    
-#     rental = execute_query(c, """
-#         SELECT r.*, c.full_name, b.bike_code
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.id = ?
-#     """, (rental_id,)).fetchone()
-    
-#     if not rental:
-#         flash("Rental not found.", "danger")
-#         return redirect(url_for("dashboard"))
-    
-#     if request.method == "POST":
-#         amount = float(request.form.get("amount", 0))
-#         payment_method = request.form.get("payment_method", "Cash")
-        
-#         if amount <= 0:
-#             flash("Payment amount must be greater than zero.", "danger")
-#             return redirect(url_for("record_payment", rental_id=rental_id))
-        
-#         # Record the payment
-#         execute_query(c, """
-#             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
-#             VALUES (?, ?, ?, 'Completed')
-#         """, (rental_id, amount, payment_method))
-        
-#         # Update rental payment status
-#         execute_query(c, """
-#             UPDATE daily_rentals 
-#             SET payment_status = 'Paid' 
-#             WHERE id = ?
-#         """, (rental_id,))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
-#         return redirect(url_for("payment_history"))
-    
-#     # ✅ FIX: Use rental_id, not user_id
-#     # Get total payments for this rental (if needed)
-#     total_paid = get_single_value(c, """
-#         SELECT COALESCE(SUM(amount), 0) 
-#         FROM rental_payments 
-#         WHERE daily_rental_id = ?
-#     """, (rental_id,))
-    
-#     # If rental has a total_cost, calculate remaining balance
-#     remaining_balance = rental["total_cost"] - total_paid if rental["total_cost"] else 0
-    
-#     conn.close()
-    
-#     return render_template(
-#         "record_payment.html",
-#         title="Record Payment",
-#         rental=rental,
-#         total_paid=total_paid,
-#         remaining_balance=remaining_balance
-#     )
-
-
-
-
-
-# @app.route("/payments")
-# @login_required
-# def payment_history():
-#     """Payment history - shows all payments."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     payments = execute_query(c, """
-#         SELECT 
-#             p.*,
-#             r.id AS rental_id,
-#             b.bike_code,
-#             c.full_name
-#         FROM rental_payments p
-#         JOIN daily_rentals r ON r.id = p.daily_rental_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         JOIN customers c ON c.id = r.customer_id
-#         ORDER BY p.payment_date DESC
-#         LIMIT 50
-#     """).fetchall()
-    
-#     # Get total revenue
-#     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
-    
-#     conn.close()
-    
-#     return render_template(
-#         "payment_history.html",
-#         title="Payment History",
-#         payments=payments,
-#         total_revenue=total_revenue
-#     )
 
 @app.route("/payments")
 @login_required
@@ -3259,316 +2976,6 @@ def rental_agreement_pdf(rental_id):
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
-
-
-# @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
-# @login_required
-# def edit_customer(customer_id):
-#     """Edit customer details."""
-#     # ✅ Check if user has permission (admin or manager)
-#     if session.get("role") not in ['admin', 'manager']:
-#         flash("You don't have permission to access this page.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get customer data
-#     customer = execute_query(c,"SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
-#     if not customer:
-#         flash("Customer not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     if request.method == "POST":
-#         full_name = request.form.get("full_name", "").strip()
-#         id_number = request.form.get("id_number", "").strip()
-#         phone = request.form.get("phone", "").strip()
-#         email = request.form.get("email", "").strip()
-#         address = request.form.get("address", "").strip()
-#         verification_status = request.form.get("verification_status", "Pending")
-        
-#         if not full_name or not phone:
-#             flash("Name and phone are required.", "danger")
-#             return redirect(url_for("edit_customer", customer_id=customer_id))
-        
-#         # Handle file uploads
-#         id_photo = request.files.get("id_photo") if request.files else None
-#         customer_photo = request.files.get("customer_photo") if request.files else None
-        
-#         execute_query(c,"""
-#             UPDATE customers 
-#             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
-#                 verification_status = ?
-#             WHERE id = ?
-#         """, (full_name, id_number, phone, email, address, verification_status, customer_id))
-        
-#         # Handle document uploads
-#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
-#         if id_photo and id_photo.filename:
-#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c,"""
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'id_copy', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         if customer_photo and customer_photo.filename:
-#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c,"""
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'customer_photo', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Customer '{full_name}' updated successfully!", "success")
-#         return redirect(url_for("customers"))
-    
-#     # Get customer documents
-#     documents = execute_query(c,"""
-#         SELECT * FROM customer_documents 
-#         WHERE customer_id = ? 
-#         ORDER BY uploaded_at DESC
-#     """, (customer_id,)).fetchall()
-    
-#     conn.close()
-    
-#     return render_template(
-#         "edit_customer.html",
-#         title="Edit Customer",
-#         customer=customer,
-#         documents=documents
-#     )
-
-
-# @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
-# @login_required
-# @manager_required
-# def edit_customer(customer_id):
-#     """Edit customer details."""
-#     from datetime import datetime  # ✅ Add this import
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get customer data
-#     customer = execute_query(c, "SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
-#     if not customer:
-#         flash("Customer not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     if request.method == "POST":
-#         full_name = request.form.get("full_name", "").strip()
-#         id_number = request.form.get("id_number", "").strip()
-#         phone = request.form.get("phone", "").strip()
-#         email = request.form.get("email", "").strip()
-#         address = request.form.get("address", "").strip()
-#         verification_status = request.form.get("verification_status", "Pending")
-        
-#         if not full_name or not phone:
-#             flash("Name and phone are required.", "danger")
-#             return redirect(url_for("edit_customer", customer_id=customer_id))
-        
-#         # Handle file uploads
-#         id_photo = request.files.get("id_photo") if request.files else None
-#         customer_photo = request.files.get("customer_photo") if request.files else None
-        
-#         execute_query(c, """
-#             UPDATE customers 
-#             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
-#                 verification_status = ?
-#             WHERE id = ?
-#         """, (full_name, id_number, phone, email, address, verification_status, customer_id))
-        
-#         # Handle document uploads
-#         import os
-#         from werkzeug.utils import secure_filename
-        
-#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
-#         if id_photo and id_photo.filename:
-#             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#             id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c, """
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'id_copy', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         if customer_photo and customer_photo.filename:
-#             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#             customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#             execute_query(c, """
-#                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                 VALUES (?, 'customer_photo', ?)
-#             """, (customer_id, f"uploads/{filename}"))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Customer '{full_name}' updated successfully!", "success")
-#         return redirect(url_for("customers"))
-    
-#     # Get customer documents
-#     documents = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE customer_id = ? 
-#         ORDER BY uploaded_at DESC
-#     """, (customer_id,)).fetchall()
-    
-#     # ✅ FIX: Format uploaded_at datetime
-#     for doc in documents:
-#         if doc.get("uploaded_at"):
-#             if isinstance(doc["uploaded_at"], datetime):
-#                 doc["uploaded_at"] = doc["uploaded_at"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(doc["uploaded_at"], str):
-#                 doc["uploaded_at"] = doc["uploaded_at"]
-    
-#     conn.close()
-    
-#     return render_template(
-#         "edit_customer.html",
-#         title="Edit Customer",
-#         customer=customer,
-#         documents=documents
-#     )
-
-
-
-# @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
-# @login_required
-# @manager_required
-# def edit_customer(customer_id):
-#     """Edit customer details."""
-#     from datetime import datetime
-#     import os
-#     import cloudinary
-#     import cloudinary.uploader
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get customer data
-#     customer = execute_query(c, "SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
-#     if not customer:
-#         flash("Customer not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     if request.method == "POST":
-#         full_name = request.form.get("full_name", "").strip()
-#         id_number = request.form.get("id_number", "").strip()
-#         phone = request.form.get("phone", "").strip()
-#         email = request.form.get("email", "").strip()
-#         address = request.form.get("address", "").strip()
-#         verification_status = request.form.get("verification_status", "Pending")
-        
-#         if not full_name or not phone:
-#             flash("Name and phone are required.", "danger")
-#             return redirect(url_for("edit_customer", customer_id=customer_id))
-        
-#         # Handle file uploads
-#         id_photo = request.files.get("id_photo") if request.files else None
-#         customer_photo = request.files.get("customer_photo") if request.files else None
-        
-#         execute_query(c, """
-#             UPDATE customers 
-#             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
-#                 verification_status = ?
-#             WHERE id = ?
-#         """, (full_name, id_number, phone, email, address, verification_status, customer_id))
-        
-#         # ✅ Save uploaded files to Cloudinary
-#         from werkzeug.utils import secure_filename
-        
-#         # Check if Cloudinary is configured
-#         use_cloudinary = all([
-#             os.environ.get("CLOUDINARY_CLOUD_NAME"),
-#             os.environ.get("CLOUDINARY_API_KEY"),
-#             os.environ.get("CLOUDINARY_API_SECRET")
-#         ])
-        
-#         if use_cloudinary:
-#             if id_photo and id_photo.filename:
-#                 try:
-#                     upload_result = cloudinary.uploader.upload(id_photo)
-#                     file_url = upload_result['secure_url']
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'id_copy', ?)
-#                     """, (customer_id, file_url))
-#                     print(f"✅ ID uploaded to Cloudinary: {file_url}")
-#                 except Exception as e:
-#                     print(f"❌ Cloudinary upload error: {e}")
-#                     flash("Error uploading ID document.", "danger")
-#                     return redirect(url_for("edit_customer", customer_id=customer_id))
-            
-#             if customer_photo and customer_photo.filename:
-#                 try:
-#                     upload_result = cloudinary.uploader.upload(customer_photo)
-#                     file_url = upload_result['secure_url']
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'customer_photo', ?)
-#                     """, (customer_id, file_url))
-#                     print(f"✅ Photo uploaded to Cloudinary: {file_url}")
-#                 except Exception as e:
-#                     print(f"❌ Cloudinary upload error: {e}")
-#                     flash("Error uploading customer photo.", "danger")
-#                     return redirect(url_for("edit_customer", customer_id=customer_id))
-#         else:
-#             # Fallback to local storage
-#             UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#             os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            
-#             if id_photo and id_photo.filename:
-#                 filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#                 id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#                 execute_query(c, """
-#                     INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                     VALUES (?, 'id_copy', ?)
-#                 """, (customer_id, f"uploads/{filename}"))
-            
-#             if customer_photo and customer_photo.filename:
-#                 filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#                 customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-#                 execute_query(c, """
-#                     INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                     VALUES (?, 'customer_photo', ?)
-#                 """, (customer_id, f"uploads/{filename}"))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Customer '{full_name}' updated successfully!", "success")
-#         return redirect(url_for("customers"))
-    
-#     # Get customer documents
-#     documents = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE customer_id = ? 
-#         ORDER BY uploaded_at DESC
-#     """, (customer_id,)).fetchall()
-    
-#     # Format uploaded_at datetime
-#     for doc in documents:
-#         if doc.get("uploaded_at"):
-#             if isinstance(doc["uploaded_at"], datetime):
-#                 doc["uploaded_at"] = doc["uploaded_at"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(doc["uploaded_at"], str):
-#                 doc["uploaded_at"] = doc["uploaded_at"]
-    
-#     conn.close()
-    
-#     return render_template(
-#         "edit_customer.html",
-#         title="Edit Customer",
-#         customer=customer,
-#         documents=documents
-#     )
 
 
 
@@ -6671,6 +6078,23 @@ with app.app_context():
             print("Database initialized successfully!")
         except Exception as e2:
             print(f"Failed to initialize database: {e2}")
+
+@app.route("/debug-cloudinary")
+@login_required
+@admin_required
+def debug_cloudinary():
+    """Debug Cloudinary configuration."""
+    import os
+    return {
+        "cloudinary_configured": all([
+            os.environ.get("CLOUDINARY_CLOUD_NAME"),
+            os.environ.get("CLOUDINARY_API_KEY"),
+            os.environ.get("CLOUDINARY_API_SECRET")
+        ]),
+        "cloud_name": os.environ.get("CLOUDINARY_CLOUD_NAME"),
+        "api_key": os.environ.get("CLOUDINARY_API_KEY")[:5] + "..." if os.environ.get("CLOUDINARY_API_KEY") else None,
+        "api_secret_set": bool(os.environ.get("CLOUDINARY_API_SECRET"))
+    }
 
 
 
