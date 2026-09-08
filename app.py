@@ -103,27 +103,11 @@ def get_single_value(cursor, query, params=None):
         return result[0] if result else 0
 
 
-# def get_duration_sql():
-#     """Return the correct duration SQL for the database."""
-#     if os.environ.get("DATABASE_URL"):
-#         # PostgreSQL - add 2 hours for Namibia time (UTC+2)
-#         return """
-#             CONCAT(
-#                 GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - (r.start_time + INTERVAL '2 hours'))) / 3600)), 'h ',
-#                 GREATEST(0, FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - (r.start_time + INTERVAL '2 hours'))) % 3600) / 60)), 'm'
-#             ) AS duration
-#         """
-#     else:
-#         # SQLite - add 2 hours for Namibia time (UTC+2)
-#         return """
-#             CAST(MAX(0, (strftime('%s', 'now') - (strftime('%s', r.start_time) + 7200))) / 3600 AS INTEGER) || 'h ' ||
-#             CAST(MAX(0, ((strftime('%s', 'now') - (strftime('%s', r.start_time) + 7200)) % 3600)) / 60 AS INTEGER) || 'm' AS duration
-#         """
 
 def get_duration_sql():
     """Return the correct duration SQL for the database."""
     if os.environ.get("DATABASE_URL"):
-        # PostgreSQL - duration from UTC time
+        # PostgreSQL - calculate duration from UTC time
         return """
             CONCAT(
                 GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600)), 'h ',
@@ -131,13 +115,11 @@ def get_duration_sql():
             ) AS duration
         """
     else:
-        # SQLite - duration from UTC time
+        # SQLite - calculate duration from UTC time
         return """
             CAST(MAX(0, (strftime('%s', 'now') - strftime('%s', r.start_time))) / 3600 AS INTEGER) || 'h ' ||
             CAST(MAX(0, ((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600)) / 60 AS INTEGER) || 'm' AS duration
         """
-
-
 
 def get_count(cursor, query, params=None):
     """Execute a count query and return the count, works for both SQLite and PostgreSQL."""
@@ -1600,6 +1582,138 @@ def customer_rent():
 #     )
 
 
+# @app.route("/dashboard")
+# @login_required
+# @staff_required
+# def dashboard():
+#     """Staff dashboard - NOT for customers."""
+#     from datetime import datetime, timedelta
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     # Stats
+#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
+#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
+#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
+#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
+    
+#     # Today's Revenue - Filter out negative values
+#     if is_postgres:
+#         today_revenue = get_single_value(c, """
+#             SELECT COALESCE(SUM(total_cost), 0) 
+#             FROM daily_rentals 
+#             WHERE DATE(created_at) = CURRENT_DATE
+#             AND status = 'Completed' 
+#             AND payment_status = 'Paid'
+#             AND total_cost >= 0
+#         """)
+#     else:
+#         today_revenue = get_single_value(c, """
+#             SELECT COALESCE(SUM(total_cost), 0) 
+#             FROM daily_rentals 
+#             WHERE date(created_at) = date('now') 
+#             AND status = 'Completed' 
+#             AND payment_status = 'Paid'
+#             AND total_cost >= 0
+#         """)
+    
+#     # Get active rentals with correct duration
+#     duration_sql = get_duration_sql()
+#     rentals = execute_query(c, f"""
+#         SELECT 
+#             r.id,
+#             c.full_name,
+#             b.bike_code,
+#             r.start_time,
+#             {duration_sql}
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.status = 'Active'
+#         ORDER BY r.start_time DESC
+#     """).fetchall()
+    
+#     # ✅ FIX: Format start_time for display - Convert UTC to Local (Namibia time)
+#     for rental in rentals:
+#         if rental.get("start_time"):
+#             if isinstance(rental["start_time"], datetime):
+#                 # Add 2 hours for Namibia time
+#                 local_start = rental["start_time"] + timedelta(hours=2)
+#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["start_time"], str):
+#                 try:
+#                     dt = datetime.fromisoformat(rental["start_time"])
+#                     local_dt = dt + timedelta(hours=2)
+#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
+#                 except:
+#                     rental["start_time"] = rental["start_time"][:16]
+    
+#     # Unpaid rentals
+#     unpaid_rentals = execute_query(c, """
+#         SELECT 
+#             r.id,
+#             c.full_name,
+#             b.bike_code,
+#             r.total_cost,
+#             r.start_time,
+#             r.end_time
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.status = 'Completed'
+#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
+#         ORDER BY r.end_time DESC
+#     """).fetchall()
+    
+#     # Format dates for unpaid rentals
+#     for rental in unpaid_rentals:
+#         if rental.get("start_time"):
+#             if isinstance(rental["start_time"], datetime):
+#                 local_start = rental["start_time"] + timedelta(hours=2)
+#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["start_time"], str):
+#                 try:
+#                     dt = datetime.fromisoformat(rental["start_time"])
+#                     local_dt = dt + timedelta(hours=2)
+#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
+#                 except:
+#                     rental["start_time"] = rental["start_time"][:16]
+        
+#         if rental.get("end_time"):
+#             if isinstance(rental["end_time"], datetime):
+#                 local_end = rental["end_time"] + timedelta(hours=2)
+#                 rental["end_time"] = local_end.strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["end_time"], str):
+#                 try:
+#                     dt = datetime.fromisoformat(rental["end_time"])
+#                     local_dt = dt + timedelta(hours=2)
+#                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
+#                 except:
+#                     rental["end_time"] = rental["end_time"][:16]
+    
+#     conn.close()
+    
+#     # Ensure revenue is never negative
+#     if today_revenue < 0:
+#         today_revenue = 0
+    
+#     return render_template(
+#         "dashboard.html",
+#         title="Dashboard - Daily Rentals",
+#         total_bikes=total_bikes,
+#         active_rentals=active_rentals,
+#         total_customers=total_customers,
+#         pending_verification=pending_verification,
+#         today_revenue=today_revenue,
+#         rentals=rentals,
+#         unpaid_rentals=unpaid_rentals
+#     )
+
+
+
 @app.route("/dashboard")
 @login_required
 @staff_required
@@ -1618,7 +1732,7 @@ def dashboard():
     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
     
-    # Today's Revenue - Filter out negative values
+    # Today's Revenue
     if is_postgres:
         today_revenue = get_single_value(c, """
             SELECT COALESCE(SUM(total_cost), 0) 
@@ -1638,7 +1752,7 @@ def dashboard():
             AND total_cost >= 0
         """)
     
-    # Get active rentals with correct duration
+    # ✅ Get active rentals with correct duration
     duration_sql = get_duration_sql()
     rentals = execute_query(c, f"""
         SELECT 
@@ -1658,7 +1772,7 @@ def dashboard():
     for rental in rentals:
         if rental.get("start_time"):
             if isinstance(rental["start_time"], datetime):
-                # Add 2 hours for Namibia time
+                # Add 2 hours for Namibia time (UTC+2)
                 local_start = rental["start_time"] + timedelta(hours=2)
                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
             elif isinstance(rental["start_time"], str):
@@ -1667,7 +1781,8 @@ def dashboard():
                     local_dt = dt + timedelta(hours=2)
                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
                 except:
-                    rental["start_time"] = rental["start_time"][:16]
+                    # If parsing fails, just take first 16 chars
+                    rental["start_time"] = rental["start_time"][:16] if len(rental["start_time"]) >= 16 else rental["start_time"]
     
     # Unpaid rentals
     unpaid_rentals = execute_query(c, """
@@ -1698,7 +1813,7 @@ def dashboard():
                     local_dt = dt + timedelta(hours=2)
                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
                 except:
-                    rental["start_time"] = rental["start_time"][:16]
+                    rental["start_time"] = rental["start_time"][:16] if len(rental["start_time"]) >= 16 else rental["start_time"]
         
         if rental.get("end_time"):
             if isinstance(rental["end_time"], datetime):
@@ -1710,7 +1825,7 @@ def dashboard():
                     local_dt = dt + timedelta(hours=2)
                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
                 except:
-                    rental["end_time"] = rental["end_time"][:16]
+                    rental["end_time"] = rental["end_time"][:16] if len(rental["end_time"]) >= 16 else rental["end_time"]
     
     conn.close()
     
@@ -1729,78 +1844,6 @@ def dashboard():
         rentals=rentals,
         unpaid_rentals=unpaid_rentals
     )
-
-
-
-# @app.route("/rentals/start", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def start_rental():
-#     conn = db()
-#     c = conn.cursor()
-    
-#     if request.method == "POST":
-#         customer_id = request.form.get("customer_id")
-#         bicycle_id = request.form.get("bicycle_id")
-#         start_time = request.form.get("start_time")
-        
-#         # Verify customer is verified
-#         customer = execute_query(c,
-#             "SELECT verification_status FROM customers WHERE id = ?",
-#             (customer_id,)
-#         ).fetchone()
-        
-#         if not customer or customer["verification_status"] != "Verified":
-#             flash("Customer must be verified before renting.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         bike = execute_query(c,
-#             "SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?",
-#             (bicycle_id,)
-#         ).fetchone()
-        
-#         if not bike:
-#             flash("Bicycle not found.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         execute_query(c,"""
-#             INSERT INTO daily_rentals (
-#                 customer_id, bicycle_id, start_time, 
-#                 hourly_rate, daily_cap, deposit_paid, status,
-#                 agreement_signed
-#             ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
-#         """, (
-#             customer_id, bicycle_id, start_time,
-#             bike["hourly_rate"], bike["daily_cap"], bike["deposit_amount"]
-#         ))
-        
-#         rental_id = c.lastrowid
-        
-#         execute_query(c,"UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Rental started successfully! Rental ID: {rental_id}", "success")
-#         return redirect(url_for("dashboard"))
-    
-#     customers = execute_query(c,
-#         "SELECT id, full_name, phone FROM customers WHERE verification_status = 'Verified' ORDER BY full_name"
-#     ).fetchall()
-    
-#     bicycles = execute_query(c,
-#         "SELECT id, bike_code, brand, model, hourly_rate, daily_cap FROM bicycles WHERE status = 'Available'"
-#     ).fetchall()
-    
-#     conn.close()
-    
-#     return render_template(
-#         "start_rental.html",
-#         title="Start Rental",
-#         customers=customers,
-#         bicycles=bicycles,
-#         now=datetime.now().strftime("%Y-%m-%dT%H:%M")
-#     )
 
 
 @app.route("/rentals/start", methods=["GET", "POST"])
