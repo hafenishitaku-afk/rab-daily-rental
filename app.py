@@ -1471,538 +1471,6 @@ def customer_rent():
 
 
 
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     """Staff dashboard - NOT for customers."""
-#     from datetime import datetime
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     # Stats
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-    
-#     # ✅ FIXED: Today's Revenue - Filter out negative values
-#     if is_postgres:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE DATE(created_at) = CURRENT_DATE
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-#     else:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE date(created_at) = date('now') 
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-    
-#     # Get active rentals with correct duration
-#     duration_sql = get_duration_sql()
-#     rentals = execute_query(c, f"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.start_time,
-#             {duration_sql}
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Active'
-#         ORDER BY r.start_time DESC
-#     """).fetchall()
-    
-#     # Format start_time for display
-#     for rental in rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 rental["start_time"] = rental["start_time"][:16]
-    
-#     # Unpaid rentals
-#     unpaid_rentals = execute_query(c, """
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-    
-#     # Format dates for unpaid rentals
-#     for rental in unpaid_rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 rental["start_time"] = rental["start_time"][:16]
-#         if rental.get("end_time"):
-#             if isinstance(rental["end_time"], datetime):
-#                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["end_time"], str):
-#                 rental["end_time"] = rental["end_time"][:16]
-    
-#     conn.close()
-    
-#     # ✅ Ensure revenue is never negative
-#     if today_revenue < 0:
-#         today_revenue = 0
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals
-#     )
-
-
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     """Staff dashboard - NOT for customers."""
-#     from datetime import datetime, timedelta
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     # Stats
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-    
-#     # Today's Revenue - Filter out negative values
-#     if is_postgres:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE DATE(created_at) = CURRENT_DATE
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-#     else:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE date(created_at) = date('now') 
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-    
-#     # Get active rentals with correct duration
-#     duration_sql = get_duration_sql()
-#     rentals = execute_query(c, f"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.start_time,
-#             {duration_sql}
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Active'
-#         ORDER BY r.start_time DESC
-#     """).fetchall()
-    
-#     # ✅ FIX: Format start_time for display - Convert UTC to Local (Namibia time)
-#     for rental in rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 # Add 2 hours for Namibia time
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["start_time"] = rental["start_time"][:16]
-    
-#     # Unpaid rentals
-#     unpaid_rentals = execute_query(c, """
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-    
-#     # Format dates for unpaid rentals
-#     for rental in unpaid_rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["start_time"] = rental["start_time"][:16]
-        
-#         if rental.get("end_time"):
-#             if isinstance(rental["end_time"], datetime):
-#                 local_end = rental["end_time"] + timedelta(hours=2)
-#                 rental["end_time"] = local_end.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["end_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["end_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["end_time"] = rental["end_time"][:16]
-    
-#     conn.close()
-    
-#     # Ensure revenue is never negative
-#     if today_revenue < 0:
-#         today_revenue = 0
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals
-#     )
-
-
-
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     """Staff dashboard - NOT for customers."""
-#     from datetime import datetime, timedelta
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     # Stats
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-    
-#     # Today's Revenue
-#     if is_postgres:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE DATE(created_at) = CURRENT_DATE
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-#     else:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE date(created_at) = date('now') 
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-    
-#     # ✅ Get active rentals with correct duration
-#     duration_sql = get_duration_sql()
-#     rentals = execute_query(c, f"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.start_time,
-#             {duration_sql}
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Active'
-#         ORDER BY r.start_time DESC
-#     """).fetchall()
-    
-#     # ✅ FIX: Format start_time for display - Convert UTC to Local (Namibia time)
-#     for rental in rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 # Add 2 hours for Namibia time (UTC+2)
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     # If parsing fails, just take first 16 chars
-#                     rental["start_time"] = rental["start_time"][:16] if len(rental["start_time"]) >= 16 else rental["start_time"]
-    
-#     # Unpaid rentals
-#     unpaid_rentals = execute_query(c, """
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-    
-#     # Format dates for unpaid rentals
-#     for rental in unpaid_rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["start_time"] = rental["start_time"][:16] if len(rental["start_time"]) >= 16 else rental["start_time"]
-        
-#         if rental.get("end_time"):
-#             if isinstance(rental["end_time"], datetime):
-#                 local_end = rental["end_time"] + timedelta(hours=2)
-#                 rental["end_time"] = local_end.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["end_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["end_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["end_time"] = rental["end_time"][:16] if len(rental["end_time"]) >= 16 else rental["end_time"]
-    
-#     conn.close()
-    
-#     # Ensure revenue is never negative
-#     if today_revenue < 0:
-#         today_revenue = 0
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals
-#     )
-
-
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     """Staff dashboard - NOT for customers."""
-#     from datetime import datetime, timedelta
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     # Stats
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-    
-#     # Today's Revenue
-#     if is_postgres:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE DATE(created_at) = CURRENT_DATE
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-#     else:
-#         today_revenue = get_single_value(c, """
-#             SELECT COALESCE(SUM(total_cost), 0) 
-#             FROM daily_rentals 
-#             WHERE date(created_at) = date('now') 
-#             AND status = 'Completed' 
-#             AND payment_status = 'Paid'
-#             AND total_cost >= 0
-#         """)
-    
-#     # ✅ FIXED: Get active rentals - ensure start_time is selected
-#     if is_postgres:
-#         rentals = execute_query(c, """
-#             SELECT 
-#                 r.id,
-#                 c.full_name,
-#                 b.bike_code,
-#                 r.start_time,
-#                 CONCAT(
-#                     GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600)), 'h ',
-#                     GREATEST(0, FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) % 3600) / 60)), 'm'
-#                 ) AS duration
-#             FROM daily_rentals r
-#             JOIN customers c ON c.id = r.customer_id
-#             JOIN bicycles b ON b.id = r.bicycle_id
-#             WHERE r.status = 'Active'
-#             ORDER BY r.start_time DESC
-#         """).fetchall()
-#     else:
-#         rentals = execute_query(c, """
-#             SELECT 
-#                 r.id,
-#                 c.full_name,
-#                 b.bike_code,
-#                 r.start_time,
-#                 CAST(MAX(0, (strftime('%s', 'now') - strftime('%s', r.start_time))) / 3600 AS INTEGER) || 'h ' ||
-#                 CAST(MAX(0, ((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600)) / 60 AS INTEGER) || 'm' AS duration
-#             FROM daily_rentals r
-#             JOIN customers c ON c.id = r.customer_id
-#             JOIN bicycles b ON b.id = r.bicycle_id
-#             WHERE r.status = 'Active'
-#             ORDER BY r.start_time DESC
-#         """).fetchall()
-    
-#     # ✅ FIXED: Format start_time with proper timezone handling
-#     for rental in rentals:
-#         # Debug: print the raw start_time
-#         print(f"Raw start_time: {rental.get('start_time')}")
-        
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 # Add 2 hours for Namibia time (UTC+2)
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     # Try to parse the string
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     # If parsing fails, use as is
-#                     rental["start_time"] = rental["start_time"]
-#         else:
-#             # ✅ If start_time is None or empty, set a default
-#             rental["start_time"] = "Time not recorded"
-    
-#     # Unpaid rentals
-#     unpaid_rentals = execute_query(c, """
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-    
-#     # Format dates for unpaid rentals
-#     for rental in unpaid_rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 local_start = rental["start_time"] + timedelta(hours=2)
-#                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["start_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["start_time"] = rental["start_time"]
-        
-#         if rental.get("end_time"):
-#             if isinstance(rental["end_time"], datetime):
-#                 local_end = rental["end_time"] + timedelta(hours=2)
-#                 rental["end_time"] = local_end.strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["end_time"], str):
-#                 try:
-#                     dt = datetime.fromisoformat(rental["end_time"])
-#                     local_dt = dt + timedelta(hours=2)
-#                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-#                 except:
-#                     rental["end_time"] = rental["end_time"]
-    
-#     conn.close()
-    
-#     # Ensure revenue is never negative
-#     if today_revenue < 0:
-#         today_revenue = 0
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals
-#     )
-
-
 
 @app.route("/dashboard")
 @login_required
@@ -2159,188 +1627,6 @@ def dashboard():
     )
 
 
-# @app.route("/rentals/start", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def start_rental():
-#     from datetime import datetime, timedelta
-#     import pytz
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     if request.method == "POST":
-#         customer_id = request.form.get("customer_id")
-#         bicycle_id = request.form.get("bicycle_id")
-#         start_time = request.form.get("start_time")
-        
-#         # ✅ FIX: Convert local time to UTC for storage
-#         if start_time:
-#             # Parse local time (Namibia time)
-#             local_dt = datetime.fromisoformat(start_time)
-#             # Convert to UTC (subtract 2 hours)
-#             utc_dt = local_dt - timedelta(hours=2)
-#             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-#         else:
-#             # Use current UTC time
-#             utc_dt = datetime.utcnow()
-#             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-        
-#         # Verify customer is verified
-#         customer = execute_query(c, """
-#             SELECT verification_status FROM customers WHERE id = ?
-#         """, (customer_id,)).fetchone()
-        
-#         if not customer or customer["verification_status"] != "Verified":
-#             flash("Customer must be verified before renting.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         bike = execute_query(c, """
-#             SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?
-#         """, (bicycle_id,)).fetchone()
-        
-#         if not bike:
-#             flash("Bicycle not found.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         # ✅ Insert with UTC time
-#         execute_query(c, """
-#             INSERT INTO daily_rentals (
-#                 customer_id, bicycle_id, start_time, 
-#                 hourly_rate, daily_cap, deposit_paid, status,
-#                 agreement_signed
-#             ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
-#         """, (customer_id, bicycle_id, start_time_utc,
-#               bike["hourly_rate"], bike["daily_cap"], bike["deposit_amount"]))
-        
-#         rental_id = c.lastrowid
-        
-#         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Rental started successfully! Rental ID: {rental_id}", "success")
-#         return redirect(url_for("dashboard"))
-    
-#     # ✅ GET request - show form with correct local time
-#     customers = execute_query(c, """
-#         SELECT id, full_name, phone FROM customers 
-#         WHERE verification_status = 'Verified' 
-#         ORDER BY full_name
-#     """).fetchall()
-    
-#     bicycles = execute_query(c, """
-#         SELECT id, bike_code, brand, model, hourly_rate, daily_cap 
-#         FROM bicycles WHERE status = 'Available'
-#     """).fetchall()
-    
-#     conn.close()
-    
-#     # ✅ Get current local time (Namibia time - UTC+2)
-#     namibia_tz = pytz.timezone('Africa/Windhoek')
-#     local_now = datetime.now(namibia_tz)
-    
-#     return render_template(
-#         "start_rental.html",
-#         title="Start Rental",
-#         customers=customers,
-#         bicycles=bicycles,
-#         now=local_now.strftime("%Y-%m-%dT%H:%M")
-#     )
-
-# @app.route("/rentals/start", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def start_rental():
-#     from datetime import datetime, timedelta
-#     import pytz
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     if request.method == "POST":
-#         customer_id = request.form.get("customer_id")
-#         bicycle_id = request.form.get("bicycle_id")
-#         start_time = request.form.get("start_time")
-        
-#         # ✅ FIX: Convert local time to UTC for storage
-#         if start_time:
-#             # Parse local time (Namibia time)
-#             local_dt = datetime.fromisoformat(start_time)
-#             # Convert to UTC (subtract 2 hours)
-#             utc_dt = local_dt - timedelta(hours=2)
-#             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-#         else:
-#             # Use current UTC time
-#             utc_dt = datetime.utcnow()
-#             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-        
-#         # Debug: Print the time being saved
-#         print(f"📝 Saving rental with start_time (UTC): {start_time_utc}")
-        
-#         # Verify customer is verified
-#         customer = execute_query(c, """
-#             SELECT verification_status FROM customers WHERE id = ?
-#         """, (customer_id,)).fetchone()
-        
-#         if not customer or customer["verification_status"] != "Verified":
-#             flash("Customer must be verified before renting.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         bike = execute_query(c, """
-#             SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?
-#         """, (bicycle_id,)).fetchone()
-        
-#         if not bike:
-#             flash("Bicycle not found.", "danger")
-#             return redirect(url_for("start_rental"))
-        
-#         # ✅ Insert with UTC time
-#         execute_query(c, """
-#             INSERT INTO daily_rentals (
-#                 customer_id, bicycle_id, start_time, 
-#                 hourly_rate, daily_cap, deposit_paid, status,
-#                 agreement_signed
-#             ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
-#         """, (customer_id, bicycle_id, start_time_utc,
-#               bike["hourly_rate"], bike["daily_cap"], bike["deposit_amount"]))
-        
-#         rental_id = c.lastrowid
-        
-#         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Rental started successfully! Rental ID: {rental_id}", "success")
-#         return redirect(url_for("dashboard"))
-    
-#     # ✅ GET request - show form with correct local time
-#     customers = execute_query(c, """
-#         SELECT id, full_name, phone FROM customers 
-#         WHERE verification_status = 'Verified' 
-#         ORDER BY full_name
-#     """).fetchall()
-    
-#     bicycles = execute_query(c, """
-#         SELECT id, bike_code, brand, model, hourly_rate, daily_cap 
-#         FROM bicycles WHERE status = 'Available'
-#     """).fetchall()
-    
-#     conn.close()
-    
-#     # ✅ Get current local time (Namibia time - UTC+2)
-#     namibia_tz = pytz.timezone('Africa/Windhoek')
-#     local_now = datetime.now(namibia_tz)
-    
-#     return render_template(
-#         "start_rental.html",
-#         title="Start Rental",
-#         customers=customers,
-#         bicycles=bicycles,
-#         now=local_now.strftime("%Y-%m-%dT%H:%M")
-#     )
 
 
 
@@ -4040,40 +3326,176 @@ def update_bicycle_health(bicycle_id):
 
 
 
+# @app.route("/bicycle-health/<int:bicycle_id>/calculate")
+# @login_required
+# @admin_required
+# def calculate_bicycle_health(bicycle_id):
+#     """Auto-calculate bicycle health score based on maintenance and usage."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get bicycle data
+#     bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+#     if not bicycle:
+#         flash("Bicycle not found.", "danger")
+#         return redirect(url_for("bicycle_health_dashboard"))
+    
+#     # Get maintenance data
+#     maintenance = execute_query(c,"""
+#         SELECT 
+#             COUNT(*) AS total,
+#             SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+#             COALESCE(SUM(cost), 0) AS total_cost,
+#             COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+#         FROM maintenance_records
+#         WHERE bicycle_id = ?
+#     """, (bicycle_id,)).fetchone()
+    
+#     # Get rental data
+#     rentals = execute_query(c,"""
+#         SELECT 
+#             COUNT(*) AS total,
+#             COALESCE(SUM(total_hours), 0) AS total_hours,
+#             COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+#         FROM daily_rentals
+#         WHERE bicycle_id = ? AND status = 'Completed'
+#     """, (bicycle_id,)).fetchone()
+    
+#     # Calculate health score (0-100)
+#     health_score = 100
+    
+#     # Get values with defaults (handle None)
+#     total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
+#     completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
+#     recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
+#     recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
+    
+#     # Deduct for high usage (more than 100 hours)
+#     if total_hours > 100:
+#         health_score -= min(20, (total_hours - 100) / 10)
+    
+#     # Deduct for lack of maintenance
+#     if completed_maintenance == 0:
+#         health_score -= 30
+#     elif completed_maintenance < 5:
+#         health_score -= 10
+    
+#     # Deduct for recent rentals without maintenance
+#     if recent_rentals > 5 and recent_maintenance == 0:
+#         health_score -= 15
+    
+#     # Add points for recent maintenance
+#     if recent_maintenance > 0:
+#         health_score += min(10, recent_maintenance * 2)
+    
+#     # Ensure score is between 0 and 100
+#     health_score = max(0, min(100, int(health_score)))
+    
+#     # Determine condition rating
+#     if health_score >= 80:
+#         condition_rating = "Excellent"
+#     elif health_score >= 60:
+#         condition_rating = "Good"
+#     elif health_score >= 40:
+#         condition_rating = "Fair"
+#     elif health_score >= 20:
+#         condition_rating = "Poor"
+#     else:
+#         condition_rating = "Critical"
+    
+#     # Update health record
+#     health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    
+#     try:
+#         if health:
+#             execute_query(c,"""
+#                 UPDATE bicycle_health 
+#                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
+#                     total_maintenance_count = ?, total_repair_cost = ?
+#                 WHERE bicycle_id = ?
+#             """, (health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0, bicycle_id))
+#         else:
+#             execute_query(c,"""
+#                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
+#                     total_maintenance_count, total_repair_cost)
+#                 VALUES (?, ?, ?, ?, ?)
+#             """, (bicycle_id, health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0))
+        
+#         # Record health history
+#         execute_query(c,"""
+#             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
+#             VALUES (?, ?, ?, ?)
+#         """, (bicycle_id, health_score, condition_rating, "Auto-calculated based on usage and maintenance"))
+        
+#         conn.commit()
+#         flash(f"Health score calculated: {health_score}/100 ({condition_rating})", "success")
+#     except Exception as e:
+#         conn.rollback()
+#         flash(f"Error calculating health: {str(e)}", "danger")
+#     finally:
+#         conn.close()
+    
+#     return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
+
+
 @app.route("/bicycle-health/<int:bicycle_id>/calculate")
 @login_required
 @admin_required
 def calculate_bicycle_health(bicycle_id):
     """Auto-calculate bicycle health score based on maintenance and usage."""
+    import os
     conn = db()
     c = conn.cursor()
     
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+    
     # Get bicycle data
-    bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+    bicycle = execute_query(c, "SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
     if not bicycle:
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycle_health_dashboard"))
     
-    # Get maintenance data
-    maintenance = execute_query(c,"""
-        SELECT 
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
-            COALESCE(SUM(cost), 0) AS total_cost,
-            COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
-        FROM maintenance_records
-        WHERE bicycle_id = ?
-    """, (bicycle_id,)).fetchone()
+    # ✅ Get maintenance data with PostgreSQL compatibility
+    if is_postgres:
+        maintenance = execute_query(c, """
+            SELECT 
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                COALESCE(SUM(cost), 0) AS total_cost,
+                COUNT(CASE WHEN status = 'Completed' AND DATE(completed_date) >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) AS recent_maintenance
+            FROM maintenance_records
+            WHERE bicycle_id = %s
+        """, (bicycle_id,)).fetchone()
+    else:
+        maintenance = execute_query(c, """
+            SELECT 
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                COALESCE(SUM(cost), 0) AS total_cost,
+                COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+            FROM maintenance_records
+            WHERE bicycle_id = ?
+        """, (bicycle_id,)).fetchone()
     
-    # Get rental data
-    rentals = execute_query(c,"""
-        SELECT 
-            COUNT(*) AS total,
-            COALESCE(SUM(total_hours), 0) AS total_hours,
-            COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
-        FROM daily_rentals
-        WHERE bicycle_id = ? AND status = 'Completed'
-    """, (bicycle_id,)).fetchone()
+    # ✅ Get rental data with PostgreSQL compatibility
+    if is_postgres:
+        rentals = execute_query(c, """
+            SELECT 
+                COUNT(*) AS total,
+                COALESCE(SUM(total_hours), 0) AS total_hours,
+                COUNT(CASE WHEN DATE(start_time) >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) AS recent_rentals
+            FROM daily_rentals
+            WHERE bicycle_id = %s AND status = 'Completed'
+        """, (bicycle_id,)).fetchone()
+    else:
+        rentals = execute_query(c, """
+            SELECT 
+                COUNT(*) AS total,
+                COALESCE(SUM(total_hours), 0) AS total_hours,
+                COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+            FROM daily_rentals
+            WHERE bicycle_id = ? AND status = 'Completed'
+        """, (bicycle_id,)).fetchone()
     
     # Calculate health score (0-100)
     health_score = 100
@@ -4118,25 +3540,25 @@ def calculate_bicycle_health(bicycle_id):
         condition_rating = "Critical"
     
     # Update health record
-    health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
+    health = execute_query(c, "SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
     
     try:
         if health:
-            execute_query(c,"""
+            execute_query(c, """
                 UPDATE bicycle_health 
                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
                     total_maintenance_count = ?, total_repair_cost = ?
                 WHERE bicycle_id = ?
             """, (health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0, bicycle_id))
         else:
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
                     total_maintenance_count, total_repair_cost)
                 VALUES (?, ?, ?, ?, ?)
             """, (bicycle_id, health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0))
         
         # Record health history
-        execute_query(c,"""
+        execute_query(c, """
             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
             VALUES (?, ?, ?, ?)
         """, (bicycle_id, health_score, condition_rating, "Auto-calculated based on usage and maintenance"))
@@ -4152,7 +3574,118 @@ def calculate_bicycle_health(bicycle_id):
     return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
 
 
-
+# @app.route("/bicycle-health/calculate-all")
+# @login_required
+# @admin_required
+# def calculate_all_bicycle_health():
+#     """Calculate health scores for all bicycles."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     bicycles = execute_query(c,"SELECT id FROM bicycles").fetchall()
+    
+#     count = 0
+    
+#     for bicycle in bicycles:
+#         bike_id = bicycle["id"]
+        
+#         # Maintenance data
+#         maintenance = execute_query(c,"""
+#             SELECT 
+#                 COUNT(*) AS total,
+#                 SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+#                 COALESCE(SUM(cost), 0) AS total_cost,
+#                 COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+#             FROM maintenance_records
+#             WHERE bicycle_id = ?
+#         """, (bike_id,)).fetchone()
+        
+#         # Rental data
+#         rentals = execute_query(c,"""
+#             SELECT 
+#                 COUNT(*) AS total,
+#                 COALESCE(SUM(total_hours), 0) AS total_hours,
+#                 COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+#             FROM daily_rentals
+#             WHERE bicycle_id = ? AND status = 'Completed'
+#         """, (bike_id,)).fetchone()
+        
+#         # =============================================
+#         # ✅ FIX: Handle None values HERE - BEFORE calculations
+#         # =============================================
+#         total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
+#         completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
+#         recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
+#         recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
+#         total_cost = maintenance["total_cost"] if maintenance["total_cost"] is not None else 0
+        
+#         # =============================================
+#         # Now use the cleaned variables in calculations
+#         # =============================================
+#         health_score = 100
+        
+#         # Deduct for high usage (more than 100 hours)
+#         if total_hours > 100:
+#             health_score -= min(20, (total_hours - 100) / 10)
+        
+#         # Deduct for lack of maintenance
+#         if completed_maintenance == 0:
+#             health_score -= 30
+#         elif completed_maintenance < 5:
+#             health_score -= 10
+        
+#         # Deduct for recent rentals without maintenance
+#         if recent_rentals > 5 and recent_maintenance == 0:
+#             health_score -= 15
+        
+#         # Add points for recent maintenance
+#         if recent_maintenance > 0:
+#             health_score += min(10, recent_maintenance * 2)
+        
+#         # Ensure score is between 0 and 100
+#         health_score = max(0, min(100, int(health_score)))
+        
+#         # Determine condition rating
+#         if health_score >= 80:
+#             condition_rating = "Excellent"
+#         elif health_score >= 60:
+#             condition_rating = "Good"
+#         elif health_score >= 40:
+#             condition_rating = "Fair"
+#         elif health_score >= 20:
+#             condition_rating = "Poor"
+#         else:
+#             condition_rating = "Critical"
+        
+#         # Update or insert
+#         health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
+#         if health:
+#             execute_query(c,"""
+#                 UPDATE bicycle_health 
+#                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
+#                     total_maintenance_count = ?, total_repair_cost = ?
+#                 WHERE bicycle_id = ?
+#             """, (health_score, condition_rating, completed_maintenance, total_cost, bike_id))
+#         else:
+#             execute_query(c,"""
+#                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
+#                     total_maintenance_count, total_repair_cost)
+#                 VALUES (?, ?, ?, ?, ?)
+#             """, (bike_id, health_score, condition_rating, completed_maintenance, total_cost))
+        
+#         # Record history
+#         execute_query(c,"""
+#             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
+#             VALUES (?, ?, ?, ?)
+#         """, (bike_id, health_score, condition_rating, "Auto-calculated - batch update"))
+        
+#         count += 1
+    
+#     conn.commit()
+#     conn.close()
+    
+#     flash(f"Health scores calculated for {count} bicycles!", "success")
+#     return redirect(url_for("bicycle_health_dashboard"))
 
 
 @app.route("/bicycle-health/calculate-all")
@@ -4160,73 +3693,86 @@ def calculate_bicycle_health(bicycle_id):
 @admin_required
 def calculate_all_bicycle_health():
     """Calculate health scores for all bicycles."""
+    import os
     conn = db()
     c = conn.cursor()
     
-    bicycles = execute_query(c,"SELECT id FROM bicycles").fetchall()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
     
+    bicycles = execute_query(c, "SELECT id FROM bicycles").fetchall()
     count = 0
     
     for bicycle in bicycles:
         bike_id = bicycle["id"]
         
-        # Maintenance data
-        maintenance = execute_query(c,"""
-            SELECT 
-                COUNT(*) AS total,
-                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
-                COALESCE(SUM(cost), 0) AS total_cost,
-                COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
-            FROM maintenance_records
-            WHERE bicycle_id = ?
-        """, (bike_id,)).fetchone()
+        # ✅ Maintenance data with PostgreSQL compatibility
+        if is_postgres:
+            maintenance = execute_query(c, """
+                SELECT 
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                    COALESCE(SUM(cost), 0) AS total_cost,
+                    COUNT(CASE WHEN status = 'Completed' AND DATE(completed_date) >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) AS recent_maintenance
+                FROM maintenance_records
+                WHERE bicycle_id = %s
+            """, (bike_id,)).fetchone()
+        else:
+            maintenance = execute_query(c, """
+                SELECT 
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                    COALESCE(SUM(cost), 0) AS total_cost,
+                    COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
+                FROM maintenance_records
+                WHERE bicycle_id = ?
+            """, (bike_id,)).fetchone()
         
-        # Rental data
-        rentals = execute_query(c,"""
-            SELECT 
-                COUNT(*) AS total,
-                COALESCE(SUM(total_hours), 0) AS total_hours,
-                COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
-            FROM daily_rentals
-            WHERE bicycle_id = ? AND status = 'Completed'
-        """, (bike_id,)).fetchone()
+        # ✅ Rental data with PostgreSQL compatibility
+        if is_postgres:
+            rentals = execute_query(c, """
+                SELECT 
+                    COUNT(*) AS total,
+                    COALESCE(SUM(total_hours), 0) AS total_hours,
+                    COUNT(CASE WHEN DATE(start_time) >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) AS recent_rentals
+                FROM daily_rentals
+                WHERE bicycle_id = %s AND status = 'Completed'
+            """, (bike_id,)).fetchone()
+        else:
+            rentals = execute_query(c, """
+                SELECT 
+                    COUNT(*) AS total,
+                    COALESCE(SUM(total_hours), 0) AS total_hours,
+                    COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
+                FROM daily_rentals
+                WHERE bicycle_id = ? AND status = 'Completed'
+            """, (bike_id,)).fetchone()
         
-        # =============================================
-        # ✅ FIX: Handle None values HERE - BEFORE calculations
-        # =============================================
+        # Handle None values
         total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
         completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
         recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
         recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
         total_cost = maintenance["total_cost"] if maintenance["total_cost"] is not None else 0
         
-        # =============================================
-        # Now use the cleaned variables in calculations
-        # =============================================
+        # Calculate health score
         health_score = 100
         
-        # Deduct for high usage (more than 100 hours)
         if total_hours > 100:
             health_score -= min(20, (total_hours - 100) / 10)
         
-        # Deduct for lack of maintenance
         if completed_maintenance == 0:
             health_score -= 30
         elif completed_maintenance < 5:
             health_score -= 10
         
-        # Deduct for recent rentals without maintenance
         if recent_rentals > 5 and recent_maintenance == 0:
             health_score -= 15
         
-        # Add points for recent maintenance
         if recent_maintenance > 0:
             health_score += min(10, recent_maintenance * 2)
         
-        # Ensure score is between 0 and 100
         health_score = max(0, min(100, int(health_score)))
         
-        # Determine condition rating
         if health_score >= 80:
             condition_rating = "Excellent"
         elif health_score >= 60:
@@ -4239,23 +3785,23 @@ def calculate_all_bicycle_health():
             condition_rating = "Critical"
         
         # Update or insert
-        health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
+        health = execute_query(c, "SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
         if health:
-            execute_query(c,"""
+            execute_query(c, """
                 UPDATE bicycle_health 
                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
                     total_maintenance_count = ?, total_repair_cost = ?
                 WHERE bicycle_id = ?
             """, (health_score, condition_rating, completed_maintenance, total_cost, bike_id))
         else:
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
                     total_maintenance_count, total_repair_cost)
                 VALUES (?, ?, ?, ?, ?)
             """, (bike_id, health_score, condition_rating, completed_maintenance, total_cost))
         
         # Record history
-        execute_query(c,"""
+        execute_query(c, """
             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
             VALUES (?, ?, ?, ?)
         """, (bike_id, health_score, condition_rating, "Auto-calculated - batch update"))
@@ -4267,9 +3813,6 @@ def calculate_all_bicycle_health():
     
     flash(f"Health scores calculated for {count} bicycles!", "success")
     return redirect(url_for("bicycle_health_dashboard"))
-
-
-
 
 
 # =============================================
@@ -6389,12 +5932,16 @@ def staff_required(f):
 
 
 
+
+
+
 @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
 @login_required
 @staff_required
 def end_rental(rental_id):
     """End a rental and calculate the total cost."""
-    from datetime import datetime
+    from datetime import datetime, timedelta
+    import pytz
     
     conn = db()
     c = conn.cursor()
@@ -6411,15 +5958,22 @@ def end_rental(rental_id):
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
-    # ✅ FIX: Handle start_time as datetime or string
+    # ✅ FIX: Handle start_time as datetime or string (stored in UTC)
     if isinstance(rental["start_time"], datetime):
-        start_time = rental["start_time"]
+        start_time_utc = rental["start_time"]
     else:
-        start_time = datetime.fromisoformat(rental["start_time"])
+        start_time_utc = datetime.fromisoformat(rental["start_time"])
+    
+    # ✅ Get current local time (Namibia time)
+    namibia_tz = pytz.timezone('Africa/Windhoek')
+    local_now = datetime.now(namibia_tz)
+    
+    # ✅ Convert local now to UTC for calculation
+    utc_now = local_now - timedelta(hours=2)
     
     if request.method == "POST":
-        end_time = datetime.now()
-        total_hours = (end_time - start_time).total_seconds() / 3600
+        end_time_utc = utc_now
+        total_hours = (end_time_utc - start_time_utc).total_seconds() / 3600
         total_hours = round(total_hours, 2)
         
         hourly_rate = rental["hourly_rate"]
@@ -6429,10 +5983,10 @@ def end_rental(rental_id):
         raw_cost = total_hours * hourly_rate
         total_cost = min(raw_cost, daily_cap)
         
-        # Late fee (after 6pm)
+        # Late fee (after 6pm local time)
         late_fee = 0
-        if end_time.hour >= 18:
-            late_fee = 10 * (end_time.hour - 18)
+        if local_now.hour >= 18:
+            late_fee = 10 * (local_now.hour - 18)
         total_cost += late_fee
         
         # Get condition values
@@ -6444,7 +5998,7 @@ def end_rental(rental_id):
             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
                 condition_before = ?, condition_after = ?, status = 'Completed'
             WHERE id = ?
-        """, (end_time.isoformat(), total_hours, total_cost, late_fee,
+        """, (end_time_utc.isoformat(), total_hours, total_cost, late_fee,
               condition_before, condition_after, rental_id))
         
         execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
@@ -6455,19 +6009,21 @@ def end_rental(rental_id):
         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
         return redirect(url_for("record_payment", rental_id=rental_id))
     
-    # Calculate preview for display
-    now = datetime.now()
-    preview_hours = round((now - start_time).total_seconds() / 3600, 2)
+    # ✅ Calculate preview for display using UTC times
+    preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
     
     hourly_rate = rental["hourly_rate"]
     daily_cap = rental["daily_cap"]
     preview_raw = preview_hours * hourly_rate
     preview_capped = min(preview_raw, daily_cap)
-    preview_late = 10 * (now.hour - 18) if now.hour >= 18 else 0
+    preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
     preview_total = preview_capped + preview_late
     
-    # ✅ FIX: Format dates for display
-    start_time_str = start_time.strftime("%Y-%m-%d %H:%M") if isinstance(start_time, datetime) else start_time
+    # ✅ FIX: Format dates for display (convert UTC to local)
+    start_time_local = start_time_utc + timedelta(hours=2)
+    start_time_str = start_time_local.strftime("%Y-%m-%d %H:%M")
+    end_time_local = local_now
+    end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
     
     conn.close()
     
@@ -6476,6 +6032,7 @@ def end_rental(rental_id):
         title="End Rental",
         rental=rental,
         start_time_str=start_time_str,
+        end_time_str=end_time_str,
         preview_hours=preview_hours,
         hourly_rate=hourly_rate,
         daily_cap=daily_cap,
@@ -6484,6 +6041,8 @@ def end_rental(rental_id):
         preview_late=preview_late,
         preview_total=preview_total
     )
+
+
 
 
 
