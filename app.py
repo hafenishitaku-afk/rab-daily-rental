@@ -103,59 +103,25 @@ def get_single_value(cursor, query, params=None):
         return result[0] if result else 0
 
 
-# def format_date(date_value, format_str="%Y-%m-%d"):
-#     """Format a date value for display (handles both string and datetime)."""
-#     if date_value is None:
-#         return ""
-#     if isinstance(date_value, datetime):
-#         return date_value.strftime(format_str)
-#     if isinstance(date_value, str):
-#         return date_value[:10]
-#     return str(date_value)
-
-def format_date(date_value, format_str="%Y-%m-%d"):
-    """Format a date value for display (handles both string and datetime)."""
-    from datetime import datetime
-    
-    if date_value is None:
-        return ""
-    if isinstance(date_value, datetime):
-        return date_value.strftime(format_str)
-    if isinstance(date_value, str):
-        # ✅ Return as is, or truncate safely
-        try:
-            # Try to parse as datetime
-            dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
-            return dt.strftime(format_str)
-        except:
-            # If parsing fails, return the string as is
-            return date_value
-    return str(date_value)
-
-
-
-
-# def get_duration_sql():
-#     """Return the correct duration SQL for the database."""
-#     if os.environ.get("DATABASE_URL"):
-#         return "TO_CHAR(CURRENT_TIMESTAMP, 'HH24:MI') AS duration"
-#     else:
-#         return "strftime('%H:%M', 'now', 'localtime') AS duration"
-# You can keep this if you use it elsewhere, or remove it
 def get_duration_sql():
     """Return the correct duration SQL for the database."""
     if os.environ.get("DATABASE_URL"):
+        # PostgreSQL - add 2 hours for Namibia time (UTC+2)
         return """
             CONCAT(
-                FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600), 'h ',
-                FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) % 3600) / 60), 'm'
+                GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - (r.start_time + INTERVAL '2 hours'))) / 3600)), 'h ',
+                GREATEST(0, FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - (r.start_time + INTERVAL '2 hours'))) % 3600) / 60)), 'm'
             ) AS duration
         """
     else:
+        # SQLite - add 2 hours for Namibia time (UTC+2)
         return """
-            CAST((strftime('%s', 'now') - strftime('%s', r.start_time)) / 3600 AS INTEGER) || 'h ' ||
-            CAST(((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600) / 60 AS INTEGER) || 'm' AS duration
+            CAST(MAX(0, (strftime('%s', 'now') - (strftime('%s', r.start_time) + 7200))) / 3600 AS INTEGER) || 'h ' ||
+            CAST(MAX(0, ((strftime('%s', 'now') - (strftime('%s', r.start_time) + 7200)) % 3600)) / 60 AS INTEGER) || 'm' AS duration
         """
+
+
+
 
 def get_count(cursor, query, params=None):
     """Execute a count query and return the count, works for both SQLite and PostgreSQL."""
@@ -1507,69 +1473,6 @@ def customer_rent():
 
 
 
-# @app.route("/dashboard")
-# @login_required
-# @staff_required
-# def dashboard():
-#     """Staff dashboard - NOT for customers."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Stats - using get_single_value helper
-#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
-#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
-#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
-#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-#     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
-    
-
-        
-#     duration_sql = get_duration_sql()
-#     rentals = execute_query(c, f"""
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.start_time,
-#             {duration_sql}
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Active'
-#         ORDER BY r.start_time DESC
-#     """).fetchall()
-
-
-#     # Unpaid rentals
-#     unpaid_rentals = execute_query(c, """
-#         SELECT 
-#             r.id,
-#             c.full_name,
-#             b.bike_code,
-#             r.total_cost,
-#             r.start_time,
-#             r.end_time
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE r.status = 'Completed'
-#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
-#         ORDER BY r.end_time DESC
-#     """).fetchall()
-    
-#     conn.close()
-    
-#     return render_template(
-#         "dashboard.html",
-#         title="Dashboard - Daily Rentals",
-#         total_bikes=total_bikes,
-#         active_rentals=active_rentals,
-#         total_customers=total_customers,
-#         pending_verification=pending_verification,
-#         today_revenue=today_revenue,
-#         rentals=rentals,
-#         unpaid_rentals=unpaid_rentals
-#     )
 
 @app.route("/dashboard")
 @login_required
@@ -1755,192 +1658,6 @@ def start_rental():
 
 
 
-# @app.route("/customers", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def customers():
-#     import os
-#     conn = db()
-#     c = conn.cursor()
-    
-#     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-#     # ✅ Check if Cloudinary is configured
-#     use_cloudinary = all([
-#         os.environ.get("CLOUDINARY_CLOUD_NAME"),
-#         os.environ.get("CLOUDINARY_API_KEY"),
-#         os.environ.get("CLOUDINARY_API_SECRET")
-#     ])
-    
-#     if use_cloudinary:
-#         try:
-#             import cloudinary
-#             import cloudinary.uploader
-#             cloudinary.config(
-#                 cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
-#                 api_key=os.environ.get("CLOUDINARY_API_KEY"),
-#                 api_secret=os.environ.get("CLOUDINARY_API_SECRET")
-#             )
-#             print("✅ Cloudinary configured successfully!")
-#         except Exception as e:
-#             print(f"❌ Cloudinary config error: {e}")
-#             use_cloudinary = False
-    
-#     if request.method == "POST":
-#         full_name = request.form.get("full_name", "").strip()
-#         phone = request.form.get("phone", "").strip()
-#         id_number = request.form.get("id_number", "").strip()
-#         email = request.form.get("email", "").strip()
-#         address = request.form.get("address", "").strip()
-#         id_photo = request.files.get("id_photo") if request.files else None
-#         customer_photo = request.files.get("customer_photo") if request.files else None
-        
-#         terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
-#         signature_data = request.form.get("signature_data", "").strip()
-        
-#         if not full_name or not phone:
-#             flash("Name and phone are required.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         if not terms_accepted:
-#             flash("You must accept the Terms & Conditions.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         # Create username
-#         username = phone
-#         existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-#         if existing_user:
-#             if email:
-#                 username = email
-#             else:
-#                 username = f"cust_{phone}"
-        
-#         # Generate random password
-#         import secrets
-#         import string
-#         temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-#         password_hash = generate_password_hash(temp_password)
-        
-#         # Insert user
-#         try:
-#             execute_query(c, """
-#                 INSERT INTO users (username, password_hash, role, full_name, email)
-#                 VALUES (?, ?, 'customer', ?, ?)
-#             """, (username, password_hash, full_name, email))
-            
-#             user_result = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-#             if user_result:
-#                 user_id = user_result['id'] if isinstance(user_result, dict) else user_result[0]
-#             else:
-#                 flash("Error: User created but ID not found.", "danger")
-#                 return redirect(url_for("customers"))
-#         except sqlite3.IntegrityError:
-#             flash(f"Username '{username}' already exists.", "danger")
-#             return redirect(url_for("customers"))
-        
-#         # Insert customer
-#         execute_query(c, """
-#             INSERT INTO customers (
-#                 full_name, id_number, phone, email, address, user_id,
-#                 terms_accepted, terms_accepted_date, signature_data, verification_status
-#             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
-#         """, (full_name, id_number, phone, email, address, user_id, 
-#               terms_accepted, signature_data))
-        
-#         customer_id = c.lastrowid
-#         if is_postgres:
-#             customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
-#             if customer_result:
-#                 customer_id = customer_result['id'] if isinstance(customer_result, dict) else customer_result[0]
-        
-#         session["customer_id"] = customer_id
-        
-#         # ✅ Save documents - try Cloudinary first, fallback to local
-#         from werkzeug.utils import secure_filename
-#         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
-#         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
-#         # Handle ID Photo
-#         if id_photo and id_photo.filename:
-#             uploaded = False
-            
-#             # Try Cloudinary first
-#             if use_cloudinary:
-#                 try:
-#                     upload_result = cloudinary.uploader.upload(id_photo)
-#                     file_url = upload_result['secure_url']
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'id_copy', ?)
-#                     """, (customer_id, file_url))
-#                     print(f"✅ ID uploaded to Cloudinary: {file_url}")
-#                     uploaded = True
-#                 except Exception as e:
-#                     print(f"❌ Cloudinary upload failed: {e}")
-            
-#             # Fallback to local storage
-#             if not uploaded:
-#                 try:
-#                     filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-#                     filepath = os.path.join(UPLOAD_FOLDER, filename)
-#                     id_photo.save(filepath)
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'id_copy', ?)
-#                     """, (customer_id, f"uploads/{filename}"))
-#                     print(f"✅ ID saved locally: {filename}")
-#                 except Exception as e:
-#                     print(f"❌ Local save failed: {e}")
-#                     flash("Error uploading ID document.", "danger")
-#                     return redirect(url_for("customers"))
-        
-#         # Handle Customer Photo
-#         if customer_photo and customer_photo.filename:
-#             uploaded = False
-            
-#             # Try Cloudinary first
-#             if use_cloudinary:
-#                 try:
-#                     upload_result = cloudinary.uploader.upload(customer_photo)
-#                     file_url = upload_result['secure_url']
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'customer_photo', ?)
-#                     """, (customer_id, file_url))
-#                     print(f"✅ Photo uploaded to Cloudinary: {file_url}")
-#                     uploaded = True
-#                 except Exception as e:
-#                     print(f"❌ Cloudinary upload failed: {e}")
-            
-#             # Fallback to local storage
-#             if not uploaded:
-#                 try:
-#                     filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-#                     filepath = os.path.join(UPLOAD_FOLDER, filename)
-#                     customer_photo.save(filepath)
-#                     execute_query(c, """
-#                         INSERT INTO customer_documents (customer_id, document_type, file_path)
-#                         VALUES (?, 'customer_photo', ?)
-#                     """, (customer_id, f"uploads/{filename}"))
-#                     print(f"✅ Photo saved locally: {filename}")
-#                 except Exception as e:
-#                     print(f"❌ Local save failed: {e}")
-#                     flash("Error uploading customer photo.", "danger")
-#                     return redirect(url_for("customers"))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Customer '{full_name}' registered successfully!", "success")
-#         flash(f"🔑 Login Credentials - Username: {username}, Password: {temp_password}", "success")
-#         flash("📌 Please give these credentials to the customer.", "info")
-        
-#         return redirect(url_for("customers"))
-    
-#     customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
-#     conn.close()
-    
-#     return render_template("customers.html", title="Customers", customers=customers)
 
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
@@ -2240,60 +1957,7 @@ def view_documents(customer_id):
 
 
 
-# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
-# @login_required
-# def view_document_file(customer_id, doc_id):
-#     """View a customer document."""
-#     import os
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     doc = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE id = ? AND customer_id = ?
-#     """, (doc_id, customer_id)).fetchone()
-    
-#     conn.close()
-    
-#     if not doc:
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("customers"))
-    
-#     file_path = doc["file_path"]
-    
-#     # ✅ Check if it's a Cloudinary URL
-#     if file_path.startswith("http"):
-#         return redirect(file_path)
-    
-#     # ✅ For local files - extract just the filename
-#     filename = file_path.split('/')[-1]
-#     full_path = os.path.join('uploads', filename)
-    
-#     # Check if file exists
-#     full_file_path = os.path.join(BASE, 'static', full_path)
-#     if not os.path.exists(full_file_path):
-#         alt_paths = [
-#             file_path,
-#             f"uploads/{filename}",
-#             filename,
-#         ]
-#         for alt in alt_paths:
-#             alt_full = os.path.join(BASE, 'static', alt)
-#             if os.path.exists(alt_full):
-#                 full_path = alt
-#                 break
-#         else:
-#             flash(f"Document file not found: {filename}", "danger")
-#             return redirect(url_for("view_documents", customer_id=customer_id))
-    
-#     return render_template(
-#         "view_document.html",
-#         title="View Document",
-#         doc=doc,
-#         customer_id=customer_id,
-#         file_path=full_path
-#     )
+
 
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/view")
 @login_required
@@ -2356,56 +2020,6 @@ def view_document_file(customer_id, doc_id):
     )
 
 
-
-# @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
-# @login_required
-# @admin_required
-# def delete_document(customer_id, doc_id):
-#     """Delete a customer document."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get the document
-#     doc = execute_query(c, """
-#         SELECT * FROM customer_documents 
-#         WHERE id = ? AND customer_id = ?
-#     """, (doc_id, customer_id)).fetchone()
-    
-#     if not doc:
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("view_documents", customer_id=customer_id))
-    
-#     # Delete the document record from database
-#     execute_query(c, "DELETE FROM customer_documents WHERE id = ?", (doc_id,))
-    
-#     # ✅ Try to delete the physical file if it exists locally
-#     import os
-#     file_path = doc["file_path"]
-    
-#     # Check if it's a local file (not Cloudinary)
-#     if not file_path.startswith("http"):
-#         # Try to find and delete the file
-#         filename = file_path.split('/')[-1]
-#         possible_paths = [
-#             os.path.join(BASE, 'static', file_path),
-#             os.path.join(BASE, 'static', 'uploads', filename),
-#             os.path.join(BASE, 'static', filename),
-#         ]
-        
-#         for path in possible_paths:
-#             if os.path.exists(path):
-#                 try:
-#                     os.remove(path)
-#                     print(f"✅ Deleted file: {path}")
-#                 except Exception as e:
-#                     print(f"❌ Could not delete file: {e}")
-#                 break
-    
-#     conn.commit()
-#     conn.close()
-    
-#     flash("Document deleted successfully!", "success")
-#     return redirect(url_for("view_documents", customer_id=customer_id))
 
 
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
@@ -4762,45 +4376,6 @@ def send_sms_notification(phone_number, message):
         return True  # ✅ Don't fail
 
 
-# @login_required
-# def send_sms_notification(phone_number, message):
-#     """Send SMS notification using Twilio."""
-#     if not SMS_ENABLED:
-#         print(f"📱 SMS (Simulated) To: {phone_number}: {message}")
-#         return True
-    
-#     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
-#         print(f"⚠️ Twilio credentials missing. SMS not sent to {phone_number}")
-#         return True
-    
-#     try:
-#         from twilio.rest import Client
-        
-#         # ✅ Simplify for trial account
-#         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        
-#         # ✅ Remove any extra parameters that trial accounts don't support
-#         sms = client.messages.create(
-#             body=message[:160],  # Truncate to 160 chars for SMS
-#             from_=TWILIO_PHONE_NUMBER,
-#             to=phone_number
-#             # Remove any other parameters like status_callback, etc.
-#         )
-        
-#         print(f"✅ SMS sent to {phone_number}")
-#         print(f"   SID: {sms.sid}")
-#         return True
-#     except Exception as e:
-#         print(f"❌ SMS error: {e}")
-        
-#         # ✅ Check if it's a trial account restriction
-#         if "trial accounts have limited parameter access" in str(e):
-#             print("📱 Trial account restriction. Upgrade to send more SMS.")
-#             # Simulate success so the app doesn't break
-#             return True
-        
-#         return True
-
 
 @app.route("/debug-twilio")
 @login_required
@@ -4918,15 +4493,7 @@ def send_reminder(rental_id):
 
 
 
-# @app.route("/rentals/<int:rental_id>/send-reminder")
-# @login_required
-# def send_reminder_route(rental_id):
-#     """Manually send a reminder for a rental."""
-#     if send_reminder(rental_id):
-#         flash("Reminder sent successfully!", "success")
-#     else:
-#         flash("Failed to send reminder. Rental not found.", "danger")
-#     return redirect(url_for("rental_history"))
+
 
 
 @app.route("/rentals/<int:rental_id>/send-reminder")
@@ -4941,29 +4508,6 @@ def send_reminder_route(rental_id):
 
 
 
-# @app.route("/rentals/check-reminders")
-# @login_required
-# def check_reminders():
-#     """Check all active rentals and send reminders if needed."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get active rentals
-#     rentals = execute_query(c,"""
-#         SELECT id FROM daily_rentals 
-#         WHERE status = 'Active'
-#         AND end_time IS NOT NULL
-#     """).fetchall()
-    
-#     sent_count = 0
-#     for rental in rentals:
-#         if send_reminder(rental["id"]):
-#             sent_count += 1
-    
-#     conn.close()
-    
-#     flash(f"Checked {len(rentals)} active rentals. Sent {sent_count} reminders.", "success")
-#     return redirect(url_for("rental_history"))
 
 @app.route("/rentals/check-reminders")
 @login_required
