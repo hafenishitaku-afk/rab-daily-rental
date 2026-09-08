@@ -1474,6 +1474,113 @@ def customer_rent():
 
 
 
+# @app.route("/dashboard")
+# @login_required
+# @staff_required
+# def dashboard():
+#     """Staff dashboard - NOT for customers."""
+#     from datetime import datetime
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     # Stats - using get_single_value helper
+#     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
+#     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
+#     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
+#     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
+#     today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
+    
+#     # ✅ Get active rentals with correct duration
+#     if is_postgres:
+#         # PostgreSQL syntax
+#         rentals = execute_query(c, """
+#             SELECT 
+#                 r.id,
+#                 c.full_name,
+#                 b.bike_code,
+#                 r.start_time,
+#                 CONCAT(
+#                     FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600), 'h ',
+#                     FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) % 3600) / 60), 'm'
+#                 ) AS duration
+#             FROM daily_rentals r
+#             JOIN customers c ON c.id = r.customer_id
+#             JOIN bicycles b ON b.id = r.bicycle_id
+#             WHERE r.status = 'Active'
+#             ORDER BY r.start_time DESC
+#         """).fetchall()
+#     else:
+#         # SQLite syntax
+#         rentals = execute_query(c, """
+#             SELECT 
+#                 r.id,
+#                 c.full_name,
+#                 b.bike_code,
+#                 r.start_time,
+#                 CAST((strftime('%s', 'now') - strftime('%s', r.start_time)) / 3600 AS INTEGER) || 'h ' ||
+#                 CAST(((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600) / 60 AS INTEGER) || 'm' AS duration
+#             FROM daily_rentals r
+#             JOIN customers c ON c.id = r.customer_id
+#             JOIN bicycles b ON b.id = r.bicycle_id
+#             WHERE r.status = 'Active'
+#             ORDER BY r.start_time DESC
+#         """).fetchall()
+    
+#     # ✅ Format start_time for display
+#     for rental in rentals:
+#         if rental.get("start_time"):
+#             if isinstance(rental["start_time"], datetime):
+#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["start_time"], str):
+#                 rental["start_time"] = rental["start_time"][:16]
+    
+#     # Unpaid rentals
+#     unpaid_rentals = execute_query(c, """
+#         SELECT 
+#             r.id,
+#             c.full_name,
+#             b.bike_code,
+#             r.total_cost,
+#             r.start_time,
+#             r.end_time
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE r.status = 'Completed'
+#         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
+#         ORDER BY r.end_time DESC
+#     """).fetchall()
+    
+#     # ✅ Format start_time and end_time for unpaid rentals
+#     for rental in unpaid_rentals:
+#         if rental.get("start_time"):
+#             if isinstance(rental["start_time"], datetime):
+#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["start_time"], str):
+#                 rental["start_time"] = rental["start_time"][:16]
+#         if rental.get("end_time"):
+#             if isinstance(rental["end_time"], datetime):
+#                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["end_time"], str):
+#                 rental["end_time"] = rental["end_time"][:16]
+    
+#     conn.close()
+    
+#     return render_template(
+#         "dashboard.html",
+#         title="Dashboard - Daily Rentals",
+#         total_bikes=total_bikes,
+#         active_rentals=active_rentals,
+#         total_customers=total_customers,
+#         pending_verification=pending_verification,
+#         today_revenue=today_revenue,
+#         rentals=rentals,
+#         unpaid_rentals=unpaid_rentals
+#    )
+
 @app.route("/dashboard")
 @login_required
 @staff_required
@@ -1486,50 +1593,49 @@ def dashboard():
     
     is_postgres = os.environ.get("DATABASE_URL") is not None
     
-    # Stats - using get_single_value helper
+    # Stats
     total_bikes = get_single_value(c, "SELECT COUNT(*) FROM bicycles WHERE status = 'Available'")
     active_rentals = get_single_value(c, "SELECT COUNT(*) FROM daily_rentals WHERE status = 'Active'")
     total_customers = get_single_value(c, "SELECT COUNT(*) FROM customers")
     pending_verification = get_single_value(c, "SELECT COUNT(*) FROM customers WHERE verification_status = 'Pending'")
-    today_revenue = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE date(created_at) = date('now') AND status = 'Completed' AND payment_status = 'Paid'")
     
-    # ✅ Get active rentals with correct duration
+    # ✅ FIXED: Today's Revenue - Filter out negative values
     if is_postgres:
-        # PostgreSQL syntax
-        rentals = execute_query(c, """
-            SELECT 
-                r.id,
-                c.full_name,
-                b.bike_code,
-                r.start_time,
-                CONCAT(
-                    FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600), 'h ',
-                    FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) % 3600) / 60), 'm'
-                ) AS duration
-            FROM daily_rentals r
-            JOIN customers c ON c.id = r.customer_id
-            JOIN bicycles b ON b.id = r.bicycle_id
-            WHERE r.status = 'Active'
-            ORDER BY r.start_time DESC
-        """).fetchall()
+        today_revenue = get_single_value(c, """
+            SELECT COALESCE(SUM(total_cost), 0) 
+            FROM daily_rentals 
+            WHERE DATE(created_at) = CURRENT_DATE
+            AND status = 'Completed' 
+            AND payment_status = 'Paid'
+            AND total_cost >= 0
+        """)
     else:
-        # SQLite syntax
-        rentals = execute_query(c, """
-            SELECT 
-                r.id,
-                c.full_name,
-                b.bike_code,
-                r.start_time,
-                CAST((strftime('%s', 'now') - strftime('%s', r.start_time)) / 3600 AS INTEGER) || 'h ' ||
-                CAST(((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600) / 60 AS INTEGER) || 'm' AS duration
-            FROM daily_rentals r
-            JOIN customers c ON c.id = r.customer_id
-            JOIN bicycles b ON b.id = r.bicycle_id
-            WHERE r.status = 'Active'
-            ORDER BY r.start_time DESC
-        """).fetchall()
+        today_revenue = get_single_value(c, """
+            SELECT COALESCE(SUM(total_cost), 0) 
+            FROM daily_rentals 
+            WHERE date(created_at) = date('now') 
+            AND status = 'Completed' 
+            AND payment_status = 'Paid'
+            AND total_cost >= 0
+        """)
     
-    # ✅ Format start_time for display
+    # Get active rentals with correct duration
+    duration_sql = get_duration_sql()
+    rentals = execute_query(c, f"""
+        SELECT 
+            r.id,
+            c.full_name,
+            b.bike_code,
+            r.start_time,
+            {duration_sql}
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.status = 'Active'
+        ORDER BY r.start_time DESC
+    """).fetchall()
+    
+    # Format start_time for display
     for rental in rentals:
         if rental.get("start_time"):
             if isinstance(rental["start_time"], datetime):
@@ -1554,7 +1660,7 @@ def dashboard():
         ORDER BY r.end_time DESC
     """).fetchall()
     
-    # ✅ Format start_time and end_time for unpaid rentals
+    # Format dates for unpaid rentals
     for rental in unpaid_rentals:
         if rental.get("start_time"):
             if isinstance(rental["start_time"], datetime):
@@ -1569,6 +1675,10 @@ def dashboard():
     
     conn.close()
     
+    # ✅ Ensure revenue is never negative
+    if today_revenue < 0:
+        today_revenue = 0
+    
     return render_template(
         "dashboard.html",
         title="Dashboard - Daily Rentals",
@@ -1580,6 +1690,8 @@ def dashboard():
         rentals=rentals,
         unpaid_rentals=unpaid_rentals
     )
+
+
 
 
 @app.route("/rentals/start", methods=["GET", "POST"])
