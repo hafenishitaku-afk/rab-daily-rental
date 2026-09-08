@@ -40,7 +40,8 @@
                 <tr>
                     <td><b>{{ rental.full_name }}</b></td>
                     <td>{{ rental.bike_code }}</td>
-                    <td>{{ start_time_str }}</td>
+                    <!-- ✅ FIXED: Use rental.start_time -->
+                    <td>{{ rental.start_time }}</td>
                     <td>{{ rental.duration }}</td>
                     <td>
                         <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
@@ -101,6 +102,5 @@
         </table>
     </div>
 </div>
-
 
 {% endblock %}
