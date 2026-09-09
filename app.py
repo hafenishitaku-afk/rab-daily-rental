@@ -5473,6 +5473,208 @@ def export_revenue_csv():
 
 
 
+# @app.route("/receipt/<int:payment_id>")
+# @login_required
+# def generate_receipt(payment_id):
+#     """Generate a PDF receipt for a payment."""
+#     from reportlab.lib.pagesizes import A4
+#     from reportlab.lib import colors
+#     from reportlab.lib.units import mm
+#     from reportlab.pdfgen import canvas
+#     from io import BytesIO
+#     from datetime import datetime
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get payment details with customer and rental info
+#     payment = execute_query(c, """
+#         SELECT 
+#             p.*,
+#             r.id AS rental_id,
+#             r.start_time,
+#             r.end_time,
+#             r.total_hours,
+#             r.total_cost,
+#             r.bicycle_id,
+#             c.full_name,
+#             c.phone,
+#             c.email,
+#             c.id_number,
+#             b.bike_code,
+#             b.brand,
+#             b.model
+#         FROM rental_payments p
+#         JOIN daily_rentals r ON r.id = p.daily_rental_id
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE p.id = ?
+#     """, (payment_id,)).fetchone()
+    
+#     conn.close()
+    
+#     if not payment:
+#         flash("Payment not found.", "danger")
+#         return redirect(url_for("payment_history"))
+    
+#     # =============================================
+#     # ✅ FIX: Format all datetime values
+#     # =============================================
+#     def fmt_datetime(value):
+#         """Format datetime for display in PDF."""
+#         if value is None:
+#             return "N/A"
+#         if isinstance(value, datetime):
+#             return value.strftime("%Y-%m-%d %H:%M")
+#         if isinstance(value, str):
+#             try:
+#                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+#                 return dt.strftime("%Y-%m-%d %H:%M")
+#             except:
+#                 return value[:16] if len(value) >= 16 else value
+#         return str(value)
+    
+#     # Format payment date
+#     payment_date_str = fmt_datetime(payment.get("payment_date"))
+#     start_time_str = fmt_datetime(payment.get("start_time"))
+#     end_time_str = fmt_datetime(payment.get("end_time"))
+    
+#     # Create PDF
+#     buf = BytesIO()
+#     pdf = canvas.Canvas(buf, pagesize=A4)
+#     width, height = A4
+    
+#     # Settings
+#     x = 25 * mm
+#     y = height - 25 * mm
+    
+#     # =============================================
+#     # HEADER
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "RAB RENT A BIKE")
+    
+#     y -= 8 * mm
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Daily Rental Receipt")
+    
+#     y -= 5 * mm
+#     pdf.setFont("Helvetica", 8)
+#     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
+#     # ✅ FIXED: Use formatted payment_date_str
+#     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
+    
+#     y -= 8 * mm
+#     pdf.line(x, y, width - x, y)
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # CUSTOMER DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Customer Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # RENTAL DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Rental Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
+#     y -= 6 * mm
+#     # ✅ FIXED: Use formatted start_time_str
+#     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
+#     y -= 6 * mm
+#     # ✅ FIXED: Use formatted end_time_str
+#     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # PAYMENT DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Payment Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
+#     y -= 6 * mm
+#     # ✅ FIXED: Use formatted payment_date_str
+#     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
+    
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # SUMMARY BOX
+#     # =============================================
+#     # Draw a box for the total
+#     box_height = 25 * mm
+#     box_y = y - box_height
+    
+#     pdf.setFillColor(colors.HexColor("#ffe500"))
+#     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
+    
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.setFont("Helvetica-Bold", 14)
+#     pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
+    
+#     y -= box_height + 15 * mm
+    
+#     # =============================================
+#     # TERMS & CONDITIONS
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
+#     y -= 5 * mm
+#     pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
+    
+#     # =============================================
+#     # FOOTER
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#999999"))
+#     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
+#     pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+#     pdf.save()
+#     buf.seek(0)
+    
+#     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
+#     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
 @app.route("/receipt/<int:payment_id>")
 @login_required
 def generate_receipt(payment_id):
@@ -5482,7 +5684,8 @@ def generate_receipt(payment_id):
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
     from io import BytesIO
-    from datetime import datetime
+    from datetime import datetime, timedelta
+    import pytz
     
     conn = db()
     c = conn.cursor()
@@ -5518,26 +5721,29 @@ def generate_receipt(payment_id):
         return redirect(url_for("payment_history"))
     
     # =============================================
-    # ✅ FIX: Format all datetime values
+    # ✅ FIX: Format datetime values with timezone
     # =============================================
-    def fmt_datetime(value):
-        """Format datetime for display in PDF."""
+    def format_datetime(value):
+        """Convert UTC to local time (Namibia UTC+2) for display."""
         if value is None:
             return "N/A"
         if isinstance(value, datetime):
-            return value.strftime("%Y-%m-%d %H:%M")
+            # Add 2 hours for Namibia time
+            local_time = value + timedelta(hours=2)
+            return local_time.strftime("%Y-%m-%d %H:%M")
         if isinstance(value, str):
             try:
                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                return dt.strftime("%Y-%m-%d %H:%M")
+                local_time = dt + timedelta(hours=2)
+                return local_time.strftime("%Y-%m-%d %H:%M")
             except:
                 return value[:16] if len(value) >= 16 else value
         return str(value)
     
-    # Format payment date
-    payment_date_str = fmt_datetime(payment.get("payment_date"))
-    start_time_str = fmt_datetime(payment.get("start_time"))
-    end_time_str = fmt_datetime(payment.get("end_time"))
+    # Format all dates
+    payment_date_str = format_datetime(payment.get("payment_date"))
+    start_time_str = format_datetime(payment.get("start_time"))
+    end_time_str = format_datetime(payment.get("end_time"))
     
     # Create PDF
     buf = BytesIO()
@@ -5563,7 +5769,7 @@ def generate_receipt(payment_id):
     y -= 5 * mm
     pdf.setFont("Helvetica", 8)
     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
-    # ✅ FIXED: Use formatted payment_date_str
+    # ✅ Use formatted payment date
     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
     
     y -= 8 * mm
@@ -5602,10 +5808,10 @@ def generate_receipt(payment_id):
     pdf.setFillColor(colors.HexColor("#111111"))
     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
     y -= 6 * mm
-    # ✅ FIXED: Use formatted start_time_str
+    # ✅ Use formatted start time
     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
     y -= 6 * mm
-    # ✅ FIXED: Use formatted end_time_str
+    # ✅ Use formatted end time
     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
@@ -5626,7 +5832,7 @@ def generate_receipt(payment_id):
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
     y -= 6 * mm
-    # ✅ FIXED: Use formatted payment_date_str
+    # ✅ Use formatted payment date
     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
@@ -5636,7 +5842,6 @@ def generate_receipt(payment_id):
     # =============================================
     # SUMMARY BOX
     # =============================================
-    # Draw a box for the total
     box_height = 25 * mm
     box_y = y - box_height
     
@@ -5673,9 +5878,6 @@ def generate_receipt(payment_id):
     
     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
-
-
-
 
 
 @app.route("/export/bicycles/csv")
