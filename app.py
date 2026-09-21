@@ -22,6 +22,12 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
+
+
+def dict_factory(cursor, row):
+    return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+
+
 # =============================================
 # LOAD ENVIRONMENT VARIABLES
 # =============================================
@@ -66,7 +72,8 @@ def db():
         import sqlite3
         conn = sqlite3.connect(DB)
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.row_factory = sqlite3.Row
+       # conn.row_factory = sqlite3.Row
+        conn.row_factory = dict_factory    # ✅ new
         return conn
 
 
@@ -2520,26 +2527,24 @@ def revenue_report():
     )
 
 
-
-
 @app.route("/rentals/history")
 @login_required
 @staff_required
 def rental_history():
-    from datetime import datetime  # ✅ Add this import
-    
+    from datetime import datetime
+
     conn = db()
     c = conn.cursor()
-    
+
     # Get filter parameters
     status_filter = request.args.get("status", "")
     date_from = request.args.get("date_from", "")
     date_to = request.args.get("date_to", "")
     search = request.args.get("search", "").strip()
-    
+
     # Build query
     query = """
-        SELECT 
+        SELECT
             r.id,
             r.start_time,
             r.end_time,
@@ -2558,58 +2563,51 @@ def rental_history():
         JOIN bicycles b ON b.id = r.bicycle_id
         WHERE 1=1
     """
-    
+
     params = []
-    
+
     if status_filter:
         query += " AND r.status = ?"
         params.append(status_filter)
-    
+
     if date_from:
         query += " AND date(r.start_time) >= ?"
         params.append(date_from)
-    
+
     if date_to:
         query += " AND date(r.start_time) <= ?"
         params.append(date_to)
-    
+
     if search:
         query += """ AND (
-            c.full_name LIKE ? OR 
-            b.bike_code LIKE ? OR 
+            c.full_name LIKE ? OR
+            b.bike_code LIKE ? OR
             c.phone LIKE ?
         )"""
         search_term = f"%{search}%"
         params.extend([search_term, search_term, search_term])
-    
+
     query += " ORDER BY r.start_time DESC LIMIT 100"
-    
+
     rentals = execute_query(c, query, params).fetchall()
-    
-    # ✅ FIX: Format datetime for each rental
+
+    # Format datetime for each rental (rows are dicts thanks to dict_factory)
     for rental in rentals:
-        if rental.get("start_time"):
-            if isinstance(rental["start_time"], datetime):
-                rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
-            elif isinstance(rental["start_time"], str):
-                rental["start_time"] = rental["start_time"]
-        
-        if rental.get("end_time"):
-            if isinstance(rental["end_time"], datetime):
-                rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
-            elif isinstance(rental["end_time"], str):
-                rental["end_time"] = rental["end_time"]
-    
+        if isinstance(rental.get("start_time"), datetime):
+            rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+        if isinstance(rental.get("end_time"), datetime):
+            rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+
     # Get summary stats
     total_rentals = len(rentals)
-    total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
-    paid_count = sum(1 for r in rentals if r["payment_status"] == "Paid")
-    unpaid_count = sum(1 for r in rentals if r["payment_status"] != "Paid")
-    active_count = sum(1 for r in rentals if r["rental_status"] == "Active")
-    completed_count = sum(1 for r in rentals if r["rental_status"] == "Completed")
-    
+    total_revenue = sum(float(r.get("total_cost") or 0) for r in rentals)
+    paid_count = sum(1 for r in rentals if r.get("payment_status") == "Paid")
+    unpaid_count = sum(1 for r in rentals if r.get("payment_status") != "Paid")
+    active_count = sum(1 for r in rentals if r.get("rental_status") == "Active")
+    completed_count = sum(1 for r in rentals if r.get("rental_status") == "Completed")
+
     conn.close()
-    
+
     return render_template(
         "rental_history.html",
         title="Rental History",
@@ -2623,8 +2621,116 @@ def rental_history():
         status_filter=status_filter,
         date_from=date_from,
         date_to=date_to,
-        search=search
+        search=search,
     )
+
+
+
+# @app.route("/rentals/history")
+# @login_required
+# @staff_required
+# def rental_history():
+#     from datetime import datetime  # ✅ Add this import
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get filter parameters
+#     status_filter = request.args.get("status", "")
+#     date_from = request.args.get("date_from", "")
+#     date_to = request.args.get("date_to", "")
+#     search = request.args.get("search", "").strip()
+    
+#     # Build query
+#     query = """
+#         SELECT 
+#             r.id,
+#             r.start_time,
+#             r.end_time,
+#             r.total_hours,
+#             r.total_cost,
+#             r.payment_status,
+#             r.status AS rental_status,
+#             c.full_name,
+#             c.phone,
+#             b.bike_code,
+#             b.brand,
+#             b.model,
+#             (SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = r.id) AS payment_count
+#         FROM daily_rentals r
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE 1=1
+#     """
+    
+#     params = []
+    
+#     if status_filter:
+#         query += " AND r.status = ?"
+#         params.append(status_filter)
+    
+#     if date_from:
+#         query += " AND date(r.start_time) >= ?"
+#         params.append(date_from)
+    
+#     if date_to:
+#         query += " AND date(r.start_time) <= ?"
+#         params.append(date_to)
+    
+#     if search:
+#         query += """ AND (
+#             c.full_name LIKE ? OR 
+#             b.bike_code LIKE ? OR 
+#             c.phone LIKE ?
+#         )"""
+#         search_term = f"%{search}%"
+#         params.extend([search_term, search_term, search_term])
+    
+#     query += " ORDER BY r.start_time DESC LIMIT 100"
+    
+#     rentals = execute_query(c, query, params).fetchall()
+
+
+
+#     # ✅ FIX: Format datetime for each rental
+#     for rental in rentals:
+#         if rental.get("start_time"):
+#             if isinstance(rental["start_time"], datetime):
+#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["start_time"], str):
+#                 rental["start_time"] = rental["start_time"]
+        
+#         if rental.get("end_time"):
+#             if isinstance(rental["end_time"], datetime):
+#                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+#             elif isinstance(rental["end_time"], str):
+#                 rental["end_time"] = rental["end_time"]
+    
+#     # Get summary stats
+#     total_rentals = len(rentals)
+#     total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
+#     paid_count = sum(1 for r in rentals if r["payment_status"] == "Paid")
+#     unpaid_count = sum(1 for r in rentals if r["payment_status"] != "Paid")
+#     active_count = sum(1 for r in rentals if r["rental_status"] == "Active")
+#     completed_count = sum(1 for r in rentals if r["rental_status"] == "Completed")
+    
+#     conn.close()
+    
+#     return render_template(
+#         "rental_history.html",
+#         title="Rental History",
+#         rentals=rentals,
+#         total_rentals=total_rentals,
+#         total_revenue=total_revenue,
+#         paid_count=paid_count,
+#         unpaid_count=unpaid_count,
+#         active_count=active_count,
+#         completed_count=completed_count,
+#         status_filter=status_filter,
+#         date_from=date_from,
+#         date_to=date_to,
+#         search=search
+#     )
 
 
 
@@ -5473,206 +5579,6 @@ def export_revenue_csv():
 
 
 
-# @app.route("/receipt/<int:payment_id>")
-# @login_required
-# def generate_receipt(payment_id):
-#     """Generate a PDF receipt for a payment."""
-#     from reportlab.lib.pagesizes import A4
-#     from reportlab.lib import colors
-#     from reportlab.lib.units import mm
-#     from reportlab.pdfgen import canvas
-#     from io import BytesIO
-#     from datetime import datetime
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get payment details with customer and rental info
-#     payment = execute_query(c, """
-#         SELECT 
-#             p.*,
-#             r.id AS rental_id,
-#             r.start_time,
-#             r.end_time,
-#             r.total_hours,
-#             r.total_cost,
-#             r.bicycle_id,
-#             c.full_name,
-#             c.phone,
-#             c.email,
-#             c.id_number,
-#             b.bike_code,
-#             b.brand,
-#             b.model
-#         FROM rental_payments p
-#         JOIN daily_rentals r ON r.id = p.daily_rental_id
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE p.id = ?
-#     """, (payment_id,)).fetchone()
-    
-#     conn.close()
-    
-#     if not payment:
-#         flash("Payment not found.", "danger")
-#         return redirect(url_for("payment_history"))
-    
-#     # =============================================
-#     # ✅ FIX: Format all datetime values
-#     # =============================================
-#     def fmt_datetime(value):
-#         """Format datetime for display in PDF."""
-#         if value is None:
-#             return "N/A"
-#         if isinstance(value, datetime):
-#             return value.strftime("%Y-%m-%d %H:%M")
-#         if isinstance(value, str):
-#             try:
-#                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-#                 return dt.strftime("%Y-%m-%d %H:%M")
-#             except:
-#                 return value[:16] if len(value) >= 16 else value
-#         return str(value)
-    
-#     # Format payment date
-#     payment_date_str = fmt_datetime(payment.get("payment_date"))
-#     start_time_str = fmt_datetime(payment.get("start_time"))
-#     end_time_str = fmt_datetime(payment.get("end_time"))
-    
-#     # Create PDF
-#     buf = BytesIO()
-#     pdf = canvas.Canvas(buf, pagesize=A4)
-#     width, height = A4
-    
-#     # Settings
-#     x = 25 * mm
-#     y = height - 25 * mm
-    
-#     # =============================================
-#     # HEADER
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 24)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "RAB RENT A BIKE")
-    
-#     y -= 8 * mm
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#667085"))
-#     pdf.drawString(x, y, "Daily Rental Receipt")
-    
-#     y -= 5 * mm
-#     pdf.setFont("Helvetica", 8)
-#     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
-#     # ✅ FIXED: Use formatted payment_date_str
-#     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
-    
-#     y -= 8 * mm
-#     pdf.line(x, y, width - x, y)
-#     y -= 10 * mm
-    
-#     # =============================================
-#     # CUSTOMER DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Customer Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
-    
-#     y -= 8 * mm
-    
-#     # =============================================
-#     # RENTAL DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Rental Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
-#     y -= 6 * mm
-#     # ✅ FIXED: Use formatted start_time_str
-#     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
-#     y -= 6 * mm
-#     # ✅ FIXED: Use formatted end_time_str
-#     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
-    
-#     y -= 8 * mm
-    
-#     # =============================================
-#     # PAYMENT DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Payment Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
-#     y -= 6 * mm
-#     # ✅ FIXED: Use formatted payment_date_str
-#     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
-    
-#     y -= 10 * mm
-    
-#     # =============================================
-#     # SUMMARY BOX
-#     # =============================================
-#     # Draw a box for the total
-#     box_height = 25 * mm
-#     box_y = y - box_height
-    
-#     pdf.setFillColor(colors.HexColor("#ffe500"))
-#     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
-    
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.setFont("Helvetica-Bold", 14)
-#     pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
-#     pdf.setFont("Helvetica-Bold", 24)
-#     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
-    
-#     y -= box_height + 15 * mm
-    
-#     # =============================================
-#     # TERMS & CONDITIONS
-#     # =============================================
-#     pdf.setFont("Helvetica", 8)
-#     pdf.setFillColor(colors.HexColor("#667085"))
-#     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
-#     y -= 5 * mm
-#     pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
-    
-#     # =============================================
-#     # FOOTER
-#     # =============================================
-#     pdf.setFont("Helvetica", 8)
-#     pdf.setFillColor(colors.HexColor("#999999"))
-#     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
-#     pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    
-#     pdf.save()
-#     buf.seek(0)
-    
-#     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
-#     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
 @app.route("/receipt/<int:payment_id>")

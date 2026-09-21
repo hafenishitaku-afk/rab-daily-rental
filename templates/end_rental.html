@@ -20,6 +20,10 @@
             <div class="value" style="font-size:20px;">{{ start_time_str }}</div>
         </div>
         <div class="metric">
+            <div class="label">Current Time</div>
+            <div class="value" style="font-size:20px;">{{ end_time_str }}</div>
+        </div>
+        <div class="metric">
             <div class="label">Hourly Rate</div>
             <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(rental.hourly_rate) }}</div>
         </div>
