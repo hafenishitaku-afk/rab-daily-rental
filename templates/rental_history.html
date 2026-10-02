@@ -26,34 +26,39 @@
 </div>
 
 <!-- Filters -->
+<!-- Filters & Search -->
 <div class="card">
-    <h2>Filter Rentals</h2>
-    <form method="get" action="{{ url_for('rental_history') }}" class="formgrid">
-        <label>
-            Status
-            <select name="status">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px;">
+        <h2 style="margin:0;">Find Rentals</h2>
+
+        <form method="get" action="{{ url_for('rental_history') }}" 
+              style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" name="search" 
+                   placeholder="Search customer, bike, or phone..." 
+                   value="{{ search or '' }}"
+                   style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;min-width:260px;">
+            <select name="status" style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;">
                 <option value="">All Statuses</option>
                 <option value="Active" {% if status_filter == 'Active' %}selected{% endif %}>Active</option>
                 <option value="Completed" {% if status_filter == 'Completed' %}selected{% endif %}>Completed</option>
+                <option value="Cancelled" {% if status_filter == 'Cancelled' %}selected{% endif %}>Cancelled</option>
             </select>
-        </label>
-        <label>
-            Search
-            <input type="text" name="search" placeholder="Customer, Bike, or Phone..." value="{{ search or '' }}">
-        </label>
-        <label>
-            Date From
-            <input type="date" name="date_from" value="{{ date_from or '' }}">
-        </label>
-        <label>
-            Date To
-            <input type="date" name="date_to" value="{{ date_to or '' }}">
-        </label>
-        <div style="display:flex;gap:10px;align-items:end;">
-            <button class="btn yellow" type="submit">🔍 Filter</button>
-            <a href="{{ url_for('rental_history') }}" class="btn">Clear</a>
-        </div>
-    </form>
+            <input type="date" name="date_from" value="{{ date_from or '' }}"
+                   style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;">
+            <input type="date" name="date_to" value="{{ date_to or '' }}"
+                   style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;">
+            <button type="submit" class="btn small yellow">🔍 Filter</button>
+            {% if search or status_filter or date_from or date_to %}
+            <a href="{{ url_for('rental_history') }}" class="btn small">✖ Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if search %}
+    <p class="sub" style="margin-top:0;">
+        Showing <b>{{ rentals|length }}</b> result(s) for "<b>{{ search }}</b>"
+    </p>
+    {% endif %}
 </div>
 
 <!-- Rental Table -->
@@ -92,9 +97,17 @@
                     <td>{{ "%.1f"|format(rental.total_hours or 0) }}</td>
                     <td><b>N$ {{ "%.2f"|format(rental.total_cost or 0) }}</b></td>
                     <td>
-                        <span class="badge {% if rental.rental_status == 'Active' %}blue{% else %}orange{% endif %}">
+                        <!-- <span class="badge {% if rental.rental_status == 'Active' %}blue{% else %}orange{% endif %}">
+                            {{ rental.rental_status }}
+                        </span> -->
+
+                        <span class="badge
+                            {% if rental.rental_status == 'Active' %}blue
+                            {% elif rental.rental_status == 'Cancelled' %}red
+                            {% else %}orange{% endif %}">
                             {{ rental.rental_status }}
                         </span>
+
                     </td>
                     <td>
                         <span class="badge {% if rental.payment_status == 'Paid' %}green{% else %}orange{% endif %}">
@@ -103,23 +116,40 @@
                         <br>
                         <small>{{ rental.payment_count }} payments</small>
                     </td>
+
                     <td>
                         {% if rental.rental_status == 'Active' %}
                             <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End</a>
                             <a class="btn small" href="{{ url_for('send_reminder_route', rental_id=rental.id) }}">🔔 Remind</a>
+                            {% if session.role == 'admin' or session.role == 'manager' %}
+                            <button class="btn small" style="background:#dc3545;color:#fff;"
+                                    onclick="openCancelModal({{ rental.id }}, '{{ rental.full_name|e }}', '{{ rental.bike_code|e }}')">
+                                ✖ Cancel
+                            </button>
+                            {% endif %}
                         {% endif %}
                         {% if rental.payment_status != 'Paid' and rental.rental_status == 'Completed' %}
                             <a class="btn small yellow" href="{{ url_for('record_payment', rental_id=rental.id) }}">Pay</a>
                         {% endif %}
                         <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">PDF</a>
                     </td>
+
+
                 </tr>
                 {% endfor %}
             {% else %}
-                <tr>
-                    <td colspan="10">No rentals found.</td>
-                </tr>
+            <tr>
+                <td colspan="10">
+                    {% if search or status_filter or date_from or date_to %}
+                        No rentals match your filters.
+                    {% else %}
+                        No rentals found.
+                    {% endif %}
+                </td>
+            </tr>
             {% endif %}
+
+
         </table>
     </div>
 </div>
@@ -130,6 +160,47 @@
     <a href="{{ url_for('rental_history') }}" class="btn yellow">⟳ Refresh</a>
     <a href="{{ url_for('check_reminders') }}" class="btn">📨 Check & Send Reminders</a>
 </div>
+
+
+<!-- Cancel Rental Modal -->
+<div id="cancelModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:480px;width:90%;margin:0;">
+        <h2>✖ Cancel Rental</h2>
+        <p class="sub" id="cancelModalSub">Cancel this rental?</p>
+
+        <form method="post" id="cancelForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+                Reason for cancellation <span style="color:#dc3545;">*</span>
+                <textarea name="reason" rows="3" required
+                          placeholder="e.g. Wrong customer selected, customer changed mind, wrong bike..."></textarea>
+            </label>
+            <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button" class="btn" onclick="closeCancelModal()">Keep Rental</button>
+                <button type="submit" class="btn" style="background:#dc3545;color:#fff;">✖ Confirm Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openCancelModal(rentalId, customerName, bikeCode) {
+    document.getElementById('cancelModalSub').textContent =
+        'Cancel rental #' + rentalId + ' for ' + customerName + ' (' + bikeCode + ')?';
+    document.getElementById('cancelForm').action = '/rentals/' + rentalId + '/cancel';
+    document.getElementById('cancelModal').style.display = 'flex';
+}
+function closeCancelModal() {
+    document.getElementById('cancelModal').style.display = 'none';
+    document.getElementById('cancelForm').reset();
+}
+document.getElementById('cancelModal').addEventListener('click', function(e) {
+    if (e.target === this) closeCancelModal();
+});
+</script>
+
+
+
 
 {% endblock %}
 

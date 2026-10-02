@@ -79,6 +79,7 @@
                 <div style="display:flex;gap:5px;flex-wrap:wrap;">
                     {% if session.role == 'admin' %}
                     <form method="post" action="{{ url_for('toggle_pin_announcement', announcement_id=a.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn small" style="background:#ffd700;color:#111;">
                             {{ '📌 Unpin' if a.is_pinned else '📌 Pin' }}
                         </button>
@@ -86,6 +87,7 @@
                     <form method="post" action="{{ url_for('delete_announcement', announcement_id=a.id) }}" 
                           style="display:inline;" 
                           onsubmit="return confirm('Delete this announcement?');">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn small" style="background:#dc3545;color:#fff;">🗑️</button>
                     </form>
                     {% endif %}

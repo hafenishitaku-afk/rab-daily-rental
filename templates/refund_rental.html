@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>💰 Refund Deposit</h1>
+<p class="sub">The deposit is more than the rental cost. Refund the difference to the customer.</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Customer</div>
+            <div class="value" style="font-size:20px;">{{ rental.full_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Bicycle</div>
+            <div class="value" style="font-size:20px;">{{ rental.bike_code }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Deposit Paid</div>
+            <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(deposit_paid) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Rental Cost</div>
+            <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(total_cost) }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="background:#e8f7ef;">
+    <div style="text-align:center;padding:20px;">
+        <div style="font-size:16px;color:#667085;">Refund Amount Due</div>
+        <div style="font-size:48px;font-weight:800;color:#16834b;">N$ {{ "%.2f"|format(refund_amount) }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Confirm Refund</h2>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Refund Method
+                <select name="refund_method">
+                    <option value="Cash">💵 Cash</option>
+                    <option value="Card">💳 Card Reversal</option>
+                    <option value="Mobile Money">📱 Mobile Money</option>
+                    <option value="Bank Transfer">🏦 Bank Transfer</option>
+                </select>
+            </label>
+            <label>
+                Notes (optional)
+                <input type="text" name="notes" placeholder="Any notes about this refund...">
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn yellow" type="submit">💰 Confirm Refund Given</button>
+            <a href="{{ url_for('dashboard') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

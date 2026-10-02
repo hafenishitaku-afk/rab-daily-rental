@@ -8,6 +8,7 @@
 <div class="card">
     <h2>Add Bicycle</h2>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             <label>
                 Bike Code *
@@ -51,7 +52,27 @@
 </div>
 
 <div class="card">
-    <h2>Fleet</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px;">
+        <h2 style="margin:0;">Fleet</h2>
+
+        <form method="get" action="{{ url_for('bicycles') }}" style="display:flex;gap:8px;align-items:center;">
+            <input type="text" name="search" 
+                   placeholder="Search code, brand, model, type..." 
+                   value="{{ search or '' }}"
+                   style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;min-width:260px;">
+            <button type="submit" class="btn small yellow">🔍 Search</button>
+            {% if search %}
+            <a href="{{ url_for('bicycles') }}" class="btn small">✖ Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if search %}
+    <p class="sub" style="margin-top:0;">
+        Showing <b>{{ bicycles|length }}</b> result(s) for "<b>{{ search }}</b>"
+    </p>
+    {% endif %}
+
     <div class="scroll">
         <table>
             <tr>
@@ -103,6 +124,7 @@
                         <form method="post" action="{{ url_for('delete_bicycle', bicycle_id=b.id) }}" 
                               style="display:inline;" 
                               onsubmit="return confirm('Are you sure you want to delete bicycle {{ b.bike_code }}? This action cannot be undone.');">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
                         </form>
                         {% endif %}
@@ -112,11 +134,19 @@
                     </div>
                 </td>
             </tr>
+
             {% else %}
             <tr>
-                <td colspan="8">No bicycles yet.</td>
+                <td colspan="8">
+                    {% if search %}
+                        No bicycles match "<b>{{ search }}</b>".
+                    {% else %}
+                        No bicycles yet.
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
+
         </table>
     </div>
 </div>

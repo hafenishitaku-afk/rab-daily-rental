@@ -41,6 +41,7 @@
                         {{ 'Disable' if d.is_active else 'Enable' }}
                     </a>
                     <form method="post" action="{{ url_for('delete_discount', discount_id=d.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn small" style="background:#dc3545;" onclick="return confirm('Delete this discount?')">🗑️</button>
                     </form>
                 </td>

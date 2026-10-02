@@ -27,6 +27,12 @@
             <div class="label">Hourly Rate</div>
             <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(rental.hourly_rate) }}</div>
         </div>
+
+        <div class="metric">
+            <div class="label">Deposit Paid</div>
+            <div class="value" style="font-size:20px;">N$ {{ "%.2f"|format(deposit_paid) }}</div>
+        </div>
+
     </div>
 </div>
 
@@ -50,22 +56,55 @@
             <div class="label">Late Fee</div>
             <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_late) }}</div>
         </div>
-        <div class="metric" style="background:#ffe500;grid-column: span 2;">
+        <!-- <div class="metric" style="background:#ffe500;grid-column: span 2;">
+            <div class="label">Total Cost</div>
+            <div class="value" style="font-size:32px;">N$ {{ "%.2f"|format(preview_total) }}</div>
+        </div> -->
+
+        <div class="metric" style="background:#ffe500;">
             <div class="label">Total Cost</div>
             <div class="value" style="font-size:32px;">N$ {{ "%.2f"|format(preview_total) }}</div>
         </div>
+
+        <div class="metric" style="background:
+            {% if preview_change > 0 %}#e8f7ef
+            {% elif preview_change < 0 %}#fdeceb
+            {% else %}#f8f9fa{% endif %};">
+            <div class="label">
+                {% if preview_change > 0 %}💰 Refund to Customer
+                {% elif preview_change < 0 %}⚠️ Customer Owes
+                {% else %}✅ Fully Covered by Deposit{% endif %}
+            </div>
+            <div class="value" style="font-size:32px;color:
+                {% if preview_change > 0 %}#16834b
+                {% elif preview_change < 0 %}#dc3545
+                {% else %}#0d1f46{% endif %};">
+                N$ {{ "%.2f"|format(preview_change|abs) if preview_change != 0 else "0.00" }}
+            </div>
+        </div>
+
     </div>
-    <p style="color:#667085;font-size:12px;margin-top:10px;">
+    <!-- <p style="color:#667085;font-size:12px;margin-top:10px;">
         ⏱️ Cost is calculated based on the current time. 
         {% if preview_late > 0 %}
             <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
         {% endif %}
+    </p> -->
+
+    <p style="color:#667085;font-size:12px;margin-top:10px;">
+        ⏱️ Cost = min(hours × rate, daily cap) + late fee.
+        Deposit (N$ {{ "%.2f"|format(deposit_paid) }}) is then applied.
+        {% if preview_late > 0 %}
+            <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
+        {% endif %}
     </p>
+
 </div>
 
 <div class="card">
     <h2>Complete Return</h2>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             <label>
                 Condition Before

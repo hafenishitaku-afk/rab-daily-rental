@@ -27,6 +27,7 @@
     <div style="display:flex;gap:5px;flex-wrap:wrap;">
         {% if session.role == 'admin' %}
         <form method="post" action="{{ url_for('toggle_pin_announcement', announcement_id=announcement.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn small" style="background:#ffd700;color:#111;">
                 {{ '📌 Unpin' if announcement.is_pinned else '📌 Pin' }}
             </button>
@@ -34,6 +35,7 @@
         <form method="post" action="{{ url_for('delete_announcement', announcement_id=announcement.id) }}" 
               style="display:inline;" 
               onsubmit="return confirm('Delete this announcement?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
         </form>
         {% endif %}
@@ -51,6 +53,7 @@
     
     <!-- Comment Form -->
     <form method="post" action="{{ url_for('add_announcement_comment', announcement_id=announcement.id) }}" style="margin-bottom:20px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div style="display:flex;gap:10px;align-items:flex-start;">
             <textarea name="comment" rows="2" placeholder="Write a comment..." style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;font-family:inherit;" required></textarea>
             <button class="btn yellow" type="submit" style="padding:10px 20px;">💬 Post</button>

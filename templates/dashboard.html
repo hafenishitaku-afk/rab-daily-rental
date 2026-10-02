@@ -43,10 +43,23 @@
                     <!-- ✅ FIXED: Use rental.start_time -->
                     <td>{{ rental.start_time }}</td>
                     <td>{{ rental.duration }}</td>
+                    <!-- <td>
+                        <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
+                        <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">📄 Agreement</a>
+                    </td> -->
+
                     <td>
                         <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
                         <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">📄 Agreement</a>
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <button class="btn small" style="background:#dc3545;color:#fff;"
+                                onclick="openCancelModal({{ rental.id }}, '{{ rental.full_name|e }}', '{{ rental.bike_code|e }}')">
+                            ✖ Cancel
+                        </button>
+                        {% endif %}
                     </td>
+
+
                 </tr>
                 {% endfor %}
             {% else %}
@@ -102,5 +115,45 @@
         </table>
     </div>
 </div>
+
+<!-- Cancel Rental Modal -->
+<div id="cancelModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:480px;width:90%;margin:0;">
+        <h2>✖ Cancel Rental</h2>
+        <p class="sub" id="cancelModalSub">Cancel this rental?</p>
+
+        <form method="post" id="cancelForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+                Reason for cancellation <span style="color:#dc3545;">*</span>
+                <textarea name="reason" rows="3" required
+                          placeholder="e.g. Wrong customer selected, customer changed mind, wrong bike..."></textarea>
+            </label>
+            <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button" class="btn" onclick="closeCancelModal()">Keep Rental</button>
+                <button type="submit" class="btn" style="background:#dc3545;color:#fff;">✖ Confirm Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openCancelModal(rentalId, customerName, bikeCode) {
+    document.getElementById('cancelModalSub').textContent =
+        'Cancel rental #' + rentalId + ' for ' + customerName + ' (' + bikeCode + ')?';
+    document.getElementById('cancelForm').action = '/rentals/' + rentalId + '/cancel';
+    document.getElementById('cancelModal').style.display = 'flex';
+}
+function closeCancelModal() {
+    document.getElementById('cancelModal').style.display = 'none';
+    document.getElementById('cancelForm').reset();
+}
+// Close when clicking outside the box
+document.getElementById('cancelModal').addEventListener('click', function(e) {
+    if (e.target === this) closeCancelModal();
+});
+</script>
+
+
 
 {% endblock %}

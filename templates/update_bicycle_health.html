@@ -9,6 +9,7 @@
 
 <div class="card">
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             <label>
                 Health Score (0-100)

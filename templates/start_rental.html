@@ -7,6 +7,7 @@
 
 <div class="card">
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             
             <label>
@@ -19,7 +20,7 @@
                 </select>
             </label>
             
-            <label>
+            <!-- <label>
                 Bicycle
                 <select name="bicycle_id" required>
                     <option value="">Select Bicycle</option>
@@ -30,7 +31,29 @@
                         </option>
                     {% endfor %}
                 </select>
+            </label> -->
+
+            <label>
+                Bicycle
+                <select name="bicycle_id" id="bicycle_id" required onchange="updateDepositDefault()">
+                    <option value="">Select Bicycle</option>
+                    {% for b in bicycles %}
+                        <option value="{{ b.id }}" data-deposit="{{ b.deposit_amount }}">
+                            {{ b.bike_code }} – {{ b.brand or '' }} {{ b.model or '' }}
+                            (N${{ "%.2f"|format(b.hourly_rate) }}/hr)
+                        </option>
+                    {% endfor %}
+                </select>
             </label>
+
+            <label>
+                Deposit Collected (N$)
+                <input type="number" step="0.01" name="deposit_paid" id="deposit_paid" value="0" min="0" required>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    💰 Any agreed amount. Default is the bicycle's standard deposit.
+                </small>
+            </label>
+
             
             <label>
                 Start Time
@@ -103,5 +126,19 @@
         💡 All times are displayed in Namibia local time (UTC+2).
     </p>
 </div>
+
+
+<script>
+function updateDepositDefault() {
+    var sel = document.getElementById("bicycle_id");
+    var opt = sel.options[sel.selectedIndex];
+    var deposit = opt.getAttribute("data-deposit");
+    if (deposit) {
+        document.getElementById("deposit_paid").value = parseFloat(deposit).toFixed(2);
+    }
+}
+// Set default on page load if a bicycle is pre-selected
+document.addEventListener("DOMContentLoaded", updateDepositDefault);
+</script>
 
 {% endblock %}

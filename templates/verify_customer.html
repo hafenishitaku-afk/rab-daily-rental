@@ -33,6 +33,7 @@
 <div class="card">
     <h2>Verification Decision</h2>
     <form method="post" action="{{ url_for('verify_customer', customer_id=customer.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             <label>
                 Status

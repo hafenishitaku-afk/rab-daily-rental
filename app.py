@@ -22,10 +22,37 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
-
+from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_talisman import Talisman
 
 def dict_factory(cursor, row):
     return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+
+def to_namibia_time(value):
+    """Convert stored UTC datetime (datetime object or ISO string) to Namibia local time (UTC+2) string."""
+    from datetime import datetime, timedelta
+
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        # Strip tzinfo if present to avoid aware/naive conflict
+        if value.tzinfo is not None:
+            value = value.replace(tzinfo=None)
+        return (value + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return (dt + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return value[:16] if len(value) >= 16 else value
+
+    return str(value)
 
 
 # =============================================
@@ -39,13 +66,78 @@ load_dotenv()
 BASE = Path(__file__).resolve().parent
 DB = BASE / "rab.db"
 
-# =============================================
-# CREATE APP
-# =============================================
+
 app = Flask(__name__)
 
-# Secret key - use environment variable in production
-app.secret_key = os.environ.get("SECRET_KEY", "daily-rental-secret-key")
+# =============================================
+# SECRET KEY — must be set BEFORE any extension
+# =============================================
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    if os.environ.get("FLASK_DEBUG") == "1":
+        _secret_key = "dev-only-secret-key-do-not-use-in-production"
+        print("⚠️ Using dev-only SECRET_KEY")
+    else:
+        raise RuntimeError(
+            "SECRET_KEY environment variable is not set! "
+            "Please configure it in the Render dashboard."
+        )
+app.secret_key = _secret_key
+
+
+# =============================================
+# SECURITY INITIALIZATION
+# =============================================
+
+# Detect prod environment (Render sets RENDER=true; DATABASE_URL=postgres on prod)
+_is_prod = (
+    os.environ.get("RENDER") == "true"
+    or os.environ.get("DATABASE_URL", "").startswith("postgres")
+)
+
+# 1. CSRF protection
+csrf = CSRFProtect(app)
+
+# 2. Rate limiting
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per hour"],
+    storage_uri="memory://",
+    headers_enabled=True,
+)
+
+# 3. HTTP security headers + forced HTTPS (production only)
+Talisman(
+    app,
+    force_https=_is_prod,
+    force_https_permanent=_is_prod,
+    strict_transport_security=_is_prod,
+    strict_transport_security_max_age=31536000 if _is_prod else 0,
+    session_cookie_secure=_is_prod,
+    session_cookie_http_only=True,
+    frame_options="DENY",
+    content_security_policy={
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src": "'self' https://fonts.gstatic.com",
+        "img-src": "'self' data: https:",
+        "frame-ancestors": "'none'",
+    },
+    content_security_policy_report_only=False,
+)
+
+# 4. Cookie hardening
+app.config.update(
+    SESSION_COOKIE_SECURE=_is_prod,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    PREFERRED_URL_SCHEME="https" if _is_prod else "http",
+    WTF_CSRF_TIME_LIMIT=3600,
+)
+
+
 
 # =============================================
 # UPLOAD FOLDER
@@ -893,13 +985,30 @@ def init_db():
 
 
 
+def ci_like(column, param):
+    """
+    Return a case-insensitive LIKE expression that works on both SQLite and PostgreSQL.
+    Usage:  WHERE {ci_like('full_name', '?')}   or with a named param, just append.
+    The `?` placeholder will be converted to %s automatically by execute_query().
+    """
+    if os.environ.get("DATABASE_URL"):
+        # PostgreSQL
+        return f"LOWER({column}) LIKE LOWER(?)"
+    else:
+        # SQLite — LIKE is already case-insensitive for ASCII by default
+        return f"{column} LIKE ?"
+
+
+
+
+
 @app.route("/")
 def home():
     return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
 
 
-
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute;20 per hour")
 def login():
     if request.method == "POST":
         conn = db()
@@ -951,8 +1060,8 @@ def login():
 
 
 
-
 @app.route("/customer-login", methods=["GET", "POST"])
+@limiter.limit("5 per minute;20 per hour")
 def customer_login():
     """Customer login page."""
     if request.method == "POST":
@@ -993,9 +1102,6 @@ def customer_login():
     
     return render_template("customer_login.html", title="Customer Login")
 
-
-
-#KAMWE OKOHAKA NATANGO NGII MAALA INAKAPWA KAA. TYEKA SHITIIKA DESING NAWA NAWA
 
 
 
@@ -1684,7 +1790,14 @@ def start_rental():
             flash("Bicycle not found.", "danger")
             return redirect(url_for("start_rental"))
         
-        # ✅ Insert with UTC time
+
+        try:
+            deposit_paid = float(request.form.get("deposit_paid", bike["deposit_amount"]))
+            if deposit_paid < 0:
+                deposit_paid = 0
+        except (TypeError, ValueError):
+            deposit_paid = bike["deposit_amount"]
+
         execute_query(c, """
             INSERT INTO daily_rentals (
                 customer_id, bicycle_id, start_time, 
@@ -1692,8 +1805,10 @@ def start_rental():
                 agreement_signed
             ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
         """, (customer_id, bicycle_id, start_time_utc,
-              bike["hourly_rate"], bike["daily_cap"], bike["deposit_amount"]))
-        
+            bike["hourly_rate"], bike["daily_cap"], deposit_paid))
+
+
+
         rental_id = c.lastrowid
         
         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
@@ -1734,6 +1849,7 @@ def start_rental():
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
 @staff_required
+@limiter.limit("10 per minute")
 def customers():
     import os
     import cloudinary
@@ -1920,11 +2036,33 @@ def customers():
         
         return redirect(url_for("customers"))
     
-    customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
-    conn.close()
-    
-    return render_template("customers.html", title="Customers", customers=customers)
 
+    # =============================================
+    # SEARCH FILTER (case-insensitive on both DBs)
+    # =============================================
+    search = (request.args.get("search") or "").strip()
+
+    if search:
+        like = f"%{search}%"
+        customers = execute_query(c, f"""
+            SELECT * FROM customers
+            WHERE {ci_like('full_name', '?')}
+               OR {ci_like('phone', '?')}
+               OR {ci_like('id_number', '?')}
+               OR {ci_like('email', '?')}
+            ORDER BY full_name
+        """, (like, like, like, like)).fetchall()
+    else:
+        customers = execute_query(c, "SELECT * FROM customers ORDER BY full_name").fetchall()
+
+    conn.close()
+
+    return render_template(
+        "customers.html",
+        title="Customers",
+        customers=customers,
+        search=search
+    )
 
 
 
@@ -2145,11 +2283,81 @@ def delete_document(customer_id, doc_id):
     return redirect(url_for("view_documents", customer_id=customer_id))
 
 
+@app.route("/rentals/<int:rental_id>/refund", methods=["GET", "POST"])
+@login_required
+def refund_rental(rental_id):
+    """Handle the case where the deposit exceeds the rental cost."""
+    from datetime import datetime
+
+    conn = db()
+    c = conn.cursor()
+
+    rental = execute_query(c, """
+        SELECT r.*, c.full_name, b.bike_code
+        FROM daily_rentals r
+        JOIN customers c ON c.id = r.customer_id
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+
+    if not rental:
+        conn.close()
+        flash("Rental not found.", "danger")
+        return redirect(url_for("dashboard"))
+
+    deposit_paid = float(rental["deposit_paid"] or 0)
+    total_cost = float(rental["total_cost"] or 0)
+    refund_amount = round(deposit_paid - total_cost, 2)
+
+    if refund_amount <= 0:
+        conn.close()
+        flash("No refund is due on this rental.", "info")
+        return redirect(url_for("record_payment", rental_id=rental_id))
+
+    if request.method == "POST":
+        refund_method = request.form.get("refund_method", "Cash")
+        notes = (request.form.get("notes") or "").strip()
+
+        # Record the refund as a NEGATIVE payment (so totals stay truthful)
+        execute_query(c, """
+            INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
+            VALUES (?, ?, ?, 'Refunded')
+        """, (rental_id, -refund_amount, refund_method))
+
+        # Mark rental as paid (fully settled)
+        execute_query(c, """
+            UPDATE daily_rentals 
+            SET payment_status = 'Paid',
+                payment_method = ?
+            WHERE id = ?
+        """, (refund_method, rental_id))
+
+        conn.commit()
+        conn.close()
+
+        flash(f"Refund of N$ {refund_amount:.2f} recorded. Rental settled.", "success")
+        return redirect(url_for("payment_history"))
+
+    conn.close()
+
+    return render_template(
+        "refund_rental.html",
+        title="Refund Deposit",
+        rental=rental,
+        deposit_paid=deposit_paid,
+        total_cost=total_cost,
+        refund_amount=refund_amount
+    )
+
+
+
+
+
 
 @app.route("/rentals/<int:rental_id>/payment", methods=["GET", "POST"])
 @login_required
 def record_payment(rental_id):
-    from datetime import datetime  # ✅ Add this import
+    from datetime import datetime
     
     conn = db()
     c = conn.cursor()
@@ -2163,13 +2371,24 @@ def record_payment(rental_id):
     """, (rental_id,)).fetchone()
     
     if not rental:
+        conn.close()
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
-    # ✅ FIX: Format datetime for display
+    # Format start_time for display
     if rental.get("start_time"):
         if isinstance(rental["start_time"], datetime):
             rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+    
+    # ✅ Compute deposit and net due
+    deposit_paid = float(rental["deposit_paid"] or 0)
+    total_cost = float(rental["total_cost"] or 0)
+    net_due = round(total_cost - deposit_paid, 2)  # positive = customer owes, negative = refund
+    
+    # ✅ If refund is due, redirect to the refund page
+    if net_due < 0:
+        conn.close()
+        return redirect(url_for("refund_rental", rental_id=rental_id))
     
     if request.method == "POST":
         amount = float(request.form.get("amount", 0))
@@ -2186,9 +2405,10 @@ def record_payment(rental_id):
         
         execute_query(c, """
             UPDATE daily_rentals 
-            SET payment_status = 'Paid' 
+            SET payment_status = 'Paid',
+                payment_method = ?
             WHERE id = ?
-        """, (rental_id,))
+        """, (payment_method, rental_id))
         
         conn.commit()
         conn.close()
@@ -2203,8 +2423,6 @@ def record_payment(rental_id):
         WHERE daily_rental_id = ?
     """, (rental_id,))
     
-    remaining_balance = rental["total_cost"] - total_paid if rental["total_cost"] else 0
-    
     conn.close()
     
     return render_template(
@@ -2212,8 +2430,11 @@ def record_payment(rental_id):
         title="Record Payment",
         rental=rental,
         total_paid=total_paid,
-        remaining_balance=remaining_balance
+        deposit_paid=deposit_paid,
+        net_due=net_due
     )
+
+
 
 
 @app.route("/payments")
@@ -2240,15 +2461,10 @@ def payment_history():
         LIMIT 50
     """).fetchall()
     
-    # # ✅ FIX: Format datetime for each payment
-    for payment in payments: 
-        # ✅ Format datetime properly
+    # ✅ FIX: Convert payment_date from UTC to Namibia local time (UTC+2)
+    for payment in payments:
         if payment.get("payment_date"):
-            if isinstance(payment["payment_date"], datetime):
-                payment["payment_date"] = payment["payment_date"].strftime("%Y-%m-%d %H:%M")
-            elif isinstance(payment["payment_date"], str):
-                payment["payment_date"] = payment["payment_date"]  # Return as is
-
+            payment["payment_date"] = to_namibia_time(payment["payment_date"])
 
     # Get total revenue
     total_revenue = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
@@ -2261,6 +2477,7 @@ def payment_history():
         payments=payments,
         total_revenue=total_revenue
     )
+
 
 
 
@@ -2578,25 +2795,29 @@ def rental_history():
         query += " AND date(r.start_time) <= ?"
         params.append(date_to)
 
+
+
     if search:
-        query += """ AND (
-            c.full_name LIKE ? OR
-            b.bike_code LIKE ? OR
-            c.phone LIKE ?
+        query += f""" AND (
+            {ci_like('c.full_name', '?')} OR 
+            {ci_like('b.bike_code', '?')} OR 
+            {ci_like('c.phone', '?')}
         )"""
         search_term = f"%{search}%"
         params.extend([search_term, search_term, search_term])
 
+
     query += " ORDER BY r.start_time DESC LIMIT 100"
+
 
     rentals = execute_query(c, query, params).fetchall()
 
-    # Format datetime for each rental (rows are dicts thanks to dict_factory)
+    # ✅ FIX: Convert start_time and end_time from UTC to Namibia local time (UTC+2)
     for rental in rentals:
-        if isinstance(rental.get("start_time"), datetime):
-            rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
-        if isinstance(rental.get("end_time"), datetime):
-            rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
+        if rental.get("start_time"):
+            rental["start_time"] = to_namibia_time(rental["start_time"])
+        if rental.get("end_time"):
+            rental["end_time"] = to_namibia_time(rental["end_time"])            
 
     # Get summary stats
     total_rentals = len(rentals)
@@ -2623,118 +2844,6 @@ def rental_history():
         date_to=date_to,
         search=search,
     )
-
-
-
-# @app.route("/rentals/history")
-# @login_required
-# @staff_required
-# def rental_history():
-#     from datetime import datetime  # ✅ Add this import
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get filter parameters
-#     status_filter = request.args.get("status", "")
-#     date_from = request.args.get("date_from", "")
-#     date_to = request.args.get("date_to", "")
-#     search = request.args.get("search", "").strip()
-    
-#     # Build query
-#     query = """
-#         SELECT 
-#             r.id,
-#             r.start_time,
-#             r.end_time,
-#             r.total_hours,
-#             r.total_cost,
-#             r.payment_status,
-#             r.status AS rental_status,
-#             c.full_name,
-#             c.phone,
-#             b.bike_code,
-#             b.brand,
-#             b.model,
-#             (SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = r.id) AS payment_count
-#         FROM daily_rentals r
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE 1=1
-#     """
-    
-#     params = []
-    
-#     if status_filter:
-#         query += " AND r.status = ?"
-#         params.append(status_filter)
-    
-#     if date_from:
-#         query += " AND date(r.start_time) >= ?"
-#         params.append(date_from)
-    
-#     if date_to:
-#         query += " AND date(r.start_time) <= ?"
-#         params.append(date_to)
-    
-#     if search:
-#         query += """ AND (
-#             c.full_name LIKE ? OR 
-#             b.bike_code LIKE ? OR 
-#             c.phone LIKE ?
-#         )"""
-#         search_term = f"%{search}%"
-#         params.extend([search_term, search_term, search_term])
-    
-#     query += " ORDER BY r.start_time DESC LIMIT 100"
-    
-#     rentals = execute_query(c, query, params).fetchall()
-
-
-
-#     # ✅ FIX: Format datetime for each rental
-#     for rental in rentals:
-#         if rental.get("start_time"):
-#             if isinstance(rental["start_time"], datetime):
-#                 rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["start_time"], str):
-#                 rental["start_time"] = rental["start_time"]
-        
-#         if rental.get("end_time"):
-#             if isinstance(rental["end_time"], datetime):
-#                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
-#             elif isinstance(rental["end_time"], str):
-#                 rental["end_time"] = rental["end_time"]
-    
-#     # Get summary stats
-#     total_rentals = len(rentals)
-#     total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
-#     paid_count = sum(1 for r in rentals if r["payment_status"] == "Paid")
-#     unpaid_count = sum(1 for r in rentals if r["payment_status"] != "Paid")
-#     active_count = sum(1 for r in rentals if r["rental_status"] == "Active")
-#     completed_count = sum(1 for r in rentals if r["rental_status"] == "Completed")
-    
-#     conn.close()
-    
-#     return render_template(
-#         "rental_history.html",
-#         title="Rental History",
-#         rentals=rentals,
-#         total_rentals=total_rentals,
-#         total_revenue=total_revenue,
-#         paid_count=paid_count,
-#         unpaid_count=unpaid_count,
-#         active_count=active_count,
-#         completed_count=completed_count,
-#         status_filter=status_filter,
-#         date_from=date_from,
-#         date_to=date_to,
-#         search=search
-#     )
-
-
-
-
 
 
 
@@ -2827,17 +2936,24 @@ def rental_agreement_pdf(rental_id):
     pdf.drawString(x, y, "RENTAL DETAILS")
     y -= 7*mm
     pdf.setFont("Helvetica", 10)
-    pdf.drawString(x + 5*mm, y, f"Start Time: {rental['start_time']}")
+    pdf.drawString(x + 5*mm, y, f"Start Time: {to_namibia_time(rental['start_time'])}")
     y -= 6*mm
-    if rental['end_time']:
-        pdf.drawString(x + 5*mm, y, f"End Time: {rental['end_time']}")
+
+
+    if rental['status'] == 'Cancelled':
+        pdf.setFillColorRGB(0.86, 0.21, 0.27)  # red
+        pdf.drawString(x + 5*mm, y, "Status: *** CANCELLED ***")
+        pdf.setFillColorRGB(0, 0, 0)  # back to black
+    elif rental['end_time']:
+        pdf.drawString(x + 5*mm, y, f"End Time: {to_namibia_time(rental['end_time'])}")
         y -= 6*mm
         pdf.drawString(x + 5*mm, y, f"Total Hours: {rental['total_hours']:.1f}")
         y -= 6*mm
         pdf.drawString(x + 5*mm, y, f"Total Cost: N$ {rental['total_cost']:.2f}")
     else:
         pdf.drawString(x + 5*mm, y, "Status: Active (Not yet returned)")
-    
+
+
     y -= 12*mm
     
     # Terms & Conditions
@@ -2878,8 +2994,6 @@ def rental_agreement_pdf(rental_id):
     
     filename = f"RAB_Agreement_{rental['bike_code']}_{rental['id']}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
-
-
 
 
 
@@ -3432,116 +3546,7 @@ def update_bicycle_health(bicycle_id):
 
 
 
-# @app.route("/bicycle-health/<int:bicycle_id>/calculate")
-# @login_required
-# @admin_required
-# def calculate_bicycle_health(bicycle_id):
-#     """Auto-calculate bicycle health score based on maintenance and usage."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get bicycle data
-#     bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
-#     if not bicycle:
-#         flash("Bicycle not found.", "danger")
-#         return redirect(url_for("bicycle_health_dashboard"))
-    
-#     # Get maintenance data
-#     maintenance = execute_query(c,"""
-#         SELECT 
-#             COUNT(*) AS total,
-#             SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
-#             COALESCE(SUM(cost), 0) AS total_cost,
-#             COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
-#         FROM maintenance_records
-#         WHERE bicycle_id = ?
-#     """, (bicycle_id,)).fetchone()
-    
-#     # Get rental data
-#     rentals = execute_query(c,"""
-#         SELECT 
-#             COUNT(*) AS total,
-#             COALESCE(SUM(total_hours), 0) AS total_hours,
-#             COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
-#         FROM daily_rentals
-#         WHERE bicycle_id = ? AND status = 'Completed'
-#     """, (bicycle_id,)).fetchone()
-    
-#     # Calculate health score (0-100)
-#     health_score = 100
-    
-#     # Get values with defaults (handle None)
-#     total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
-#     completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
-#     recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
-#     recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
-    
-#     # Deduct for high usage (more than 100 hours)
-#     if total_hours > 100:
-#         health_score -= min(20, (total_hours - 100) / 10)
-    
-#     # Deduct for lack of maintenance
-#     if completed_maintenance == 0:
-#         health_score -= 30
-#     elif completed_maintenance < 5:
-#         health_score -= 10
-    
-#     # Deduct for recent rentals without maintenance
-#     if recent_rentals > 5 and recent_maintenance == 0:
-#         health_score -= 15
-    
-#     # Add points for recent maintenance
-#     if recent_maintenance > 0:
-#         health_score += min(10, recent_maintenance * 2)
-    
-#     # Ensure score is between 0 and 100
-#     health_score = max(0, min(100, int(health_score)))
-    
-#     # Determine condition rating
-#     if health_score >= 80:
-#         condition_rating = "Excellent"
-#     elif health_score >= 60:
-#         condition_rating = "Good"
-#     elif health_score >= 40:
-#         condition_rating = "Fair"
-#     elif health_score >= 20:
-#         condition_rating = "Poor"
-#     else:
-#         condition_rating = "Critical"
-    
-#     # Update health record
-#     health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bicycle_id,)).fetchone()
-    
-#     try:
-#         if health:
-#             execute_query(c,"""
-#                 UPDATE bicycle_health 
-#                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
-#                     total_maintenance_count = ?, total_repair_cost = ?
-#                 WHERE bicycle_id = ?
-#             """, (health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0, bicycle_id))
-#         else:
-#             execute_query(c,"""
-#                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
-#                     total_maintenance_count, total_repair_cost)
-#                 VALUES (?, ?, ?, ?, ?)
-#             """, (bicycle_id, health_score, condition_rating, completed_maintenance, maintenance["total_cost"] or 0))
-        
-#         # Record health history
-#         execute_query(c,"""
-#             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
-#             VALUES (?, ?, ?, ?)
-#         """, (bicycle_id, health_score, condition_rating, "Auto-calculated based on usage and maintenance"))
-        
-#         conn.commit()
-#         flash(f"Health score calculated: {health_score}/100 ({condition_rating})", "success")
-#     except Exception as e:
-#         conn.rollback()
-#         flash(f"Error calculating health: {str(e)}", "danger")
-#     finally:
-#         conn.close()
-    
-#     return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
+
 
 
 @app.route("/bicycle-health/<int:bicycle_id>/calculate")
@@ -3680,118 +3685,7 @@ def calculate_bicycle_health(bicycle_id):
     return redirect(url_for("bicycle_health_detail", bicycle_id=bicycle_id))
 
 
-# @app.route("/bicycle-health/calculate-all")
-# @login_required
-# @admin_required
-# def calculate_all_bicycle_health():
-#     """Calculate health scores for all bicycles."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     bicycles = execute_query(c,"SELECT id FROM bicycles").fetchall()
-    
-#     count = 0
-    
-#     for bicycle in bicycles:
-#         bike_id = bicycle["id"]
-        
-#         # Maintenance data
-#         maintenance = execute_query(c,"""
-#             SELECT 
-#                 COUNT(*) AS total,
-#                 SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
-#                 COALESCE(SUM(cost), 0) AS total_cost,
-#                 COUNT(CASE WHEN status = 'Completed' AND date(completed_date) >= date('now', '-30 days') THEN 1 END) AS recent_maintenance
-#             FROM maintenance_records
-#             WHERE bicycle_id = ?
-#         """, (bike_id,)).fetchone()
-        
-#         # Rental data
-#         rentals = execute_query(c,"""
-#             SELECT 
-#                 COUNT(*) AS total,
-#                 COALESCE(SUM(total_hours), 0) AS total_hours,
-#                 COUNT(CASE WHEN date(start_time) >= date('now', '-30 days') THEN 1 END) AS recent_rentals
-#             FROM daily_rentals
-#             WHERE bicycle_id = ? AND status = 'Completed'
-#         """, (bike_id,)).fetchone()
-        
-#         # =============================================
-#         # ✅ FIX: Handle None values HERE - BEFORE calculations
-#         # =============================================
-#         total_hours = rentals["total_hours"] if rentals["total_hours"] is not None else 0
-#         completed_maintenance = maintenance["completed"] if maintenance["completed"] is not None else 0
-#         recent_rentals = rentals["recent_rentals"] if rentals["recent_rentals"] is not None else 0
-#         recent_maintenance = maintenance["recent_maintenance"] if maintenance["recent_maintenance"] is not None else 0
-#         total_cost = maintenance["total_cost"] if maintenance["total_cost"] is not None else 0
-        
-#         # =============================================
-#         # Now use the cleaned variables in calculations
-#         # =============================================
-#         health_score = 100
-        
-#         # Deduct for high usage (more than 100 hours)
-#         if total_hours > 100:
-#             health_score -= min(20, (total_hours - 100) / 10)
-        
-#         # Deduct for lack of maintenance
-#         if completed_maintenance == 0:
-#             health_score -= 30
-#         elif completed_maintenance < 5:
-#             health_score -= 10
-        
-#         # Deduct for recent rentals without maintenance
-#         if recent_rentals > 5 and recent_maintenance == 0:
-#             health_score -= 15
-        
-#         # Add points for recent maintenance
-#         if recent_maintenance > 0:
-#             health_score += min(10, recent_maintenance * 2)
-        
-#         # Ensure score is between 0 and 100
-#         health_score = max(0, min(100, int(health_score)))
-        
-#         # Determine condition rating
-#         if health_score >= 80:
-#             condition_rating = "Excellent"
-#         elif health_score >= 60:
-#             condition_rating = "Good"
-#         elif health_score >= 40:
-#             condition_rating = "Fair"
-#         elif health_score >= 20:
-#             condition_rating = "Poor"
-#         else:
-#             condition_rating = "Critical"
-        
-#         # Update or insert
-#         health = execute_query(c,"SELECT * FROM bicycle_health WHERE bicycle_id = ?", (bike_id,)).fetchone()
-#         if health:
-#             execute_query(c,"""
-#                 UPDATE bicycle_health 
-#                 SET health_score = ?, condition_rating = ?, updated_at = CURRENT_TIMESTAMP,
-#                     total_maintenance_count = ?, total_repair_cost = ?
-#                 WHERE bicycle_id = ?
-#             """, (health_score, condition_rating, completed_maintenance, total_cost, bike_id))
-#         else:
-#             execute_query(c,"""
-#                 INSERT INTO bicycle_health (bicycle_id, health_score, condition_rating, 
-#                     total_maintenance_count, total_repair_cost)
-#                 VALUES (?, ?, ?, ?, ?)
-#             """, (bike_id, health_score, condition_rating, completed_maintenance, total_cost))
-        
-#         # Record history
-#         execute_query(c,"""
-#             INSERT INTO bicycle_health_history (bicycle_id, health_score, condition_rating, reason)
-#             VALUES (?, ?, ?, ?)
-#         """, (bike_id, health_score, condition_rating, "Auto-calculated - batch update"))
-        
-#         count += 1
-    
-#     conn.commit()
-#     conn.close()
-    
-#     flash(f"Health scores calculated for {count} bicycles!", "success")
-#     return redirect(url_for("bicycle_health_dashboard"))
+
 
 
 @app.route("/bicycle-health/calculate-all")
@@ -4631,22 +4525,41 @@ def bicycles():
         
         return redirect(url_for("bicycles"))
     
-    #bicycles = execute_query(c,"SELECT * FROM bicycles ORDER BY bike_code").fetchall()
 
-    # Get bicycles with health data
-    bicycles = execute_query(c,"""
-        SELECT 
-            b.*,
-            bh.health_score,
-            bh.condition_rating
-        FROM bicycles b
-        LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
-        ORDER BY b.bike_code
-    """).fetchall()
+    # =============================================
+    # SEARCH FILTER
+    # =============================================
+    search = (request.args.get("search") or "").strip()
+
+    if search:
+        like = f"%{search}%"
+        bicycles = execute_query(c, f"""
+            SELECT 
+                b.*,
+                bh.health_score,
+                bh.condition_rating
+            FROM bicycles b
+            LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+            WHERE {ci_like('b.bike_code', '?')}
+               OR {ci_like('b.brand', '?')}
+               OR {ci_like('b.model', '?')}
+               OR {ci_like('b.bike_type', '?')}
+            ORDER BY b.bike_code
+        """, (like, like, like, like)).fetchall()
+    else:
+        bicycles = execute_query(c,"""
+            SELECT 
+                b.*,
+                bh.health_score,
+                bh.condition_rating
+            FROM bicycles b
+            LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+            ORDER BY b.bike_code
+        """).fetchall()
 
     conn.close()
     
-    return render_template("bicycles.html", title="Bicycles", bicycles=bicycles)
+    return render_template("bicycles.html", title="Bicycles", bicycles=bicycles, search=search)
 
 
 @app.route("/reports/bicycle-utilization")
@@ -4777,7 +4690,7 @@ def send_email_notification(to_email, subject, body):
         return True
 
 
-@login_required
+
 def send_sms_notification(phone_number, message):
     """Send SMS notification using Twilio."""
     if not SMS_ENABLED:
@@ -5090,6 +5003,7 @@ def delete_discount(discount_id):
 
 @app.route("/validate-discount", methods=["POST"])
 @login_required
+@limiter.limit("10 per minute")
 def validate_discount():
     """Validate a discount code (AJAX)."""
     code = request.form.get("code", "").strip().upper()
@@ -5578,9 +5492,6 @@ def export_revenue_csv():
 
 
 
-
-
-
 @app.route("/receipt/<int:payment_id>")
 @login_required
 def generate_receipt(payment_id):
@@ -5591,12 +5502,11 @@ def generate_receipt(payment_id):
     from reportlab.pdfgen import canvas
     from io import BytesIO
     from datetime import datetime, timedelta
-    import pytz
     
     conn = db()
     c = conn.cursor()
     
-    # Get payment details with customer and rental info
+    # Get payment details with customer and rental info (incl. deposit)
     payment = execute_query(c, """
         SELECT 
             p.*,
@@ -5605,6 +5515,7 @@ def generate_receipt(payment_id):
             r.end_time,
             r.total_hours,
             r.total_cost,
+            r.deposit_paid,
             r.bicycle_id,
             c.full_name,
             c.phone,
@@ -5627,36 +5538,17 @@ def generate_receipt(payment_id):
         return redirect(url_for("payment_history"))
     
     # =============================================
-    # ✅ FIX: Format datetime values with timezone
+    # ✅ Use shared helper to convert UTC → Namibia time
     # =============================================
-    def format_datetime(value):
-        """Convert UTC to local time (Namibia UTC+2) for display."""
-        if value is None:
-            return "N/A"
-        if isinstance(value, datetime):
-            # Add 2 hours for Namibia time
-            local_time = value + timedelta(hours=2)
-            return local_time.strftime("%Y-%m-%d %H:%M")
-        if isinstance(value, str):
-            try:
-                dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                local_time = dt + timedelta(hours=2)
-                return local_time.strftime("%Y-%m-%d %H:%M")
-            except:
-                return value[:16] if len(value) >= 16 else value
-        return str(value)
-    
-    # Format all dates
-    payment_date_str = format_datetime(payment.get("payment_date"))
-    start_time_str = format_datetime(payment.get("start_time"))
-    end_time_str = format_datetime(payment.get("end_time"))
+    payment_date_str = to_namibia_time(payment.get("payment_date"))
+    start_time_str = to_namibia_time(payment.get("start_time"))
+    end_time_str = to_namibia_time(payment.get("end_time"))
     
     # Create PDF
     buf = BytesIO()
     pdf = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
     
-    # Settings
     x = 25 * mm
     y = height - 25 * mm
     
@@ -5675,7 +5567,6 @@ def generate_receipt(payment_id):
     y -= 5 * mm
     pdf.setFont("Helvetica", 8)
     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
-    # ✅ Use formatted payment date
     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
     
     y -= 8 * mm
@@ -5714,10 +5605,8 @@ def generate_receipt(payment_id):
     pdf.setFillColor(colors.HexColor("#111111"))
     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
     y -= 6 * mm
-    # ✅ Use formatted start time
     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
     y -= 6 * mm
-    # ✅ Use formatted end time
     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
@@ -5725,7 +5614,7 @@ def generate_receipt(payment_id):
     y -= 8 * mm
     
     # =============================================
-    # PAYMENT DETAILS
+    # PAYMENT DETAILS (now with deposit breakdown)
     # =============================================
     pdf.setFont("Helvetica-Bold", 12)
     pdf.setFillColor(colors.HexColor("#0d1f46"))
@@ -5734,11 +5623,26 @@ def generate_receipt(payment_id):
     
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(colors.HexColor("#111111"))
-    pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
+    
+    # ✅ Deposit breakdown
+    pdf.drawString(x + 5 * mm, y, f"Total Rental Cost: N$ {payment['total_cost']:.2f}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Deposit Applied: N$ {payment['deposit_paid']:.2f}")
+    y -= 6 * mm
+    
+    # Show refund or extra payment if applicable
+    net_at_counter = round(payment['total_cost'] - payment['deposit_paid'], 2)
+    if net_at_counter > 0:
+        pdf.drawString(x + 5 * mm, y, f"Amount Due at Counter: N$ {net_at_counter:.2f}")
+        y -= 6 * mm
+    elif net_at_counter < 0:
+        pdf.drawString(x + 5 * mm, y, f"Refund to Customer: N$ {abs(net_at_counter):.2f}")
+        y -= 6 * mm
+    
+    pdf.drawString(x + 5 * mm, y, f"Amount Settled: N$ {payment['amount']:.2f}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
     y -= 6 * mm
-    # ✅ Use formatted payment date
     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
@@ -5756,7 +5660,7 @@ def generate_receipt(payment_id):
     
     pdf.setFillColor(colors.HexColor("#0d1f46"))
     pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
+    pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL SETTLED")
     pdf.setFont("Helvetica-Bold", 24)
     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
     
@@ -5784,6 +5688,211 @@ def generate_receipt(payment_id):
     
     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+# @app.route("/receipt/<int:payment_id>")
+# @login_required
+# def generate_receipt(payment_id):
+#     """Generate a PDF receipt for a payment."""
+#     from reportlab.lib.pagesizes import A4
+#     from reportlab.lib import colors
+#     from reportlab.lib.units import mm
+#     from reportlab.pdfgen import canvas
+#     from io import BytesIO
+#     from datetime import datetime, timedelta
+#     import pytz
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     # Get payment details with customer and rental info
+#     payment = execute_query(c, """
+#         SELECT 
+#             p.*,
+#             r.id AS rental_id,
+#             r.start_time,
+#             r.end_time,
+#             r.total_hours,
+#             r.total_cost,
+#             r.bicycle_id,
+#             c.full_name,
+#             c.phone,
+#             c.email,
+#             c.id_number,
+#             b.bike_code,
+#             b.brand,
+#             b.model
+#         FROM rental_payments p
+#         JOIN daily_rentals r ON r.id = p.daily_rental_id
+#         JOIN customers c ON c.id = r.customer_id
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         WHERE p.id = ?
+#     """, (payment_id,)).fetchone()
+    
+#     conn.close()
+    
+#     if not payment:
+#         flash("Payment not found.", "danger")
+#         return redirect(url_for("payment_history"))
+    
+#     # =============================================
+#     # ✅ FIX: Format datetime values with timezone
+#     # =============================================
+#     def format_datetime(value):
+#         """Convert UTC to local time (Namibia UTC+2) for display."""
+#         if value is None:
+#             return "N/A"
+#         if isinstance(value, datetime):
+#             # Add 2 hours for Namibia time
+#             local_time = value + timedelta(hours=2)
+#             return local_time.strftime("%Y-%m-%d %H:%M")
+#         if isinstance(value, str):
+#             try:
+#                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+#                 local_time = dt + timedelta(hours=2)
+#                 return local_time.strftime("%Y-%m-%d %H:%M")
+#             except:
+#                 return value[:16] if len(value) >= 16 else value
+#         return str(value)
+    
+#     # Format all dates
+#     payment_date_str = format_datetime(payment.get("payment_date"))
+#     start_time_str = format_datetime(payment.get("start_time"))
+#     end_time_str = format_datetime(payment.get("end_time"))
+    
+#     # Create PDF
+#     buf = BytesIO()
+#     pdf = canvas.Canvas(buf, pagesize=A4)
+#     width, height = A4
+    
+#     # Settings
+#     x = 25 * mm
+#     y = height - 25 * mm
+    
+#     # =============================================
+#     # HEADER
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "RAB RENT A BIKE")
+    
+#     y -= 8 * mm
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Daily Rental Receipt")
+    
+#     y -= 5 * mm
+#     pdf.setFont("Helvetica", 8)
+#     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
+#     # ✅ Use formatted payment date
+#     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
+    
+#     y -= 8 * mm
+#     pdf.line(x, y, width - x, y)
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # CUSTOMER DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Customer Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # RENTAL DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Rental Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
+#     y -= 6 * mm
+#     # ✅ Use formatted start time
+#     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
+#     y -= 6 * mm
+#     # ✅ Use formatted end time
+#     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
+    
+#     y -= 8 * mm
+    
+#     # =============================================
+#     # PAYMENT DETAILS
+#     # =============================================
+#     pdf.setFont("Helvetica-Bold", 12)
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.drawString(x, y, "Payment Details")
+#     y -= 7 * mm
+    
+#     pdf.setFont("Helvetica", 10)
+#     pdf.setFillColor(colors.HexColor("#111111"))
+#     pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
+#     y -= 6 * mm
+#     # ✅ Use formatted payment date
+#     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
+#     y -= 6 * mm
+#     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
+    
+#     y -= 10 * mm
+    
+#     # =============================================
+#     # SUMMARY BOX
+#     # =============================================
+#     box_height = 25 * mm
+#     box_y = y - box_height
+    
+#     pdf.setFillColor(colors.HexColor("#ffe500"))
+#     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
+    
+#     pdf.setFillColor(colors.HexColor("#0d1f46"))
+#     pdf.setFont("Helvetica-Bold", 14)
+#     pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
+#     pdf.setFont("Helvetica-Bold", 24)
+#     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
+    
+#     y -= box_height + 15 * mm
+    
+#     # =============================================
+#     # TERMS & CONDITIONS
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#667085"))
+#     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
+#     y -= 5 * mm
+#     pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
+    
+#     # =============================================
+#     # FOOTER
+#     # =============================================
+#     pdf.setFont("Helvetica", 8)
+#     pdf.setFillColor(colors.HexColor("#999999"))
+#     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
+#     pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+#     pdf.save()
+#     buf.seek(0)
+    
+#     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
+#     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
 @app.route("/export/bicycles/csv")
@@ -6045,6 +6154,118 @@ def staff_required(f):
 
 
 
+# @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
+# @login_required
+# @staff_required
+# def end_rental(rental_id):
+#     """End a rental and calculate the total cost."""
+#     from datetime import datetime, timedelta
+#     import pytz
+    
+#     conn = db()
+#     c = conn.cursor()
+    
+#     rental = execute_query(c, """
+#         SELECT r.*, b.bike_code, c.full_name
+#         FROM daily_rentals r
+#         JOIN bicycles b ON b.id = r.bicycle_id
+#         JOIN customers c ON c.id = r.customer_id
+#         WHERE r.id = ?
+#     """, (rental_id,)).fetchone()
+    
+#     if not rental:
+#         flash("Rental not found.", "danger")
+#         return redirect(url_for("dashboard"))
+    
+#     # ✅ FIX: Handle start_time as datetime or string (stored in UTC - offset-naive)
+#     if isinstance(rental["start_time"], datetime):
+#         start_time_utc = rental["start_time"]
+#     else:
+#         start_time_utc = datetime.fromisoformat(rental["start_time"])
+    
+#     # ✅ Get current UTC time (offset-naive)
+#     utc_now = datetime.utcnow()
+    
+#     # ✅ Get current local time for display (Namibia time - UTC+2)
+#     namibia_tz = pytz.timezone('Africa/Windhoek')
+#     local_now = datetime.now(namibia_tz)
+
+
+
+ 
+    
+#     if request.method == "POST":
+#         # Use UTC time for calculation
+#         end_time_utc = utc_now
+#         total_hours = (end_time_utc - start_time_utc).total_seconds() / 3600
+#         total_hours = round(total_hours, 2)
+        
+#         hourly_rate = rental["hourly_rate"]
+#         daily_cap = rental["daily_cap"]
+        
+#         # Calculate cost
+#         raw_cost = total_hours * hourly_rate
+#         total_cost = min(raw_cost, daily_cap)
+        
+#         # Late fee (after 6pm local time)
+#         late_fee = 0
+#         if local_now.hour >= 18:
+#             late_fee = 10 * (local_now.hour - 18)
+#         total_cost += late_fee
+        
+#         # Get condition values
+#         condition_before = request.form.get("condition_before", "Good")
+#         condition_after = request.form.get("condition_after", "Good")
+        
+#         execute_query(c, """
+#             UPDATE daily_rentals 
+#             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
+#                 condition_before = ?, condition_after = ?, status = 'Completed'
+#             WHERE id = ?
+#         """, (end_time_utc.isoformat(), total_hours, total_cost, late_fee,
+#               condition_before, condition_after, rental_id))
+        
+#         execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        
+#         conn.commit()
+#         conn.close()
+        
+#         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+#         return redirect(url_for("record_payment", rental_id=rental_id))
+    
+#     ✅ Calculate preview for display using UTC times
+#     preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
+    
+#     hourly_rate = rental["hourly_rate"]
+#     daily_cap = rental["daily_cap"]
+#     preview_raw = preview_hours * hourly_rate
+#     preview_capped = min(preview_raw, daily_cap)
+#     preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
+#     preview_total = preview_capped + preview_late
+    
+#     # ✅ FIX: Format dates for display (convert UTC to local)
+#     start_time_local = start_time_utc + timedelta(hours=2)
+#     start_time_str = start_time_local.strftime("%Y-%m-%d %H:%M")
+#     end_time_local = local_now
+#     end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
+    
+#     conn.close()
+    
+#     return render_template(
+#         "end_rental.html",
+#         title="End Rental",
+#         rental=rental,
+#         start_time_str=start_time_str,
+#         end_time_str=end_time_str,
+#         preview_hours=preview_hours,
+#         hourly_rate=hourly_rate,
+#         daily_cap=daily_cap,
+#         preview_raw=preview_raw,
+#         preview_capped=preview_capped,
+#         preview_late=preview_late,
+#         preview_total=preview_total
+#     )
+
 @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
 @login_required
 @staff_required
@@ -6065,10 +6286,11 @@ def end_rental(rental_id):
     """, (rental_id,)).fetchone()
     
     if not rental:
+        conn.close()
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
-    # ✅ FIX: Handle start_time as datetime or string (stored in UTC - offset-naive)
+    # ✅ Handle start_time as datetime or string (stored in UTC - offset-naive)
     if isinstance(rental["start_time"], datetime):
         start_time_utc = rental["start_time"]
     else:
@@ -6089,6 +6311,7 @@ def end_rental(rental_id):
         
         hourly_rate = rental["hourly_rate"]
         daily_cap = rental["daily_cap"]
+        deposit_paid = float(rental["deposit_paid"] or 0)
         
         # Calculate cost
         raw_cost = total_hours * hourly_rate
@@ -6099,6 +6322,10 @@ def end_rental(rental_id):
         if local_now.hour >= 18:
             late_fee = 10 * (local_now.hour - 18)
         total_cost += late_fee
+        
+        # ✅ Change calculation (Option A)
+        # positive = refund to customer, negative = customer owes more
+        change_due = round(deposit_paid - total_cost, 2)
         
         # Get condition values
         condition_before = request.form.get("condition_before", "Good")
@@ -6118,19 +6345,35 @@ def end_rental(rental_id):
         conn.close()
         
         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+        
+        # ✅ Route based on the change
+        if change_due == 0:
+            # Deposit exactly covers the cost → mark Paid and go home
+            conn = db()
+            c = conn.cursor()
+            execute_query(c, "UPDATE daily_rentals SET payment_status = 'Paid' WHERE id = ?", (rental_id,))
+            conn.commit()
+            conn.close()
+            flash("Deposit fully covered the rental. Nothing left to pay.", "success")
+            return redirect(url_for("dashboard"))
+        
+        # change_due > 0  → refund_rental()  (negative net in record_payment)
+        # change_due < 0  → record_payment() (positive net)
         return redirect(url_for("record_payment", rental_id=rental_id))
     
-    # ✅ Calculate preview for display using UTC times
+    # ✅ GET branch: preview calculation
     preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
     
     hourly_rate = rental["hourly_rate"]
     daily_cap = rental["daily_cap"]
+    deposit_paid = float(rental["deposit_paid"] or 0)
     preview_raw = preview_hours * hourly_rate
     preview_capped = min(preview_raw, daily_cap)
     preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
     preview_total = preview_capped + preview_late
+    preview_change = round(deposit_paid - preview_total, 2)
     
-    # ✅ FIX: Format dates for display (convert UTC to local)
+    # ✅ Format dates for display (convert UTC to local)
     start_time_local = start_time_utc + timedelta(hours=2)
     start_time_str = start_time_local.strftime("%Y-%m-%d %H:%M")
     end_time_local = local_now
@@ -6150,10 +6393,90 @@ def end_rental(rental_id):
         preview_raw=preview_raw,
         preview_capped=preview_capped,
         preview_late=preview_late,
-        preview_total=preview_total
+        preview_total=preview_total,
+        deposit_paid=deposit_paid,
+        preview_change=preview_change
     )
 
 
+@app.route("/rentals/<int:rental_id>/cancel", methods=["POST"])
+@login_required
+@manager_required
+def cancel_rental(rental_id):
+    """Cancel an active rental that was started by mistake."""
+    from datetime import datetime
+
+    conn = db()
+    c = conn.cursor()
+
+    # 1. Fetch the rental + related info
+    rental = execute_query(c, """
+        SELECT r.*, b.bike_code, c.full_name
+        FROM daily_rentals r
+        JOIN bicycles b ON b.id = r.bicycle_id
+        JOIN customers c ON c.id = r.customer_id
+        WHERE r.id = ?
+    """, (rental_id,)).fetchone()
+
+    if not rental:
+        conn.close()
+        flash("Rental not found.", "danger")
+        return redirect(url_for("dashboard"))
+
+    # 2. Only Active rentals can be cancelled
+    if rental["status"] != "Active":
+        conn.close()
+        flash(f"Cannot cancel a rental with status '{rental['status']}'. Only Active rentals can be cancelled.", "danger")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    # 3. Block cancellation if any payment has been recorded
+    payment_count = get_single_value(c, """
+        SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = ?
+    """, (rental_id,))
+
+    if payment_count and int(payment_count) > 0:
+        conn.close()
+        flash("Cannot cancel this rental because a payment has already been recorded. Please refund the payment first.", "danger")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    # 4. Get the reason
+    reason = (request.form.get("reason") or "").strip()
+    if not reason:
+        conn.close()
+        flash("A reason is required to cancel a rental.", "danger")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    # 5. Soft-cancel: set status and record reason in notes
+    cancel_note = f"[CANCELLED {datetime.now().strftime('%Y-%m-%d %H:%M')} by {session.get('username')}] {reason}"
+
+    existing_notes = rental.get("notes") or ""
+    if existing_notes:
+        combined_notes = existing_notes + "\n" + cancel_note
+    else:
+        combined_notes = cancel_note
+
+    execute_query(c, """
+        UPDATE daily_rentals
+        SET status = 'Cancelled',
+            notes = ?,
+            actual_return_time = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (combined_notes, rental_id))
+
+    # 6. Free the bicycle
+    execute_query(c, """
+        UPDATE bicycles SET status = 'Available' WHERE id = ?
+    """, (rental["bicycle_id"],))
+
+    conn.commit()
+    conn.close()
+
+    flash(
+        f"Rental #{rental_id} for {rental['full_name']} ({rental['bike_code']}) has been cancelled. "
+        f"Bicycle is now Available.",
+        "success"
+    )
+    return redirect(request.referrer or url_for("dashboard"))
 
 @app.route("/logout")
 def logout():
@@ -6233,8 +6556,8 @@ def backup_uploads():
         mimetype="application/zip"
     )
 
-
-
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True, port=5000)
+    # Only enable debug locally. On Render, gunicorn never hits this block.
+    _debug = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(debug=_debug, port=int(os.environ.get("PORT", 5001)))

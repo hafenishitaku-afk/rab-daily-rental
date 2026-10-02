@@ -8,6 +8,7 @@
 <div class="card">
     <h2>Register Customer</h2>
     <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             <label>
                 Full Name *
@@ -81,100 +82,31 @@
     </form>
 </div>
 
-<!-- <div class="card">
-    <h2>Customer List</h2>
-    <div class="scroll">
-        <table>
-            <tr>
-                <th>Name</th>
-                <th>Phone</th>
-                <th>ID</th>
-                <th>Email</th>
-                <th>Verification</th>
-                <th>Documents</th>
-                <th>Action</th>
-            </tr>
-            {% for c in customers %}
-            <tr>
-                <td><b>{{ c.full_name }}</b></td>
-                <td>{{ c.phone }}</td>
-                <td>{{ c.id_number or '—' }}</td>
-                <td>{{ c.email or '—' }}</td>
-                <td>
-                    <span class="badge {% if c.verification_status == 'Verified' %}green{% elif c.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
-                        {{ c.verification_status or 'Pending' }}
-                    </span>
-                </td>
 
-                <td>
-                    <a class="btn small" href="{{ url_for('view_documents', customer_id=c.id) }}">📄 View</a>
-                </td>
-
-                <td>
-                    <a class="btn small" href="{{ url_for('verify_customer', customer_id=c.id) }}">Verify</a>
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="6">No customers yet.</td>
-            </tr>
-            {% endfor %}
-        </table>
-    </div>
-</div> -->
-
-<!-- <div class="card">
-    <h2>Customer List</h2>
-    <div class="scroll">
-        <table>
-            <tr>
-                <th>Name</th>
-                <th>Phone</th>
-                <th>ID</th>
-                <th>Email</th>
-                <th>Verification</th>
-                <th>Documents</th>
-                <th>Action</th>
-            </tr>
-            {% for c in customers %}
-            <tr>
-                <td><b>{{ c.full_name }}</b></td>
-                <td>{{ c.phone }}</td>
-                <td>{{ c.id_number or '—' }}</td>
-                <td>{{ c.email or '—' }}</td>
-                <td>
-                    <span class="badge {% if c.verification_status == 'Verified' %}green{% elif c.verification_status == 'Rejected' %}orange{% else %}blue{% endif %}">
-                        {{ c.verification_status or 'Pending' }}
-                    </span>
-                </td>
-                <td>
-                    <a class="btn small" href="{{ url_for('view_documents', customer_id=c.id) }}">📄 View</a>
-                </td>
-                <td>
-                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
-                        <a class="btn small" href="{{ url_for('verify_customer_page', customer_id=c.id) }}">✅ Verify</a>
-                        {% if session.role == 'admin' %}
-                        <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
-                              style="display:inline;" 
-                              onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
-                            <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
-                        </form>
-                        {% endif %}
-                    </div>
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="7">No customers yet.</td>
-            </tr>
-            {% endfor %}
-        </table>
-    </div>
-</div> -->
 
 
 <div class="card">
-    <h2>Customer List</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px;">
+        <h2 style="margin:0;">Customer List</h2>
+
+        <form method="get" action="{{ url_for('customers') }}" style="display:flex;gap:8px;align-items:center;">
+            <input type="text" name="search" 
+                   placeholder="Search name, phone, ID, email..." 
+                   value="{{ search or '' }}"
+                   style="padding:8px 12px;border:1px solid #ddd;border-radius:8px;min-width:260px;">
+            <button type="submit" class="btn small yellow">🔍 Search</button>
+            {% if search %}
+            <a href="{{ url_for('customers') }}" class="btn small">✖ Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if search %}
+    <p class="sub" style="margin-top:0;">
+        Showing <b>{{ customers|length }}</b> result(s) for "<b>{{ search }}</b>"
+    </p>
+    {% endif %}
+
     <div class="scroll">
         <table>
             <tr>
@@ -213,24 +145,32 @@
                         {% if session.role == 'admin' %}
 
                         <a class="btn small" href="{{ url_for('reset_customer_password', customer_id=c.id) }}" style="background:#ffd700;color:#111;">🔑 Reset Password</a>
+
                         <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
                             style="display:inline;" 
                             onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
-
-                        <form method="post" action="{{ url_for('delete_customer', customer_id=c.id) }}" 
-                              style="display:inline;" 
-                              onsubmit="return confirm('Are you sure you want to delete customer {{ c.full_name }}? This action cannot be undone.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
                         </form>
+
+
                         {% endif %}
                     </div>
                 </td>
             </tr>
+
             {% else %}
             <tr>
-                <td colspan="7">No customers yet.</td>
+                <td colspan="7">
+                    {% if search %}
+                        No customers match "<b>{{ search }}</b>".
+                    {% else %}
+                        No customers yet.
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
+
         </table>
     </div>
 </div>
