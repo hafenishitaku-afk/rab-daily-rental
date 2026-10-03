@@ -46,6 +46,17 @@
                 Notes
                 <input type="text" name="notes" placeholder="Any notes about this bike">
             </label>
+
+            <label>
+                Initial Station
+                <select name="current_station_id">
+                    <option value="">— Not assigned —</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}">{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
         </div>
         <button class="btn yellow" style="margin-top:16px">Add Bicycle</button>
     </form>
@@ -82,6 +93,7 @@
                 <th>Hourly</th>
                 <th>Daily Cap</th>
                 <th>Status</th>
+                <th>Station</th>
                 <th>Health</th>
                 <th>Actions</th>
             </tr>
@@ -97,6 +109,15 @@
                         {{ b.status }}
                     </span>
                 </td>
+
+                <td>
+                    {% if b.station_name %}
+                        <span class="badge blue">{{ b.station_name }}</span>
+                    {% else %}
+                        <span style="color:#667085;">—</span>
+                    {% endif %}
+                </td>
+
                 <td>
                     {% if b.health_score is not none %}
                     <div style="display:flex;align-items:center;gap:5px;">
@@ -137,7 +158,7 @@
 
             {% else %}
             <tr>
-                <td colspan="8">
+                <td colspan="9">
                     {% if search %}
                         No bicycles match "<b>{{ search }}</b>".
                     {% else %}

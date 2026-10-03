@@ -33,6 +33,34 @@
                     <option value="staff" selected>Staff</option>
                 </select>
             </label>
+
+            <!-- <label>
+                Assigned Station
+                <select name="branch_id">
+                    <option value="">— None (Head Office) —</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}">{{ s.name }}{% if s.location %} — {{ s.location }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    📍 The station this user works at. Rentals they start will default to this station.
+                </small>
+            </label> -->
+
+            <label>
+                Assigned Station
+                <select name="branch_id">
+                    <option value="">-- None (Head Office) --</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}">{{ s.name }}{% if s.location %} ({{ s.location }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    The station this user works at. Rentals they start will default to this station.
+                </small>
+            </label>
+
+
         </div>
         <div style="margin-top:20px;display:flex;gap:10px;">
             <button class="btn yellow" type="submit">➕ Create User</button>

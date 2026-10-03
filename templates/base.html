@@ -34,6 +34,7 @@
                 <a href="{{ url_for('announcements') }}" style="color:#ffe500;">📢 Announcements</a>
                 <a href="{{ url_for('reminder_logs') }}" style="color:#ffe500;">🔔 Reminders</a>
                 
+                
                 <!-- Reports & Analytics (Manager+) -->
                 {% if session.role == 'admin' or session.role == 'manager' %}
                 <a href="{{ url_for('analytics_dashboard') }}" style="color:#ffe500;">📊 Analytics</a>
@@ -42,6 +43,7 @@
                 <a href="{{ url_for('bicycle_health_dashboard') }}" style="color:#ffe500;">🩺 Health</a>
                 <a href="{{ url_for('maintenance_dashboard') }}" style="color:#ffe500;">🔧 Maintenance</a>
                 <a href="{{ url_for('exports_page') }}" style="color:#ffe500;">📄 Exports</a>
+                <a href="{{ url_for('staff_activity') }}" style="color:#ffe500;">🧾 Staff Activity</a>
                 {% endif %}
                 
                 <!-- Admin Only -->
@@ -49,17 +51,19 @@
                 <a href="{{ url_for('discounts') }}" style="color:#00ff80;">🏷️ Discounts</a>
                 <a href="{{ url_for('loyalty_dashboard') }}" style="color:#00ff80;">⭐ Loyalty</a>
                 <a href="{{ url_for('users') }}" style="color:#00ff80;">👥 Users</a>
+                <a href="{{ url_for('stations') }}" style="color:#00ff80;">🏢 Stations</a>
                 {% endif %}
             {% endif %}
             
             <!-- ✅ CUSTOMER ONLY -->
             {% if session.role == 'customer' %}
-                <a href="{{ url_for('customer_portal') }}" style="color:#00ff80;font-weight:bold;">👤 My Account</a>
-                <a href="{{ url_for('customer_rent') }}" style="color:#ffe500;">🚲 Rent a Bike</a>
+                <a href="{{ url_for('customer_portal') }}" style="color:#ffe500;font-weight:bold;">👤 My Account</a>
+             
                 <a href="{{ url_for('customer_rentals') }}" style="color:#ffe500;">📋 My Rentals</a>
             {% endif %}
             
             <!-- ✅ EVERYONE (Staff and Customers) -->
+            <a href="{{ url_for('customer_stations') }}" style="color:#ffe500;">📍 Pickup Points</a>
             <a href="{{ url_for('profile') }}" style="color:#ffe500;">👤 Profile</a>
             <a href="{{ url_for('logout') }}" style="color:#ffe500;">🔒 Logout</a>
         </nav>        

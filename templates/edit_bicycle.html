@@ -45,6 +45,22 @@
                 Notes
                 <input type="text" name="notes" value="{{ bicycle.notes or '' }}">
             </label>
+
+            <label>
+                Current Station
+                <select name="current_station_id">
+                    <option value="">— Not assigned —</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}"
+                            {% if bicycle.current_station_id and bicycle.current_station_id|string == s.id|string %}selected{% endif %}>
+                        {{ s.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    📍 Where this bicycle is currently located.
+                </small>
+            </label>
         </div>
         <div style="margin-top:20px;display:flex;gap:10px;">
             <button class="btn yellow" type="submit">💾 Update Bicycle</button>

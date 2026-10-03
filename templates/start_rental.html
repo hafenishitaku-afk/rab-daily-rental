@@ -54,7 +54,19 @@
                 </small>
             </label>
 
-            
+            <label>
+                Pickup Station
+                <select name="start_station_id" required>
+                    <option value="">Select Station</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}" {% if default_station_id|string == s.id|string %}selected{% endif %}>
+                        {{ s.name }}{% if s.location %} — {{ s.location }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>            
+
+
             <label>
                 Start Time
                 <input type="datetime-local" name="start_time" value="{{ now }}" required>

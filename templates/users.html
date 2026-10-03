@@ -16,10 +16,12 @@
                 <th>Username</th>
                 <th>Full Name</th>
                 <th>Role</th>
+                <th>Station</th>
                 <th>Email</th>
                 <th>Created</th>
                 <th>Actions</th>
             </tr>
+
             {% for u in users %}
             <tr>
                 <td><b>{{ u.username }}</b></td>
@@ -28,6 +30,13 @@
                     <span class="badge {% if u.role == 'admin' %}green{% elif u.role == 'manager' %}blue{% else %}orange{% endif %}">
                         {{ u.role }}
                     </span>
+                </td>
+                <td>
+                    {% if u.station_name %}
+                        <span class="badge blue">{{ u.station_name }}</span>
+                    {% else %}
+                        <span style="color:#667085;">—</span>
+                    {% endif %}
                 </td>
                 <td>{{ u.email or '—' }}</td>
                 <td>{{ u.created_at }}</td>
@@ -41,7 +50,7 @@
                     {% endif %}
                 </td>
             </tr>
-            {% endfor %}
+            {% endfor %}          
         </table>
     </div>
 </div>

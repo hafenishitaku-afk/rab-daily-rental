@@ -25,6 +25,23 @@
                     <option value="staff" {% if user.role == 'staff' %}selected{% endif %}>Staff</option>
                 </select>
             </label>
+
+            <label>
+                Assigned Station
+                <select name="branch_id">
+                    <option value="" {% if not user.branch_id %}selected{% endif %}>-- None (Head Office) --</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}"
+                            {% if user.branch_id and user.branch_id|string == s.id|string %}selected{% endif %}>
+                        {{ s.name }}{% if s.location %} ({{ s.location }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    The station this user works at. Rentals they start will default to this station.
+                </small>
+            </label>
+
             <label>
                 New Password
                 <input type="password" name="new_password" placeholder="Leave blank to keep current">

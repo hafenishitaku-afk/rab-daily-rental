@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📍 Pickup Points</h1>
+<p class="sub">Find our stations, contact them, and see how many bikes are available right now.</p>
+
+<div class="card">
+    <h2>Our Stations</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Address</th>
+                <th>Phone</th>
+                <th>Total Available Bikes</th>
+                <th>S</th>
+                <th>M</th>
+                <th>E</th>
+            </tr>
+            {% if stations %}
+                {% for s in stations %}
+                <tr>
+                    <td><b>{{ s.name }}</b></td>
+                    <td>{{ s.location or '—' }}</td>
+                    <td>{{ s.address or '—' }}</td>
+                    <td>
+                        {% if s.phone %}
+                            <a href="tel:{{ s.phone }}" style="color:#0d1f46;">{{ s.phone }}</a>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.total_available > 0 %}
+                            <span class="badge green">{{ s.total_available }}</span>
+                        {% else %}
+                            <span class="badge orange">0</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ s.std_available }}</td>
+                    <td>{{ s.mtn_available }}</td>
+                    <td>{{ s.elec_available }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#667085;padding:20px;">
+                        No pickup points available yet.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+    <p style="color:#667085;font-size:12px;margin-top:10px;">
+        💡 <b>S</b> = Standard · <b>M</b> = Mountain · <b>E</b> = Electric
+    </p>
+</div>
+
+<!-- 📄 Rental Agreement -->
+<div class="card" style="background:#f8f9fa;">
+    <h2>📄 Rental Agreement</h2>
+    <p class="sub">By renting a bicycle from RAB, you agree to the following terms:</p>
+    <ol style="color:#333;line-height:1.9;padding-left:20px;">
+        <li>The bicycle remains the property of RAB at all times.</li>
+        <li>The customer is responsible for the bicycle during the rental period.</li>
+        <li>The bicycle must be returned by the agreed time.</li>
+        <li>Late returns will incur additional charges.</li>
+        <li>Damage or loss must be reported immediately.</li>
+        <li>The customer agrees to follow all traffic rules and safety guidelines.</li>
+    </ol>
+    <p style="color:#667085;font-size:12px;">
+        You will sign a physical/digital copy of this agreement at the station when you start your rental.
+    </p>
+</div>
+
+
+<div class="card" style="background:#f8f9fa;">
+    <h3>📌 How it Works</h3>
+    <ul style="color:#667085;line-height:1.9;">
+        <li>✅ Choose a pickup point with available bikes</li>
+        <li>✅ Visit the station to start your rental</li>
+        <li>✅ Return the bike to any active pickup point</li>
+        <li>✅ Call the station if you need help</li>
+    </ul>
+
+    <h4 style="margin-top:20px;color:#0d1f46;">🪪 Identification</h4>
+    <ul style="color:#667085;line-height:1.9;">
+        <li><b>New customers:</b> please bring a valid ID or passport for registration.</li>
+        <li><b>Registered customers:</b> no physical ID needed — just provide your <b>name</b>, <b>ID number</b>, or <b>cell phone number</b> so we can verify you in the system.</li>
+    </ul>
+
+    <h4 style="margin-top:20px;color:#0d1f46;">📸 Profile Photo</h4>
+    <p style="color:#667085;line-height:1.9;margin:0;">
+        For security and to keep your account active, we'll update your photo
+        every <b>2 weeks</b> during your visit. This helps us serve you faster
+        and keeps your account protected.
+    </p>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('customer_portal') }}" class="btn">← Back to My Account</a>
+</div>
+
+{% endblock %}

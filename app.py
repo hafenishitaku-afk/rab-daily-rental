@@ -983,7 +983,13 @@ def init_db():
     conn.commit()
     conn.close()
 
-
+    with app.app_context():
+        try:
+            # init_db()
+            ensure_schema_columns()
+            print("✅ Schema is up to date.")
+        except Exception as e:
+            print(f"⚠️ Schema bootstrap error: {e}")
 
 def ci_like(column, param):
     """
@@ -999,7 +1005,62 @@ def ci_like(column, param):
         return f"{column} LIKE ?"
 
 
+def ensure_schema_columns():
+    """
+    Idempotently add audit + station columns to daily_rentals and bicycles.
+    Safe to run on every startup on both SQLite and PostgreSQL.
+    """
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
 
+    # (table, column, sqlite_type, postgres_type)
+    columns = [
+        # daily_rentals — audit trail
+        ("daily_rentals", "started_by_user_id",   "INTEGER", "INTEGER"),
+        ("daily_rentals", "ended_by_user_id",     "INTEGER", "INTEGER"),
+        ("daily_rentals", "cancelled_by_user_id", "INTEGER", "INTEGER"),
+        # daily_rentals — stations
+        ("daily_rentals", "start_station_id",     "INTEGER", "INTEGER"),
+        ("daily_rentals", "end_station_id",       "INTEGER", "INTEGER"),
+        # bicycles — current location
+        ("bicycles",      "current_station_id",   "INTEGER", "INTEGER"),
+    ]
+
+    for table, column, sqlite_type, pg_type in columns:
+        try:
+            if is_postgres:
+                # PostgreSQL supports IF NOT EXISTS natively
+                execute_query(c, f"""
+                    ALTER TABLE {table}
+                    ADD COLUMN IF NOT EXISTS {column} {pg_type}
+                """)
+            else:
+                # SQLite doesn't support IF NOT EXISTS on ADD COLUMN,
+                # so check the schema first
+
+
+                existing = execute_query(c, f"PRAGMA table_info({table})").fetchall()
+                # SQLite returns rows either as dicts (dict_factory) or tuples; handle both
+                names = []
+                for row in existing:
+                    if isinstance(row, dict):
+                        names.append(row.get("name"))
+                    else:
+                        # tuple layout: (cid, name, type, notnull, dflt_value, pk)
+                        names.append(row[1])
+                if column not in names:
+
+                    execute_query(c, f"""
+                        ALTER TABLE {table}
+                        ADD COLUMN {column} {sqlite_type}
+                    """)
+        except Exception as e:
+            # If it already exists, ignore. Otherwise print for debugging.
+            print(f"ensure_schema_columns: {table}.{column} → {e}")
+
+    conn.commit()
+    conn.close()
 
 
 @app.route("/")
@@ -1029,6 +1090,7 @@ def login():
                 session["username"] = user["username"]
                 session["role"] = user["role"]
                 session["full_name"] = user["full_name"]
+                session["station_id"] = user.get("branch_id")                
                 
                 # Get customer ID
                 conn = db()
@@ -1192,12 +1254,6 @@ def customer_required(f):
 
 
 
-
-# =============================================
-# USER MANAGEMENT ROUTES
-# =============================================
-
-
 @app.route("/users")
 @login_required
 @admin_required
@@ -1207,61 +1263,78 @@ def users():
     c = conn.cursor()
     
     users_list = execute_query(c, """
-        SELECT id, username, role, full_name, email, created_at
-        FROM users
-        ORDER BY role, username
+        SELECT u.id, u.username, u.role, u.full_name, u.email, u.created_at,
+               s.name AS station_name
+        FROM users u
+        LEFT JOIN branches s ON s.id = u.branch_id
+        WHERE u.role != 'customer'
+        ORDER BY u.role, u.username
     """).fetchall()
     
     conn.close()
     
-
-
-# ✅ Format datetime for each user
+    # Format datetime for each user
     for user in users_list:
         if user.get("created_at"):
             if isinstance(user["created_at"], datetime):
                 user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
             elif isinstance(user["created_at"], str):
-                user["created_at"] = user["created_at"]  # ✅ Return as is    
+                user["created_at"] = user["created_at"]
     
     return render_template("users.html", title="User Management", users=users_list)
-
+  
 
 
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
 @admin_required
 def add_user():
+    print("DEBUG: add_user was called")    
     """Add a new user (Admin only)."""
+    conn = db()
+    c = conn.cursor()
+
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         role = request.form.get("role", "staff")
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip()
-        
+
+        branch_id = request.form.get("branch_id") or None
+        if branch_id:
+            branch_id = int(branch_id)
+
         if not username or not password:
             flash("Username and password are required.", "danger")
+            conn.close()
             return redirect(url_for("add_user"))
-        
-        conn = db()
-        c = conn.cursor()
-        
+
         try:
-            execute_query(c,"""
-                INSERT INTO users (username, password_hash, role, full_name, email)
-                VALUES (?, ?, ?, ?, ?)
-            """, (username, generate_password_hash(password), role, full_name, email))
+            execute_query(c, """
+                INSERT INTO users (username, password_hash, role, full_name, email, branch_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (username, generate_password_hash(password), role, full_name, email, branch_id))
             conn.commit()
             flash(f"User '{username}' created successfully!", "success")
         except sqlite3.IntegrityError:
             flash(f"Username '{username}' already exists.", "danger")
-        finally:
-            conn.close()
-        
+
+        conn.close()
         return redirect(url_for("users"))
-    
-    return render_template("add_user.html", title="Add User")
+
+    # GET branch
+    stations = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
+
+    conn.close()
+
+    print("DEBUG add_user → stations =", stations)
+    print("DEBUG add_user → type =", type(stations))
+
+    return render_template("add_user.html", title="Add User", stations=stations)
 
 
 @app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
@@ -1274,39 +1347,260 @@ def edit_user(user_id):
     
     user = execute_query(c,"SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     
+    # if not user:
+    #     flash("User not found.", "danger")
+    #     return redirect(url_for("users"))
     if not user:
+        conn.close()
         flash("User not found.", "danger")
-        return redirect(url_for("users"))
-    
+        return redirect(url_for("users"))  
+
+
     if request.method == "POST":
         role = request.form.get("role", "staff")
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip()
         new_password = request.form.get("new_password", "").strip()
-        
+
+        # ✅ Optional: assign a station
+        branch_id = request.form.get("branch_id") or None
+        if branch_id:
+            branch_id = int(branch_id)
+
         if new_password:
             execute_query(c,"""
                 UPDATE users 
-                SET role = ?, full_name = ?, email = ?, password_hash = ?
+                SET role = ?, full_name = ?, email = ?, password_hash = ?, branch_id = ?
                 WHERE id = ?
-            """, (role, full_name, email, generate_password_hash(new_password), user_id))
+            """, (role, full_name, email, generate_password_hash(new_password), branch_id, user_id))
         else:
             execute_query(c,"""
                 UPDATE users 
-                SET role = ?, full_name = ?, email = ?
+                SET role = ?, full_name = ?, email = ?, branch_id = ?
                 WHERE id = ?
-            """, (role, full_name, email, user_id))
-        
+            """, (role, full_name, email, branch_id, user_id))
+
         conn.commit()
         conn.close()
-        
+
         flash(f"User '{user['username']}' updated successfully!", "success")
-        return redirect(url_for("users"))
-    
+        return redirect(url_for("users"))    
+    # conn.close()
+    # return render_template("edit_user.html", title="Edit User", user=user)
+    stations = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
     conn.close()
-    return render_template("edit_user.html", title="Edit User", user=user)
+    return render_template("edit_user.html", title="Edit User", user=user, stations=stations)
+
+@app.route("/staff-activity")
+@login_required
+@manager_required
+def staff_activity():
+    """Admin/manager view: who started / ended / cancelled each rental, at which station."""
+    conn = db()
+    c = conn.cursor()
+
+    # Filters
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to   = (request.args.get("date_to") or "").strip()
+    staff_id  = (request.args.get("staff_id") or "").strip()
+    station_id = (request.args.get("station_id") or "").strip()
+    action    = (request.args.get("action") or "").strip()
+
+    query = """
+        SELECT
+            r.id,
+            r.start_time,
+            r.end_time,
+            r.status,
+            r.total_cost,
+            r.notes,
+            c.full_name       AS customer_name,
+            b.bike_code,
+            su.username       AS started_by,
+            su.full_name      AS started_by_name,
+            eu.username       AS ended_by,
+            eu.full_name      AS ended_by_name,
+            cu.username       AS cancelled_by,
+            cu.full_name      AS cancelled_by_name,
+            ss.name           AS start_station,
+            es.name           AS end_station
+        FROM daily_rentals r
+        LEFT JOIN customers   c  ON c.id  = r.customer_id
+        LEFT JOIN bicycles    b  ON b.id  = r.bicycle_id
+        LEFT JOIN users       su ON su.id = r.started_by_user_id
+        LEFT JOIN users       eu ON eu.id = r.ended_by_user_id
+        LEFT JOIN users       cu ON cu.id = r.cancelled_by_user_id
+        LEFT JOIN branches    ss ON ss.id = r.start_station_id
+        LEFT JOIN branches    es ON es.id = r.end_station_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(r.start_time) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(r.start_time) <= ?"
+        params.append(date_to)
+    if staff_id:
+        query += " AND (r.started_by_user_id = ? OR r.ended_by_user_id = ? OR r.cancelled_by_user_id = ?)"
+        params.extend([staff_id, staff_id, staff_id])
+    if station_id:
+        query += " AND (r.start_station_id = ? OR r.end_station_id = ?)"
+        params.extend([station_id, station_id])
+    if action == "started":
+        query += " AND r.started_by_user_id IS NOT NULL"
+    elif action == "ended":
+        query += " AND r.ended_by_user_id IS NOT NULL"
+    elif action == "cancelled":
+        query += " AND r.cancelled_by_user_id IS NOT NULL"
+
+    query += " ORDER BY r.start_time DESC LIMIT 500"
+
+    rentals = execute_query(c, query, params).fetchall()
+
+    # Format datetimes using shared helper
+    for r in rentals:
+        if r.get("start_time"): r["start_time"] = to_namibia_time(r["start_time"])
+        if r.get("end_time"):   r["end_time"]   = to_namibia_time(r["end_time"])
+
+    # For filter dropdowns
+    staff_list = execute_query(c, """
+        SELECT id, username, full_name FROM users
+        WHERE role IN ('admin','manager','staff')
+        ORDER BY username
+    """).fetchall()
+
+    station_list = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "staff_activity.html",
+        title="Staff Activity",
+        rentals=rentals,
+        staff_list=staff_list,
+        station_list=station_list,
+        date_from=date_from,
+        date_to=date_to,
+        staff_id=staff_id,
+        station_id=station_id,
+        action=action
+    )
 
 
+
+
+@app.route("/stations", methods=["GET", "POST"])
+@login_required
+@admin_required
+def stations():
+    """Admin: manage stations (= branches)."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        location = (request.form.get("location") or "").strip()
+        address = (request.form.get("address") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        email = (request.form.get("email") or "").strip()
+
+        if not name:
+            flash("Station name is required.", "danger")
+        else:
+            try:
+                execute_query(c, """
+                    INSERT INTO branches (name, location, address, phone, email, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                """, (name, location, address, phone, email))
+                conn.commit()
+                flash(f"Station '{name}' added.", "success")
+            except Exception as e:
+                conn.rollback()
+                flash(f"Error: {e}", "danger")
+
+        conn.close()
+        return redirect(url_for("stations"))
+
+    # ✅ Include bike count per station
+    stations_list = execute_query(c, """
+        SELECT s.*,
+               (SELECT COUNT(*) FROM bicycles b WHERE b.current_station_id = s.id) AS bike_count
+        FROM branches s
+        ORDER BY s.name
+    """).fetchall()
+
+    conn.close()
+    return render_template("stations.html", title="Stations", stations=stations_list)
+
+
+@app.route("/stations/<int:station_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_station(station_id):
+    conn = db()
+    c = conn.cursor()
+
+    station = execute_query(c,
+        "SELECT * FROM branches WHERE id = ?", (station_id,)
+    ).fetchone()
+
+    if not station:
+        conn.close()
+        flash("Station not found.", "danger")
+        return redirect(url_for("stations"))
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        location = (request.form.get("location") or "").strip()
+        address = (request.form.get("address") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        is_active = 1 if request.form.get("is_active") == "on" else 0
+
+        if not name:
+            flash("Station name is required.", "danger")
+        else:
+            execute_query(c, """
+                UPDATE branches
+                SET name = ?, location = ?, address = ?, phone = ?, email = ?, is_active = ?
+                WHERE id = ?
+            """, (name, location, address, phone, email, is_active, station_id))
+            conn.commit()
+            flash(f"Station '{name}' updated.", "success")
+            conn.close()
+            return redirect(url_for("stations"))
+
+    conn.close()
+    return render_template("edit_station.html", title="Edit Station", station=station)
+
+
+@app.route("/stations/<int:station_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_station(station_id):
+    conn = db()
+    c = conn.cursor()
+
+    # Block if any bicycle is currently at this station
+    bikes_here = get_single_value(c,
+        "SELECT COUNT(*) FROM bicycles WHERE current_station_id = ?", (station_id,))
+    if bikes_here and int(bikes_here) > 0:
+        conn.close()
+        flash(f"Cannot delete: {bikes_here} bicycle(s) are currently at this station.", "danger")
+        return redirect(url_for("stations"))
+
+    execute_query(c, "DELETE FROM branches WHERE id = ?", (station_id,))
+    conn.commit()
+    conn.close()
+    flash("Station deleted.", "success")
+    return redirect(url_for("stations"))
 
 
 @app.route("/users/<int:user_id>/delete", methods=["POST"])
@@ -1554,31 +1848,36 @@ def customer_rentals():
     )
 
 
-
-
-
 @app.route("/customer-rent")
 @login_required
 @customer_required
 def customer_rent():
-    """Customer view - browse available bikes (cannot start rental)."""
-    conn = db()
-    c = conn.cursor()
+    """Legacy route — redirected to Pickup Points."""
+    return redirect(url_for("customer_stations"))
+
+
+# @app.route("/customer-rent")
+# @login_required
+# @customer_required
+# def customer_rent():
+#     """Customer view - browse available bikes (cannot start rental)."""
+#     conn = db()
+#     c = conn.cursor()
     
-    # Get available bikes only
-    bikes = execute_query(c,"""
-        SELECT * FROM bicycles 
-        WHERE status = 'Available'
-        ORDER BY bike_code
-    """).fetchall()
+#     # Get available bikes only
+#     bikes = execute_query(c,"""
+#         SELECT * FROM bicycles 
+#         WHERE status = 'Available'
+#         ORDER BY bike_code
+#     """).fetchall()
     
-    conn.close()
+#     conn.close()
     
-    return render_template(
-        "customer_rent.html",
-        title="Available Bicycles",
-        bikes=bikes
-    )
+#     return render_template(
+#         "customer_rent.html",
+#         title="Available Bicycles",
+#         bikes=bikes
+#     )
 
 
 
@@ -1798,15 +2097,25 @@ def start_rental():
         except (TypeError, ValueError):
             deposit_paid = bike["deposit_amount"]
 
+
+
+
+
+        # Station
+        start_station_id = request.form.get("start_station_id") or None
+        if start_station_id:
+            start_station_id = int(start_station_id)
+
         execute_query(c, """
             INSERT INTO daily_rentals (
-                customer_id, bicycle_id, start_time, 
+                customer_id, bicycle_id, start_time,
                 hourly_rate, daily_cap, deposit_paid, status,
-                agreement_signed
-            ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1)
+                agreement_signed,
+                started_by_user_id, start_station_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, ?, ?)
         """, (customer_id, bicycle_id, start_time_utc,
-            bike["hourly_rate"], bike["daily_cap"], deposit_paid))
-
+              bike["hourly_rate"], bike["daily_cap"], deposit_paid,
+              session["user_id"], start_station_id))
 
 
         rental_id = c.lastrowid
@@ -1831,6 +2140,18 @@ def start_rental():
         FROM bicycles WHERE status = 'Available'
     """).fetchall()
     
+
+    stations = execute_query(c, """
+        SELECT id, name, location FROM branches
+        WHERE is_active = 1
+        ORDER BY name
+    """).fetchall()
+
+    # Default station from session (user's assigned station) or first active station
+    default_station_id = session.get("station_id")
+    if not default_station_id and stations:
+        default_station_id = stations[0]["id"]
+
     conn.close()
     
     # ✅ Get current local time (Namibia time - UTC+2)
@@ -1842,6 +2163,8 @@ def start_rental():
         title="Start Rental",
         customers=customers,
         bicycles=bicycles,
+        stations=stations,
+        default_station_id=default_station_id,
         now=local_now.strftime("%Y-%m-%dT%H:%M")
     )
 
@@ -4444,6 +4767,51 @@ def analytics_dashboard():
 
 
 
+# @app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
+# @login_required
+# @manager_required
+# def edit_bicycle(bicycle_id):
+#     """Edit a bicycle's details."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+#     if not bicycle:
+#         flash("Bicycle not found.", "danger")
+#         return redirect(url_for("bicycles"))
+    
+#     if request.method == "POST":
+#         bike_code = request.form.get("bike_code", "").strip().upper()
+#         brand = request.form.get("brand", "").strip()
+#         model = request.form.get("model", "").strip()
+#         bike_type = request.form.get("bike_type", "Standard")
+#         hourly_rate = float(request.form.get("hourly_rate", 20))
+#         daily_cap = float(request.form.get("daily_cap", 120))
+#         deposit_amount = float(request.form.get("deposit_amount", 50))
+#         notes = request.form.get("notes", "").strip()
+        
+#         if not bike_code:
+#             flash("Bicycle code is required.", "danger")
+#             return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
+        
+#         try:
+#             execute_query(c,"""
+#                 UPDATE bicycles 
+#                 SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
+#                     hourly_rate = ?, daily_cap = ?, deposit_amount = ?, notes = ?
+#                 WHERE id = ?
+#             """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes, bicycle_id))
+#             conn.commit()
+#             flash(f"Bicycle '{bike_code}' updated successfully!", "success")
+#         except sqlite3.IntegrityError:
+#             flash("Bicycle code already exists.", "danger")
+#         finally:
+#             conn.close()
+        
+#         return redirect(url_for("bicycles"))
+    
+#     conn.close()
+#     return render_template("edit_bicycle.html", title="Edit Bicycle", bicycle=bicycle)
 @app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
 @login_required
 @manager_required
@@ -4451,12 +4819,16 @@ def edit_bicycle(bicycle_id):
     """Edit a bicycle's details."""
     conn = db()
     c = conn.cursor()
-    
-    bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
+
+    bicycle = execute_query(c,
+        "SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)
+    ).fetchone()
+
     if not bicycle:
+        conn.close()
         flash("Bicycle not found.", "danger")
         return redirect(url_for("bicycles"))
-    
+
     if request.method == "POST":
         bike_code = request.form.get("bike_code", "").strip().upper()
         brand = request.form.get("brand", "").strip()
@@ -4466,29 +4838,48 @@ def edit_bicycle(bicycle_id):
         daily_cap = float(request.form.get("daily_cap", 120))
         deposit_amount = float(request.form.get("deposit_amount", 50))
         notes = request.form.get("notes", "").strip()
-        
+
+        # ✅ Optional: update current station
+        current_station_id = request.form.get("current_station_id") or None
+        if current_station_id:
+            current_station_id = int(current_station_id)
+
         if not bike_code:
             flash("Bicycle code is required.", "danger")
+            conn.close()
             return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
-        
+
         try:
-            execute_query(c,"""
-                UPDATE bicycles 
+            execute_query(c, """
+                UPDATE bicycles
                 SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
-                    hourly_rate = ?, daily_cap = ?, deposit_amount = ?, notes = ?
+                    hourly_rate = ?, daily_cap = ?, deposit_amount = ?,
+                    notes = ?, current_station_id = ?
                 WHERE id = ?
-            """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes, bicycle_id))
+            """, (bike_code, brand, model, bike_type,
+                  hourly_rate, daily_cap, deposit_amount,
+                  notes, current_station_id, bicycle_id))
             conn.commit()
             flash(f"Bicycle '{bike_code}' updated successfully!", "success")
         except sqlite3.IntegrityError:
             flash("Bicycle code already exists.", "danger")
         finally:
             conn.close()
-        
+
         return redirect(url_for("bicycles"))
-    
+
+    # GET: fetch stations for the dropdown
+    stations = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
     conn.close()
-    return render_template("edit_bicycle.html", title="Edit Bicycle", bicycle=bicycle)
+    return render_template(
+        "edit_bicycle.html",
+        title="Edit Bicycle",
+        bicycle=bicycle,
+        stations=stations
+    )
 
 
 @app.route("/bicycles", methods=["GET", "POST"])
@@ -4497,7 +4888,7 @@ def edit_bicycle(bicycle_id):
 def bicycles():
     conn = db()
     c = conn.cursor()
-    
+
     if request.method == "POST":
         bike_code = request.form.get("bike_code", "").strip().upper()
         brand = request.form.get("brand", "").strip()
@@ -4507,24 +4898,33 @@ def bicycles():
         daily_cap = float(request.form.get("daily_cap", 120))
         deposit_amount = float(request.form.get("deposit_amount", 50))
         notes = request.form.get("notes", "").strip()
-        
+
+        # ✅ Optional: admin can set the initial station
+        current_station_id = request.form.get("current_station_id") or None
+        if current_station_id:
+            current_station_id = int(current_station_id)
+
         if not bike_code:
             flash("Bicycle code is required.", "danger")
             return redirect(url_for("bicycles"))
-        
+
         try:
-            execute_query(c,"""
+            execute_query(c, """
                 INSERT INTO bicycles 
-                (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes))
+                (bike_code, brand, model, bike_type,
+                 hourly_rate, daily_cap, deposit_amount, notes,
+                 current_station_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (bike_code, brand, model, bike_type,
+                  hourly_rate, daily_cap, deposit_amount, notes,
+                  current_station_id))
             conn.commit()
             flash(f"Bicycle {bike_code} added successfully.", "success")
         except sqlite3.IntegrityError:
             flash("Bicycle code already exists.", "danger")
-        
+
+        conn.close()
         return redirect(url_for("bicycles"))
-    
 
     # =============================================
     # SEARCH FILTER
@@ -4537,9 +4937,11 @@ def bicycles():
             SELECT 
                 b.*,
                 bh.health_score,
-                bh.condition_rating
+                bh.condition_rating,
+                s.name AS station_name
             FROM bicycles b
             LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+            LEFT JOIN branches s ON s.id = b.current_station_id
             WHERE {ci_like('b.bike_code', '?')}
                OR {ci_like('b.brand', '?')}
                OR {ci_like('b.model', '?')}
@@ -4547,19 +4949,33 @@ def bicycles():
             ORDER BY b.bike_code
         """, (like, like, like, like)).fetchall()
     else:
-        bicycles = execute_query(c,"""
+        bicycles = execute_query(c, """
             SELECT 
                 b.*,
                 bh.health_score,
-                bh.condition_rating
+                bh.condition_rating,
+                s.name AS station_name
             FROM bicycles b
             LEFT JOIN bicycle_health bh ON bh.bicycle_id = b.id
+            LEFT JOIN branches s ON s.id = b.current_station_id
             ORDER BY b.bike_code
         """).fetchall()
 
+    # ✅ Pass stations list to the template (for the "Initial Station" dropdown)
+    stations = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
     conn.close()
-    
-    return render_template("bicycles.html", title="Bicycles", bicycles=bicycles, search=search)
+
+    return render_template(
+        "bicycles.html",
+        title="Bicycles",
+        bicycles=bicycles,
+        stations=stations,
+        search=search
+    )
+
 
 
 @app.route("/reports/bicycle-utilization")
@@ -5690,209 +6106,6 @@ def generate_receipt(payment_id):
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
-# @app.route("/receipt/<int:payment_id>")
-# @login_required
-# def generate_receipt(payment_id):
-#     """Generate a PDF receipt for a payment."""
-#     from reportlab.lib.pagesizes import A4
-#     from reportlab.lib import colors
-#     from reportlab.lib.units import mm
-#     from reportlab.pdfgen import canvas
-#     from io import BytesIO
-#     from datetime import datetime, timedelta
-#     import pytz
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     # Get payment details with customer and rental info
-#     payment = execute_query(c, """
-#         SELECT 
-#             p.*,
-#             r.id AS rental_id,
-#             r.start_time,
-#             r.end_time,
-#             r.total_hours,
-#             r.total_cost,
-#             r.bicycle_id,
-#             c.full_name,
-#             c.phone,
-#             c.email,
-#             c.id_number,
-#             b.bike_code,
-#             b.brand,
-#             b.model
-#         FROM rental_payments p
-#         JOIN daily_rentals r ON r.id = p.daily_rental_id
-#         JOIN customers c ON c.id = r.customer_id
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         WHERE p.id = ?
-#     """, (payment_id,)).fetchone()
-    
-#     conn.close()
-    
-#     if not payment:
-#         flash("Payment not found.", "danger")
-#         return redirect(url_for("payment_history"))
-    
-#     # =============================================
-#     # ✅ FIX: Format datetime values with timezone
-#     # =============================================
-#     def format_datetime(value):
-#         """Convert UTC to local time (Namibia UTC+2) for display."""
-#         if value is None:
-#             return "N/A"
-#         if isinstance(value, datetime):
-#             # Add 2 hours for Namibia time
-#             local_time = value + timedelta(hours=2)
-#             return local_time.strftime("%Y-%m-%d %H:%M")
-#         if isinstance(value, str):
-#             try:
-#                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-#                 local_time = dt + timedelta(hours=2)
-#                 return local_time.strftime("%Y-%m-%d %H:%M")
-#             except:
-#                 return value[:16] if len(value) >= 16 else value
-#         return str(value)
-    
-#     # Format all dates
-#     payment_date_str = format_datetime(payment.get("payment_date"))
-#     start_time_str = format_datetime(payment.get("start_time"))
-#     end_time_str = format_datetime(payment.get("end_time"))
-    
-#     # Create PDF
-#     buf = BytesIO()
-#     pdf = canvas.Canvas(buf, pagesize=A4)
-#     width, height = A4
-    
-#     # Settings
-#     x = 25 * mm
-#     y = height - 25 * mm
-    
-#     # =============================================
-#     # HEADER
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 24)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "RAB RENT A BIKE")
-    
-#     y -= 8 * mm
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#667085"))
-#     pdf.drawString(x, y, "Daily Rental Receipt")
-    
-#     y -= 5 * mm
-#     pdf.setFont("Helvetica", 8)
-#     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
-#     # ✅ Use formatted payment date
-#     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
-    
-#     y -= 8 * mm
-#     pdf.line(x, y, width - x, y)
-#     y -= 10 * mm
-    
-#     # =============================================
-#     # CUSTOMER DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Customer Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
-    
-#     y -= 8 * mm
-    
-#     # =============================================
-#     # RENTAL DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Rental Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
-#     y -= 6 * mm
-#     # ✅ Use formatted start time
-#     pdf.drawString(x + 5 * mm, y, f"Start: {start_time_str}")
-#     y -= 6 * mm
-#     # ✅ Use formatted end time
-#     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
-    
-#     y -= 8 * mm
-    
-#     # =============================================
-#     # PAYMENT DETAILS
-#     # =============================================
-#     pdf.setFont("Helvetica-Bold", 12)
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.drawString(x, y, "Payment Details")
-#     y -= 7 * mm
-    
-#     pdf.setFont("Helvetica", 10)
-#     pdf.setFillColor(colors.HexColor("#111111"))
-#     pdf.drawString(x + 5 * mm, y, f"Amount Paid: N$ {payment['amount']:.2f}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
-#     y -= 6 * mm
-#     # ✅ Use formatted payment date
-#     pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
-#     y -= 6 * mm
-#     pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
-    
-#     y -= 10 * mm
-    
-#     # =============================================
-#     # SUMMARY BOX
-#     # =============================================
-#     box_height = 25 * mm
-#     box_y = y - box_height
-    
-#     pdf.setFillColor(colors.HexColor("#ffe500"))
-#     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
-    
-#     pdf.setFillColor(colors.HexColor("#0d1f46"))
-#     pdf.setFont("Helvetica-Bold", 14)
-#     pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL PAID")
-#     pdf.setFont("Helvetica-Bold", 24)
-#     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
-    
-#     y -= box_height + 15 * mm
-    
-#     # =============================================
-#     # TERMS & CONDITIONS
-#     # =============================================
-#     pdf.setFont("Helvetica", 8)
-#     pdf.setFillColor(colors.HexColor("#667085"))
-#     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
-#     y -= 5 * mm
-#     pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
-    
-#     # =============================================
-#     # FOOTER
-#     # =============================================
-#     pdf.setFont("Helvetica", 8)
-#     pdf.setFillColor(colors.HexColor("#999999"))
-#     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
-#     pdf.drawString(width - 60 * mm, 15 * mm, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    
-#     pdf.save()
-#     buf.seek(0)
-    
-#     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
-#     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
 @app.route("/export/bicycles/csv")
@@ -6107,10 +6320,79 @@ def customer_portal():
         points=points
     )
 
+# @app.route("/pickup-points")
+# @login_required
+# @customer_required
+# def customer_stations():
+#     """Customer view: list of active pickup points with available bike counts."""
+#     conn = db()
+#     c = conn.cursor()
+
+#     stations = execute_query(c, """
+#         SELECT 
+#             s.id,
+#             s.name,
+#             s.location,
+#             s.address,
+#             s.phone,
+#             (SELECT COUNT(*) FROM bicycles b 
+#              WHERE b.current_station_id = s.id 
+#                AND b.status = 'Available') AS bikes_available
+#         FROM branches s
+#         WHERE s.is_active = 1
+#         ORDER BY s.name
+#     """).fetchall()
+
+#     conn.close()
+
+#     return render_template(
+#         "customer_stations.html",
+#         title="Pickup Points",
+#         stations=stations
+#     )
 
 
+@app.route("/pickup-points")
+@login_required
+def customer_stations():
+    """Customer view: pickup points with available bike counts by type."""
+    conn = db()
+    c = conn.cursor()
 
+    stations = execute_query(c, """
+        SELECT 
+            s.id,
+            s.name,
+            s.location,
+            s.address,
+            s.phone,
+            (SELECT COUNT(*) FROM bicycles b
+             WHERE b.current_station_id = s.id
+               AND b.status = 'Available') AS total_available,
+            (SELECT COUNT(*) FROM bicycles b
+             WHERE b.current_station_id = s.id
+               AND b.status = 'Available'
+               AND b.bike_type = 'Standard') AS std_available,
+            (SELECT COUNT(*) FROM bicycles b
+             WHERE b.current_station_id = s.id
+               AND b.status = 'Available'
+               AND b.bike_type = 'Mountain') AS mtn_available,
+            (SELECT COUNT(*) FROM bicycles b
+             WHERE b.current_station_id = s.id
+               AND b.status = 'Available'
+               AND b.bike_type = 'Electric') AS elec_available
+        FROM branches s
+        WHERE s.is_active = 1
+        ORDER BY s.name
+    """).fetchall()
 
+    conn.close()
+
+    return render_template(
+        "customer_stations.html",
+        title="Pickup Points",
+        stations=stations
+    )
 
 # ✅ ADD THIS - Customer-only decorator
 def customer_required(f):
@@ -6148,123 +6430,6 @@ def staff_required(f):
 
 
 
-
-
-
-
-
-
-# @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
-# @login_required
-# @staff_required
-# def end_rental(rental_id):
-#     """End a rental and calculate the total cost."""
-#     from datetime import datetime, timedelta
-#     import pytz
-    
-#     conn = db()
-#     c = conn.cursor()
-    
-#     rental = execute_query(c, """
-#         SELECT r.*, b.bike_code, c.full_name
-#         FROM daily_rentals r
-#         JOIN bicycles b ON b.id = r.bicycle_id
-#         JOIN customers c ON c.id = r.customer_id
-#         WHERE r.id = ?
-#     """, (rental_id,)).fetchone()
-    
-#     if not rental:
-#         flash("Rental not found.", "danger")
-#         return redirect(url_for("dashboard"))
-    
-#     # ✅ FIX: Handle start_time as datetime or string (stored in UTC - offset-naive)
-#     if isinstance(rental["start_time"], datetime):
-#         start_time_utc = rental["start_time"]
-#     else:
-#         start_time_utc = datetime.fromisoformat(rental["start_time"])
-    
-#     # ✅ Get current UTC time (offset-naive)
-#     utc_now = datetime.utcnow()
-    
-#     # ✅ Get current local time for display (Namibia time - UTC+2)
-#     namibia_tz = pytz.timezone('Africa/Windhoek')
-#     local_now = datetime.now(namibia_tz)
-
-
-
- 
-    
-#     if request.method == "POST":
-#         # Use UTC time for calculation
-#         end_time_utc = utc_now
-#         total_hours = (end_time_utc - start_time_utc).total_seconds() / 3600
-#         total_hours = round(total_hours, 2)
-        
-#         hourly_rate = rental["hourly_rate"]
-#         daily_cap = rental["daily_cap"]
-        
-#         # Calculate cost
-#         raw_cost = total_hours * hourly_rate
-#         total_cost = min(raw_cost, daily_cap)
-        
-#         # Late fee (after 6pm local time)
-#         late_fee = 0
-#         if local_now.hour >= 18:
-#             late_fee = 10 * (local_now.hour - 18)
-#         total_cost += late_fee
-        
-#         # Get condition values
-#         condition_before = request.form.get("condition_before", "Good")
-#         condition_after = request.form.get("condition_after", "Good")
-        
-#         execute_query(c, """
-#             UPDATE daily_rentals 
-#             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
-#                 condition_before = ?, condition_after = ?, status = 'Completed'
-#             WHERE id = ?
-#         """, (end_time_utc.isoformat(), total_hours, total_cost, late_fee,
-#               condition_before, condition_after, rental_id))
-        
-#         execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
-        
-#         conn.commit()
-#         conn.close()
-        
-#         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
-#         return redirect(url_for("record_payment", rental_id=rental_id))
-    
-#     ✅ Calculate preview for display using UTC times
-#     preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
-    
-#     hourly_rate = rental["hourly_rate"]
-#     daily_cap = rental["daily_cap"]
-#     preview_raw = preview_hours * hourly_rate
-#     preview_capped = min(preview_raw, daily_cap)
-#     preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
-#     preview_total = preview_capped + preview_late
-    
-#     # ✅ FIX: Format dates for display (convert UTC to local)
-#     start_time_local = start_time_utc + timedelta(hours=2)
-#     start_time_str = start_time_local.strftime("%Y-%m-%d %H:%M")
-#     end_time_local = local_now
-#     end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
-    
-#     conn.close()
-    
-#     return render_template(
-#         "end_rental.html",
-#         title="End Rental",
-#         rental=rental,
-#         start_time_str=start_time_str,
-#         end_time_str=end_time_str,
-#         preview_hours=preview_hours,
-#         hourly_rate=hourly_rate,
-#         daily_cap=daily_cap,
-#         preview_raw=preview_raw,
-#         preview_capped=preview_capped,
-#         preview_late=preview_late,
-#         preview_total=preview_total
-#     )
 
 @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
 @login_required
@@ -6324,22 +6489,44 @@ def end_rental(rental_id):
         total_cost += late_fee
         
         # ✅ Change calculation (Option A)
-        # positive = refund to customer, negative = customer owes more
         change_due = round(deposit_paid - total_cost, 2)
         
         # Get condition values
         condition_before = request.form.get("condition_before", "Good")
         condition_after = request.form.get("condition_after", "Good")
         
+
+        # ✅ Save who ended the rental, where, and move the bicycle
+        end_station_id = request.form.get("end_station_id") or None
+        if end_station_id:
+            end_station_id = int(end_station_id)
+
         execute_query(c, """
-            UPDATE daily_rentals 
+            UPDATE daily_rentals
             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
-                condition_before = ?, condition_after = ?, status = 'Completed'
+                condition_before = ?, condition_after = ?, status = 'Completed',
+                ended_by_user_id = ?, end_station_id = ?
             WHERE id = ?
         """, (end_time_utc.isoformat(), total_hours, total_cost, late_fee,
-              condition_before, condition_after, rental_id))
+              condition_before, condition_after,
+              session["user_id"], end_station_id,
+              rental_id))
+
+        # Bicycle becomes available AND moves to the return station
+        if end_station_id:
+            execute_query(c, """
+                UPDATE bicycles
+                SET status = 'Available',
+                    current_station_id = ?
+                WHERE id = ?
+            """, (end_station_id, rental["bicycle_id"]))
+        else:
+            execute_query(c, """
+                UPDATE bicycles SET status = 'Available' WHERE id = ?
+            """, (rental["bicycle_id"],))
+
         
-        execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
+        # execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
         
         conn.commit()
         conn.close()
@@ -6379,6 +6566,21 @@ def end_rental(rental_id):
     end_time_local = local_now
     end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
     
+    stations = execute_query(c, """
+        SELECT id, name, location FROM branches
+        WHERE is_active = 1
+        ORDER BY name
+    """).fetchall()
+
+    # Default return station = the one it started at
+    default_return_station_id = rental.get("start_station_id")
+    if not default_return_station_id:
+        default_return_station_id = session.get("station_id")
+    if not default_return_station_id and stations:
+        default_return_station_id = stations[0]["id"]
+
+
+
     conn.close()
     
     return render_template(
@@ -6395,7 +6597,9 @@ def end_rental(rental_id):
         preview_late=preview_late,
         preview_total=preview_total,
         deposit_paid=deposit_paid,
-        preview_change=preview_change
+        preview_change=preview_change,
+        stations=stations,
+        default_return_station_id=default_return_station_id        
     )
 
 
@@ -6455,14 +6659,22 @@ def cancel_rental(rental_id):
     else:
         combined_notes = cancel_note
 
+    # execute_query(c, """
+    #     UPDATE daily_rentals
+    #     SET status = 'Cancelled',
+    #         notes = ?,
+    #         actual_return_time = CURRENT_TIMESTAMP
+    #     WHERE id = ?
+    # """, (combined_notes, rental_id))
     execute_query(c, """
         UPDATE daily_rentals
         SET status = 'Cancelled',
             notes = ?,
-            actual_return_time = CURRENT_TIMESTAMP
+            actual_return_time = CURRENT_TIMESTAMP,
+            cancelled_by_user_id = ?
         WHERE id = ?
-    """, (combined_notes, rental_id))
-
+    """, (combined_notes, session["user_id"], rental_id))
+    
     # 6. Free the bicycle
     execute_query(c, """
         UPDATE bicycles SET status = 'Available' WHERE id = ?
@@ -6556,8 +6768,8 @@ def backup_uploads():
         mimetype="application/zip"
     )
 
+
 if __name__ == "__main__":
     init_db()
-    # Only enable debug locally. On Render, gunicorn never hits this block.
-    _debug = os.environ.get("FLASK_DEBUG") == "1"
-    app.run(debug=_debug, port=int(os.environ.get("PORT", 5001)))
+    # Local development: debug on. On Render, gunicorn never reaches this block.
+    app.run(debug=True, port=int(os.environ.get("PORT", 5001)))

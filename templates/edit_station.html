@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit Station</h1>
+<p class="sub">{{ station.name }}</p>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Station Name *
+                <input type="text" name="name" value="{{ station.name }}" required>
+            </label>
+            <label>
+                Location
+                <input type="text" name="location" value="{{ station.location or '' }}">
+            </label>
+            <label>
+                Address
+                <input type="text" name="address" value="{{ station.address or '' }}">
+            </label>
+            <label>
+                Phone
+                <input type="text" name="phone" value="{{ station.phone or '' }}">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" value="{{ station.email or '' }}">
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;padding-top:10px;">
+                <input type="checkbox" name="is_active" {% if station.is_active %}checked{% endif %}>
+                Station is active (available for rentals)
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Save Changes</button>
+            <a href="{{ url_for('stations') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

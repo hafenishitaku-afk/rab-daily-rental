@@ -105,9 +105,29 @@
     <h2>Complete Return</h2>
     <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- <form method="post"> -->
+        <label style="display:block;margin-bottom:15px;">
+            Return Station
+            <select name="end_station_id" required>
+                <option value="">Select Station</option>
+                {% for s in stations %}
+                <option value="{{ s.id }}" {% if default_return_station_id|string == s.id|string %}selected{% endif %}>
+                    {{ s.name }}{% if s.location %} — {{ s.location }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <small style="color:#667085;display:block;margin-top:4px;">
+                📍 Where is the bicycle being dropped off?
+            </small>
+        </label>
         <div class="formgrid">
             <label>
                 Condition Before
+
+        <!-- <div class="formgrid">
+            <label>
+                Condition Before -->
                 <select name="condition_before">
                     <option value="Excellent">Excellent</option>
                     <option value="Good" selected>Good</option>

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🏢 Stations</h1>
+<p class="sub">Manage rental stations (pick-up and drop-off points).</p>
+
+<div class="card">
+    <h2>Add Station</h2>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Station Name *
+                <input type="text" name="name" placeholder="e.g. Main Street, Katutura, Airport" required>
+            </label>
+            <label>
+                Location
+                <input type="text" name="location" placeholder="Short description e.g. City Centre">
+            </label>
+            <label>
+                Address
+                <input type="text" name="address" placeholder="Street address">
+            </label>
+            <label>
+                Phone
+                <input type="text" name="phone" placeholder="Contact number">
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" placeholder="Station email">
+            </label>
+        </div>
+        <button class="btn yellow" style="margin-top:16px" type="submit">+ Add Station</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Station List</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Address</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Bikes Here</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            {% if stations %}
+                {% for s in stations %}
+                <tr>
+                    <td><b>{{ s.name }}</b></td>
+                    <td>{{ s.location or '—' }}</td>
+                    <td>{{ s.address or '—' }}</td>
+                    <td>{{ s.phone or '—' }}</td>
+                    <td>{{ s.email or '—' }}</td>
+                    <td>
+                        <span class="badge blue">{{ s.bike_count or 0 }}</span>
+                    </td>
+                    <td>
+                        <span class="badge {% if s.is_active %}green{% else %}orange{% endif %}">
+                            {{ 'Active' if s.is_active else 'Inactive' }}
+                        </span>
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                            <a class="btn small" href="{{ url_for('edit_station', station_id=s.id) }}">✏️ Edit</a>
+                            <form method="post" 
+                                  action="{{ url_for('delete_station', station_id=s.id) }}" 
+                                  style="display:inline;"
+                                  onsubmit="return confirm('Delete station {{ s.name }}? This cannot be undone.');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#667085;padding:20px;">
+                        No stations yet. Add your first station above.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

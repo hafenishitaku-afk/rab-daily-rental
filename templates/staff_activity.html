@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🧾 Staff Activity</h1>
+<p class="sub">Who started, ended, or cancelled each rental — and where.</p>
+
+<!-- Filters -->
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+        <h2 style="margin:0;">Filter Activity</h2>
+    </div>
+
+    <form method="get" action="{{ url_for('staff_activity') }}" 
+          style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+        <label style="flex:1;min-width:160px;">
+            Search by date from
+            <input type="date" name="date_from" value="{{ date_from or '' }}">
+        </label>
+        <label style="flex:1;min-width:160px;">
+            Date to
+            <input type="date" name="date_to" value="{{ date_to or '' }}">
+        </label>
+        <label style="flex:1;min-width:180px;">
+            Staff member
+            <select name="staff_id">
+                <option value="">All staff</option>
+                {% for s in staff_list %}
+                <option value="{{ s.id }}" {% if staff_id|string == s.id|string %}selected{% endif %}>
+                    {{ s.full_name or s.username }} ({{ s.username }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label style="flex:1;min-width:160px;">
+            Station
+            <select name="station_id">
+                <option value="">All stations</option>
+                {% for st in station_list %}
+                <option value="{{ st.id }}" {% if station_id|string == st.id|string %}selected{% endif %}>
+                    {{ st.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label style="flex:1;min-width:140px;">
+            Action
+            <select name="action">
+                <option value="">Any</option>
+                <option value="started" {% if action == 'started' %}selected{% endif %}>Started</option>
+                <option value="ended" {% if action == 'ended' %}selected{% endif %}>Ended</option>
+                <option value="cancelled" {% if action == 'cancelled' %}selected{% endif %}>Cancelled</option>
+            </select>
+        </label>
+
+        <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn yellow">🔍 Filter</button>
+            <a href="{{ url_for('staff_activity') }}" class="btn">Clear</a>
+        </div>
+    </form>
+</div>
+
+<!-- Results -->
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <h2 style="margin:0;">Results</h2>
+        <span class="sub" style="margin:0;">{{ rentals|length }} record(s) shown (max 500)</span>
+    </div>
+
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Rental</th>
+                <th>Customer</th>
+                <th>Bike</th>
+                <th>Started By</th>
+                <th>Start Time</th>
+                <th>Start Station</th>
+                <th>Ended By</th>
+                <th>End Time</th>
+                <th>End Station</th>
+                <th>Status</th>
+            </tr>
+            {% if rentals %}
+                {% for r in rentals %}
+                <tr>
+                    <td><b>#{{ r.id }}</b></td>
+                    <td>{{ r.customer_name or '—' }}</td>
+                    <td>{{ r.bike_code or '—' }}</td>
+
+                    <td>
+                        {% if r.started_by %}
+                            <b>{{ r.started_by_name or r.started_by }}</b>
+                            <br><small style="color:#667085;">{{ r.started_by }}</small>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.start_time or '—' }}</td>
+                    <td>
+                        {% if r.start_station %}
+                            <span class="badge blue">{{ r.start_station }}</span>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if r.ended_by %}
+                            <b>{{ r.ended_by_name or r.ended_by }}</b>
+                            <br><small style="color:#667085;">{{ r.ended_by }}</small>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.end_time or '—' }}</td>
+                    <td>
+                        {% if r.end_station %}
+                            <span class="badge blue">{{ r.end_station }}</span>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <span class="badge
+                            {% if r.status == 'Active' %}blue
+                            {% elif r.status == 'Cancelled' %}red
+                            {% else %}green{% endif %}">
+                            {{ r.status }}
+                        </span>
+                        {% if r.cancelled_by %}
+                            <br><small style="color:#dc3545;">by {{ r.cancelled_by_name or r.cancelled_by }}</small>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="10" style="text-align:center;color:#667085;padding:20px;">
+                        No activity records match your filters.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('staff_activity') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}
