@@ -324,27 +324,6 @@ limiter = Limiter(
     headers_enabled=True,
 )
 
-# 3. HTTP security headers + forced HTTPS (production only)
-# Talisman(
-#     app,
-#     force_https=_is_prod,
-#     force_https_permanent=_is_prod,
-#     strict_transport_security=_is_prod,
-#     strict_transport_security_max_age=31536000 if _is_prod else 0,
-#     session_cookie_secure=_is_prod,
-#     session_cookie_http_only=True,
-#     frame_options="DENY",
-#     content_security_policy={
-#         "default-src": "'self'",
-#         "script-src": "'self' 'unsafe-inline'",
-#         "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
-#         "font-src": "'self' https://fonts.gstatic.com",
-#         "img-src": "'self' data: https:",
-#         "frame-ancestors": "'none'",
-#     },
-#     content_security_policy_report_only=False,
-# )
-
 Talisman(
     app,
     force_https=_is_prod,
