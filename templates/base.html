@@ -7,6 +7,67 @@
     <title>{{ title or "RAB Daily Rental" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
+{% if session.get('user_id') %}
+<script>
+// =============================================
+// SESSION IDLE TIMER — shows warning before timeout
+// =============================================
+(function() {
+    var role = "{{ session.get('role', 'staff') }}";
+    var limits = {
+        admin: 15,
+        manager: 30,
+        staff: 30,
+        customer: 60
+    };
+    var idleMinutes = limits[role] || 30;
+    var warnSeconds = 120; // 2 minutes before timeout
+    var totalMs = idleMinutes * 60 * 1000;
+    var warnMs = (idleMinutes * 60 - warnSeconds) * 1000;
+
+    var lastActivity = Date.now();
+    var warned = false;
+    var banner = null;
+
+    function ensureBanner() {
+        if (banner) return banner;
+        banner = document.createElement('div');
+        banner.id = 'session-warn-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#fff8e1;color:#a66300;' +
+            'padding:10px 20px;text-align:center;font-size:14px;font-weight:600;z-index:99999;' +
+            'border-bottom:2px solid #ffd700;display:none;';
+        document.body.appendChild(banner);
+        return banner;
+    }
+
+    function resetTimer() {
+        lastActivity = Date.now();
+        if (warned) {
+            warned = false;
+            ensureBanner().style.display = 'none';
+        }
+    }
+
+    // Reset on any user interaction
+    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(function(ev) {
+        document.addEventListener(ev, resetTimer, { passive: true });
+    });
+
+    setInterval(function() {
+        var idle = Date.now() - lastActivity;
+        if (idle > warnMs && idle < totalMs && !warned) {
+            warned = true;
+            var secondsLeft = Math.round((totalMs - idle) / 1000);
+            var b = ensureBanner();
+            b.textContent = '⏰ You will be logged out in ' + secondsLeft + ' seconds due to inactivity. Move your mouse to stay signed in.';
+            b.style.display = 'block';
+        }
+    }, 5000);
+})();
+</script>
+{% endif %}
+
 <body>
     {% if session.get('user_id') %}
     <header class="top">

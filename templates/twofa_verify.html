@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="max-width:500px;margin:0 auto;">
+<h1>🔐 Two-Factor Verification</h1>
+<p class="sub">Enter the 6-digit code from your authenticator app.</p>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+            Code
+            <input type="text" name="code" inputmode="numeric"
+                   autocomplete="one-time-code" placeholder="000000" required autofocus
+                   style="font-size:24px;letter-spacing:10px;text-align:center;font-family:monospace;">
+        </label>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" class="btn yellow">✅ Verify</button>
+            <a href="{{ url_for('logout') }}" class="btn">Log out</a>
+        </div>
+    </form>
+    <p style="color:#667085;font-size:12px;margin-top:15px;text-align:center;">
+        Lost your device? Enter a backup code instead (format XXXX-XXXX-XXXX).
+    </p>
+</div>
+</div>
+
+{% endblock %}

@@ -301,3 +301,9 @@ footer {
     gap: 5px;
     flex-wrap: wrap;
 }
+
+.flash.warning {
+    background: #fff8e1;
+    border: 1px solid #ffd700;
+    color: #a66300;
+}

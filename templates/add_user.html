@@ -13,10 +13,21 @@
                 Username *
                 <input type="text" name="username" required>
             </label>
-            <label>
+            <!-- <label>
                 Password *
                 <input type="password" name="password" required>
+            </label> -->
+
+            <label>
+                Password *
+                <input type="password" name="password" required minlength="10"
+                       title="At least 10 characters, with a letter, a number, and a special character">
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    🔒 At least 10 characters, with a letter, a number, and a special character.
+                </small>
             </label>
+
+
             <label>
                 Full Name
                 <input type="text" name="full_name">

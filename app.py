@@ -180,6 +180,103 @@ if not _secret_key:
 app.secret_key = _secret_key
 
 
+@app.before_request
+def _enforce_idle_timeout():
+    """
+    Force-logout users who have been idle too long.
+    Runs on every request before the view function.
+    """
+    from datetime import datetime, timezone
+
+    # Skip static files and the login/logout routes themselves
+    path = request.path or ""
+    if path.startswith("/static/") or path in ("/login", "/customer-login", "/logout"):
+        return
+
+    # Only run if the user is logged in
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+
+    role = session.get("role", "staff")
+    idle_limit = _role_idle_seconds(role)
+
+    now = datetime.now(timezone.utc).timestamp()
+    last = session.get("last_activity")
+
+    if last is None:
+        # First request after login — initialize
+        session["last_activity"] = now
+        return
+
+    idle_seconds = now - last
+
+    if idle_seconds > idle_limit:
+        # Log the timeout
+        try:
+            log_audit(
+                action="session_timeout",
+                entity_type="user",
+                entity_id=user_id,
+                details=f"Idle timeout after {int(idle_seconds // 60)} minutes (limit: {idle_limit // 60} min)"
+            )
+        except Exception as e:
+            print(f"⚠️ session_timeout log failed: {e}")
+
+        session.clear()
+        flash("You have been logged out due to inactivity. Please log in again.", "warning")
+        return redirect(url_for("login"))
+
+    # Update last_activity on every active request
+    session["last_activity"] = now
+    session.modified = True
+
+
+
+
+@app.before_request
+def _enforce_2fa_setup():
+    """
+    If the logged-in user requires 2FA but hasn't set it up, force them to /2fa/setup.
+    Skips: static, login, logout, 2fa routes, 2fa verify, and profile (so they can still log out).
+    """
+    path = request.path or ""
+    if path.startswith("/static/") or path.startswith("/2fa/"):
+        return
+    if path in ("/login", "/customer-login", "/logout"):
+        return
+
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+
+    # Already passed the 2FA gate this session?
+    if session.get("twofa_verified"):
+        return
+
+    # Fetch user's 2FA status (lightweight check)
+    try:
+        conn = db()
+        c = conn.cursor()
+        user = execute_query(c, """
+            SELECT id, role, twofa_required, twofa_enabled FROM users WHERE id = ?
+        """, (user_id,)).fetchone()
+        conn.close()
+    except Exception:
+        return
+
+    if not user:
+        return
+
+    # If 2FA required but not enabled → force setup
+    if user_needs_2fa_setup(user):
+        flash("You must enable two-factor authentication before continuing.", "warning")
+        return redirect(url_for("twofa_setup"))
+
+    # If 2FA enabled but not yet verified this session → require verification
+    if user.get("twofa_enabled") and not session.get("twofa_verified"):
+        return redirect(url_for("twofa_verify"))
+
 # =============================================
 # BACKGROUND SCHEDULER (retention cleanup)
 # =============================================
@@ -228,22 +325,49 @@ limiter = Limiter(
 )
 
 # 3. HTTP security headers + forced HTTPS (production only)
+# Talisman(
+#     app,
+#     force_https=_is_prod,
+#     force_https_permanent=_is_prod,
+#     strict_transport_security=_is_prod,
+#     strict_transport_security_max_age=31536000 if _is_prod else 0,
+#     session_cookie_secure=_is_prod,
+#     session_cookie_http_only=True,
+#     frame_options="DENY",
+#     content_security_policy={
+#         "default-src": "'self'",
+#         "script-src": "'self' 'unsafe-inline'",
+#         "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+#         "font-src": "'self' https://fonts.gstatic.com",
+#         "img-src": "'self' data: https:",
+#         "frame-ancestors": "'none'",
+#     },
+#     content_security_policy_report_only=False,
+# )
+
 Talisman(
     app,
     force_https=_is_prod,
     force_https_permanent=_is_prod,
     strict_transport_security=_is_prod,
     strict_transport_security_max_age=31536000 if _is_prod else 0,
+    strict_transport_security_include_subdomains=False,
+    strict_transport_security_preload=False,
     session_cookie_secure=_is_prod,
     session_cookie_http_only=True,
     frame_options="DENY",
+    referrer_policy="strict-origin-when-cross-origin",
     content_security_policy={
         "default-src": "'self'",
-        "script-src": "'self' 'unsafe-inline'",
-        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
-        "font-src": "'self' https://fonts.gstatic.com",
-        "img-src": "'self' data: https:",
+        "script-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self'",
+        "img-src": "'self' data: https://res.cloudinary.com",
+        "connect-src": "'self'",
         "frame-ancestors": "'none'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'self'",
     },
     content_security_policy_report_only=False,
 )
@@ -275,6 +399,127 @@ os.makedirs(PRIVATE_UPLOAD_FOLDER, exist_ok=True)
 
 # File validation constants
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
+
+# =============================================
+# PASSWORD POLICY
+# =============================================
+import re as _re
+
+# Common weak passwords to reject (lowercase)
+# _COMMON_PASSWORDS = {
+#     "password", "password1", "password123", "123456", "12345678", "123456789",
+#     "qwerty", "qwerty123", "abc123", "letmein", "welcome", "admin", "admin123",
+#     "administrator", "root", "toor", "pass", "pass123", "changeme", "iloveyou",
+#     "monkey", "dragon", "sunshine", "princess", "football", "baseball",
+#     "rab123", "rab12345", "rabrate123", "rent123", "bike123",
+# }
+
+_COMMON_PASSWORDS = {
+    # Top 50 leaked passwords (compiled from HaveIBeenPwned / NCSC)
+    "password", "passw0rd", "password1", "password12", "password123", "password1234",
+    "123456", "1234567", "12345678", "123456789", "1234567890",
+    "qwerty", "qwerty123", "qwertyuiop", "azerty", "123qwe",
+    "abc123", "letmein", "welcome", "welcome1", "welcome123",
+    "admin", "admin123", "administrator", "root", "toor",
+    "pass", "pass123", "changeme", "iloveyou", "monkey",
+    "dragon", "sunshine", "princess", "football", "baseball",
+    "123123", "qwe123", "1q2w3e4r", "zxcvbnm", "asdfghjkl",
+    "trustno1", "starwars", "whatever", "freedom", "hunter",
+    # Project-specific
+    "rab123", "rab12345", "rabrate123", "rent123", "bike123",
+    "rabrental", "rabrentals", "rab-bike", "rabbike",
+    "windhoek", "namibia",
+}
+
+def validate_password_strength(password):
+    """
+    Check a password against the policy (Q1 — Strong).
+    Returns (ok: bool, error_message: str or None)
+    """
+    if not password:
+        return False, "Password is required."
+
+    if password != password.strip():
+        return False, "Password cannot start or end with a space."
+
+    if len(password) < 10:
+        return False, "Password must be at least 10 characters long."
+
+    if not _re.search(r"[A-Za-z]", password):
+        return False, "Password must contain at least one letter."
+
+    if not _re.search(r"\d", password):
+        return False, "Password must contain at least one number."
+
+    if not _re.search(r"[^A-Za-z0-9]", password):
+        return False, "Password must contain at least one special character (e.g. ! @ # $ %)."
+
+    # ✅ Substring check with normalization (defeats common bypass tricks)
+    lower = password.lower()
+    normalized = (
+        lower
+        .replace("@", "a")
+        .replace("0", "o")
+        .replace("1", "i")
+        .replace("3", "e")
+        .replace("5", "s")
+        .replace("$", "s")
+        .replace("!", "i")
+    )
+
+    for common in _COMMON_PASSWORDS:
+        if common in normalized:
+            return False, "This password contains a common word. Please choose something less predictable."
+
+    return True, None
+
+
+
+# def validate_password_strength(password):
+#     """
+#     Check a password against the policy (Q1 — Strong).
+#     Returns (ok: bool, error_message: str or None)
+#     Rules:
+#       - at least 10 characters
+#       - at least one letter
+#       - at least one digit
+#       - at least one special character (! @ # $ % ^ & * etc.)
+#       - not in the common-password list
+#       - no leading/trailing whitespace
+#     """
+#     if not password:
+#         return False, "Password is required."
+
+#     if password != password.strip():
+#         return False, "Password cannot start or end with a space."
+
+#     if len(password) < 10:
+#         return False, "Password must be at least 10 characters long."
+
+#     if not _re.search(r"[A-Za-z]", password):
+#         return False, "Password must contain at least one letter."
+
+#     if not _re.search(r"\d", password):
+#         return False, "Password must contain at least one number."
+
+#     if not _re.search(r"[^A-Za-z0-9]", password):
+#         return False, "Password must contain at least one special character (e.g. ! @ # $ %)."
+
+#     # if password.lower() in _COMMON_PASSWORDS:
+#     #     return False, "This password is too common. Please choose something less predictable."
+
+#     lower = password.lower()
+#     # Strip common special-character substitutions used to bypass filters
+#     normalized = lower.replace("@", "a").replace("0", "o").replace("1", "i").replace("3", "e").replace("$", "s")
+
+#     for common in _COMMON_PASSWORDS:
+#         if common in normalized:
+#             return False, "This password contains a common word. Please choose something less predictable."
+
+
+#     return True, None
+
+
 ALLOWED_MIME_TYPES = {
     "image/jpeg", "image/jpg", "image/png",
     "application/pdf",
@@ -293,6 +538,30 @@ RETENTION = {
     "document_views_days": 90,
     "damage_claims_years": 7,         # accounting
 }
+
+# =============================================
+# SESSION IDLE TIMEOUTS (per role, in minutes)
+# =============================================
+SESSION_IDLE_MINUTES = {
+    "admin": 15,
+    "manager": 30,
+    "staff": 30,
+    "customer": 60,
+}
+SESSION_WARN_SECONDS = 120  # Show warning when this many seconds remain
+
+# =============================================
+# ACCOUNT LOCKOUT POLICY
+# =============================================
+LOCKOUT_MAX_FAILURES = 5              # Lock after this many consecutive failures
+LOCKOUT_DURATION_MINUTES = 15         # Auto-unlock after this many minutes
+
+
+def _role_idle_seconds(role):
+    """Return idle timeout in seconds for a role."""
+    minutes = SESSION_IDLE_MINUTES.get(role, 30)
+    return minutes * 60
+
 
 PRIVACY_EMAIL = "privacy@rab.com"
 
@@ -588,6 +857,145 @@ def log_login_attempt(user_id, username_attempted, success,
         print(f"⚠️ log_login_attempt failed: {e}")
 
 
+def get_lockout_status(cursor, user_id):
+    """
+    Return a dict with the lockout status of a user:
+      {
+        "locked": bool,
+        "minutes_remaining": int,
+        "failed_count": int,
+      }
+    """
+    row = execute_query(cursor, """
+        SELECT failed_count, locked_until
+        FROM login_attempts
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    if not row:
+        return {"locked": False, "minutes_remaining": 0, "failed_count": 0}
+
+    failed_count = row.get("failed_count") or 0
+    locked_until_raw = row.get("locked_until")
+
+    if not locked_until_raw:
+        return {"locked": False, "minutes_remaining": 0, "failed_count": failed_count}
+
+    from datetime import datetime, timezone, timedelta
+
+    # Parse locked_until — could be a datetime (Postgres) or string (SQLite)
+    if isinstance(locked_until_raw, datetime):
+        locked_until = locked_until_raw
+        if locked_until.tzinfo is not None:
+            locked_until = locked_until.astimezone(timezone.utc).replace(tzinfo=None)
+    else:
+        try:
+            locked_until = datetime.fromisoformat(str(locked_until_raw))
+            if locked_until.tzinfo is not None:
+                locked_until = locked_until.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception:
+            return {"locked": False, "minutes_remaining": 0, "failed_count": failed_count}
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if locked_until > now:
+        remaining = (locked_until - now).total_seconds() / 60
+        return {
+            "locked": True,
+            "minutes_remaining": max(1, int(round(remaining))),
+            "failed_count": failed_count,
+        }
+
+    # Lock has expired — clear it lazily
+    try:
+        execute_query(cursor, """
+            UPDATE login_attempts
+            SET locked_until = NULL, locked_reason = NULL, failed_count = 0
+            WHERE user_id = ?
+        """, (user_id,))
+    except Exception:
+        pass
+
+    return {"locked": False, "minutes_remaining": 0, "failed_count": failed_count}
+
+
+def record_failed_login(cursor, user_id):
+    """
+    Increment failed count for a user and lock if threshold reached.
+    Returns the new state: {"locked": bool, "minutes_remaining": int, "failed_count": int}
+    """
+    from datetime import datetime, timezone, timedelta
+
+    row = execute_query(cursor, """
+        SELECT failed_count FROM login_attempts WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    current = (row.get("failed_count") if row else 0) or 0
+    new_count = current + 1
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    locked_until = None
+    reason = None
+
+    if new_count >= LOCKOUT_MAX_FAILURES:
+        locked_until = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        reason = f"Locked after {new_count} failed attempts"
+        new_count = 0  # reset counter so it starts fresh after unlock
+
+    if row:
+        execute_query(cursor, """
+            UPDATE login_attempts
+            SET failed_count = ?, last_failed_at = ?, locked_until = ?, locked_reason = ?
+            WHERE user_id = ?
+        """, (new_count, now.isoformat(), 
+              locked_until.isoformat() if locked_until else None,
+              reason, user_id))
+    else:
+        execute_query(cursor, """
+            INSERT INTO login_attempts (user_id, failed_count, last_failed_at, locked_until, locked_reason)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, new_count, now.isoformat(),
+              locked_until.isoformat() if locked_until else None, reason))
+
+    if locked_until:
+        return {
+            "locked": True,
+            "minutes_remaining": LOCKOUT_DURATION_MINUTES,
+            "failed_count": new_count,
+        }
+
+    return {"locked": False, "minutes_remaining": 0, "failed_count": new_count}
+
+
+def reset_login_attempts(cursor, user_id):
+    """Clear failed count and lockout after a successful login."""
+    try:
+        execute_query(cursor, """
+            UPDATE login_attempts
+            SET failed_count = 0, locked_until = NULL, locked_reason = NULL
+            WHERE user_id = ?
+        """, (user_id,))
+    except Exception:
+        pass
+
+
+def unlock_user_account(user_id):
+    """Admin action: manually unlock a user and clear their failed counter."""
+    try:
+        conn = db()
+        c = conn.cursor()
+        execute_query(c, """
+            UPDATE login_attempts
+            SET failed_count = 0, locked_until = NULL, locked_reason = NULL
+            WHERE user_id = ?
+        """, (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ unlock_user_account failed: {e}")
+        return False
+
+
 def log_audit(action, entity_type=None, entity_id=None, details=None,
               user_id=None, username=None, user_role=None):
     """
@@ -706,7 +1114,23 @@ if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
     SMS_ENABLED = False  # Disable SMS if credentials missing
 
 
+# import sqlite3
 
+# conn = sqlite3.connect("rab.db")
+# c = conn.cursor()
+
+# print("=== All users ===")
+# c.execute("SELECT id, username, role, twofa_enabled, twofa_required FROM users ORDER BY id")
+# for row in c.fetchall():
+#     print(row)
+
+# print()
+# print("=== Gabriel's ID ===")
+# c.execute("SELECT id FROM users WHERE username = 'Gabriel'")
+# row = c.fetchone()
+# print(row if row else "Gabriel not found")
+
+# conn.close()
 
 
 
@@ -811,6 +1235,34 @@ def cleanup_old_logs():
                 DELETE FROM document_views 
                 WHERE viewed_at < datetime('now', '-{doc_days} days')
             """)
+
+        # Clear expired lockouts and stale failure counters
+        is_postgres = os.environ.get("DATABASE_URL") is not None
+        if is_postgres:
+            execute_query(c, """
+                UPDATE login_attempts
+                SET locked_until = NULL, locked_reason = NULL, failed_count = 0
+                WHERE locked_until IS NOT NULL AND locked_until < CURRENT_TIMESTAMP
+            """)
+            execute_query(c, """
+                DELETE FROM login_attempts
+                WHERE failed_count = 0
+                  AND locked_until IS NULL
+                  AND last_failed_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+            """)
+        else:
+            execute_query(c, """
+                UPDATE login_attempts
+                SET locked_until = NULL, locked_reason = NULL, failed_count = 0
+                WHERE locked_until IS NOT NULL AND locked_until < datetime('now')
+            """)
+            execute_query(c, """
+                DELETE FROM login_attempts
+                WHERE failed_count = 0
+                  AND locked_until IS NULL
+                  AND last_failed_at < datetime('now', '-30 days')
+            """)
+
 
         conn.commit()
         conn.close()
@@ -1954,7 +2406,36 @@ def ensure_audit_schema():
     #         print(f"⚠️ Schema bootstrap error: {e}")    
 
 
+def ensure_lockout_schema():
+    """Idempotent migration for account lockout tracking."""
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
 
+    if is_postgres:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS login_attempts(
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                failed_count INTEGER DEFAULT 0,
+                last_failed_at TIMESTAMP,
+                locked_until TIMESTAMP,
+                locked_reason TEXT
+            );
+        """)
+    else:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS login_attempts(
+                user_id INTEGER PRIMARY KEY,
+                failed_count INTEGER DEFAULT 0,
+                last_failed_at TEXT,
+                locked_until TEXT,
+                locked_reason TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+    conn.commit()
+    conn.close()
 
 @app.route("/")
 def home():
@@ -1962,24 +2443,44 @@ def home():
 
 
 @app.route("/login", methods=["GET", "POST"])
-@limiter.limit("5 per minute;20 per hour")
+@limiter.limit("50 per minute;200 per hour")
 def login():
     if request.method == "POST":
         conn = db()
         c = conn.cursor()
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        
+
         user = execute_query(c,
-            "SELECT * FROM users WHERE username = ?", 
+            "SELECT * FROM users WHERE username = ?",
             (username,)
         ).fetchone()
-        
-        
+
+        # ✅ Check lockout status BEFORE verifying password
+        if user:
+            lockout = get_lockout_status(c, user["id"])
+            if lockout["locked"]:
+                log_login_attempt(
+                    user_id=user["id"],
+                    username_attempted=username,
+                    success=False,
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent"),
+                    failure_reason=f"Account locked ({lockout['minutes_remaining']} min remaining)"
+                )
+                conn.close()
+                flash(
+                    f"Account is locked due to too many failed attempts. "
+                    f"Try again in {lockout['minutes_remaining']} minute(s).",
+                    "danger"
+                )
+                return render_template("login.html", title="Login - Daily Rentals")
+
+        # ✅ Successful login path
         if user and check_password_hash(user["password_hash"], password):
+            from datetime import datetime, timezone
+            session["last_activity"] = datetime.now(timezone.utc).timestamp()
 
-
-            # ✅ Log the successful login
             log_login_attempt(
                 user_id=user["id"],
                 username_attempted=username,
@@ -1987,8 +2488,6 @@ def login():
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get("User-Agent"),
             )
-                        # ✅ Fire alerts if suspicious
-            check_suspicious_login(user, request.remote_addr, request.headers.get("User-Agent"))
             log_audit(
                 action="login_success",
                 entity_type="user",
@@ -1998,41 +2497,54 @@ def login():
                 username=user["username"],
                 user_role=user["role"],
             )
+            check_suspicious_login(user, request.remote_addr, request.headers.get("User-Agent"))
+            reset_login_attempts(c, user["id"])
 
+            # ✅ Auto-upgrade old password hashes to the current scheme
+            if maybe_rehash_password(c, user["id"], user["password_hash"], password):
+                log_audit(
+                    action="password_rehash",
+                    entity_type="user",
+                    entity_id=user["id"],
+                    details="Upgraded password hash to current scheme",
+                )
 
-            # ✅ Check if user is customer - redirect to customer portal
+            conn.commit()
+            conn.close()
+
+            # Customer users go to their portal
             if user["role"] == "customer":
                 session["user_id"] = user["id"]
                 session["username"] = user["username"]
                 session["role"] = user["role"]
                 session["full_name"] = user["full_name"]
-                session["station_id"] = user.get("branch_id")                
-                
-                # Get customer ID
-                conn = db()
-                c = conn.cursor()
-                customer = execute_query(c,
-                    "SELECT id FROM customers WHERE user_id = ?", 
+                session["twofa_verified"] = False   # ← force 2FA check on next request
+
+                conn2 = db()
+                c2 = conn2.cursor()
+                customer = execute_query(c2,
+                    "SELECT id FROM customers WHERE user_id = ?",
                     (user["id"],)
                 ).fetchone()
-                conn.close()
-                
+                conn2.close()
+
                 if customer:
                     session["customer_id"] = customer["id"]
-                
+
                 flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
                 return redirect(url_for("customer_portal"))
-            
-            # Staff user
+
+            # Staff / manager / admin
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["role"] = user["role"]
             session["full_name"] = user["full_name"]
-            
+            session["station_id"] = user.get("branch_id")
+
             flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
             return redirect(url_for("dashboard"))
 
-        # ✅ Log the failed login
+        # ✅ Failed login path — runs ONCE
         log_login_attempt(
             user_id=user["id"] if user else None,
             username_attempted=username,
@@ -2042,261 +2554,168 @@ def login():
             failure_reason="Invalid credentials",
         )
 
-        flash("Invalid username or password.", "danger")
+        if user:
+            result = record_failed_login(c, user["id"])
+            conn.commit()
+            if result["locked"]:
+                log_audit(
+                    action="account_locked",
+                    entity_type="user",
+                    entity_id=user["id"],
+                    details=f"Account locked for {LOCKOUT_DURATION_MINUTES} min after {LOCKOUT_MAX_FAILURES} failed attempts"
+                )
+                flash(
+                    f"Too many failed attempts. Your account is locked for "
+                    f"{LOCKOUT_DURATION_MINUTES} minutes.",
+                    "danger"
+                )
+            else:
+                remaining = LOCKOUT_MAX_FAILURES - result["failed_count"]
+                flash(
+                    f"Invalid username or password. "
+                    f"{remaining} attempt(s) left before lockout.",
+                    "danger"
+                )
+        else:
+            flash("Invalid username or password.", "danger")
 
+        conn.close()
+        return render_template("login.html", title="Login - Daily Rentals")
+
+    # GET
     return render_template("login.html", title="Login - Daily Rentals")
 
-# @app.route("/login-history")
-# @login_required
-# @manager_required
-# def login_history():
-#     """Admin/Manager: view all login attempts."""
-#     from datetime import datetime, timedelta
-
-#     conn = db()
-#     c = conn.cursor()
-
-#     # Filters
-#     date_from = (request.args.get("date_from") or "").strip()
-#     date_to = (request.args.get("date_to") or "").strip()
-#     user_filter = (request.args.get("user_filter") or "").strip()
-#     status_filter = (request.args.get("status_filter") or "").strip()
-#     page = int(request.args.get("page", 1))
-#     per_page = 50
-#     offset = (page - 1) * per_page
-
-#     query = """
-#         SELECT 
-#             lh.*,
-#             u.username AS user_username,
-#             u.full_name AS user_full_name,
-#             u.role AS user_role
-#         FROM login_history lh
-#         LEFT JOIN users u ON u.id = lh.user_id
-#         WHERE 1=1
-#     """
-#     params = []
-
-#     if date_from:
-#         query += " AND date(lh.created_at) >= ?"
-#         params.append(date_from)
-#     if date_to:
-#         query += " AND date(lh.created_at) <= ?"
-#         params.append(date_to)
-#     if user_filter:
-#         query += " AND (lh.username_attempted LIKE ? OR u.username LIKE ?)"
-#         like = f"%{user_filter}%"
-#         params.extend([like, like])
-#     if status_filter == "success":
-#         query += " AND lh.success = 1"
-#     elif status_filter == "failed":
-#         query += " AND lh.success = 0"
-
-#     # Get total count for pagination
-#     count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
-#     total_count = get_single_value(c, count_query, params)
-
-#     query += " ORDER BY lh.created_at DESC LIMIT ? OFFSET ?"
-#     params.extend([per_page, offset])
-
-#     entries = execute_query(c, query, params).fetchall()
-
-#     # Convert UTC → Namibia local time for display
-#     for e in entries:
-#         if e.get("created_at"):
-#             e["created_at_display"] = to_namibia_time(e["created_at"])
-#         else:
-#             e["created_at_display"] = "—"
-
-#         # IP masking — admin sees full, manager sees masked
-#         if session.get("role") == "admin":
-#             e["ip_display"] = e.get("ip_address") or "—"
-#         else:
-#             e["ip_display"] = mask_ip(e.get("ip_address"))
-
-#     # Stats
-#     total_attempts = get_single_value(c, "SELECT COUNT(*) FROM login_history")
-#     total_success = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 1")
-#     total_failed = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 0")
-
-#     # Failed in last hour
-#     if os.environ.get("DATABASE_URL"):
-#         failed_last_hour = get_single_value(c, """
-#             SELECT COUNT(*) FROM login_history
-#             WHERE success = 0 AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
-#         """)
-#     else:
-#         failed_last_hour = get_single_value(c, """
-#             SELECT COUNT(*) FROM login_history
-#             WHERE success = 0 AND created_at >= datetime('now', '-1 hour')
-#         """)
-
-#     total_pages = max(1, (total_count + per_page - 1) // per_page)
-
-#     conn.close()
-
-#     return render_template(
-#         "login_history.html",
-#         title="Login History",
-#         entries=entries,
-#         total_attempts=total_attempts,
-#         total_success=total_success,
-#         total_failed=total_failed,
-#         failed_last_hour=failed_last_hour,
-#         date_from=date_from,
-#         date_to=date_to,
-#         user_filter=user_filter,
-#         status_filter=status_filter,
-#         page=page,
-#         total_pages=total_pages,
-#     )
-
-
-# @app.route("/audit-log")
-# @login_required
-# @admin_required
-# def audit_log_page():
-#     """Admin only: view general audit log."""
-#     conn = db()
-#     c = conn.cursor()
-
-#     # Filters
-#     date_from = (request.args.get("date_from") or "").strip()
-#     date_to = (request.args.get("date_to") or "").strip()
-#     user_filter = (request.args.get("user_filter") or "").strip()
-#     action_filter = (request.args.get("action_filter") or "").strip()
-#     entity_filter = (request.args.get("entity_filter") or "").strip()
-#     page = int(request.args.get("page", 1))
-#     per_page = 100
-#     offset = (page - 1) * per_page
-
-#     query = "SELECT * FROM audit_log WHERE 1=1"
-#     params = []
-
-#     if date_from:
-#         query += " AND date(created_at) >= ?"
-#         params.append(date_from)
-#     if date_to:
-#         query += " AND date(created_at) <= ?"
-#         params.append(date_to)
-#     if user_filter:
-#         query += " AND (username LIKE ? OR user_role LIKE ?)"
-#         like = f"%{user_filter}%"
-#         params.extend([like, like])
-#     if action_filter:
-#         query += " AND action = ?"
-#         params.append(action_filter)
-#     if entity_filter:
-#         query += " AND entity_type = ?"
-#         params.append(entity_filter)
-
-#     # Count for pagination
-#     count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
-#     total_count = get_single_value(c, count_query, params)
-
-#     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-#     params.extend([per_page, offset])
-
-#     entries = execute_query(c, query, params).fetchall()
-
-#     # Convert UTC → Namibia local time
-#     for e in entries:
-#         if e.get("created_at"):
-#             e["created_at_display"] = to_namibia_time(e["created_at"])
-#         else:
-#             e["created_at_display"] = "—"
-#         if session.get("role") == "admin":
-#             e["ip_display"] = e.get("ip_address") or "—"
-#         else:
-#             e["ip_display"] = mask_ip(e.get("ip_address"))
-
-#     # Get the list of distinct actions for the filter dropdown
-#     actions = execute_query(c, """
-#         SELECT DISTINCT action FROM audit_log ORDER BY action
-#     """).fetchall()
-#     action_list = [a["action"] if isinstance(a, dict) else a[0] for a in actions]
-
-#     # Distinct entity types
-#     entities = execute_query(c, """
-#         SELECT DISTINCT entity_type FROM audit_log 
-#         WHERE entity_type IS NOT NULL ORDER BY entity_type
-#     """).fetchall()
-#     entity_list = [a["entity_type"] if isinstance(a, dict) else a[0] for a in entities]
-
-#     total_pages = max(1, (total_count + per_page - 1) // per_page)
-#     conn.close()
-
-#     return render_template(
-#         "audit_log.html",
-#         title="Audit Log",
-#         entries=entries,
-#         action_list=action_list,
-#         entity_list=entity_list,
-#         date_from=date_from,
-#         date_to=date_to,
-#         user_filter=user_filter,
-#         action_filter=action_filter,
-#         entity_filter=entity_filter,
-#         page=page,
-#         total_pages=total_pages,
-#     )
-
-# @app.route("/admin/run-cleanup", methods=["POST"])
-# @login_required
-# @admin_required
-# def admin_run_cleanup():
-#     """Manually trigger the retention cleanup."""
-#     cleanup_old_logs()
-#     log_audit(
-#         action="run_cleanup",
-#         entity_type="system",
-#         details="Manual retention cleanup executed",
-#     )
-#     flash("Retention cleanup completed. Old logs purged.", "success")
-#     return redirect(url_for("audit_log_page"))
-
-
 @app.route("/customer-login", methods=["GET", "POST"])
-@limiter.limit("5 per minute;20 per hour")
+@limiter.limit("50 per minute;200 per hour")
 def customer_login():
     """Customer login page."""
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        
+
         conn = db()
         c = conn.cursor()
-        
+
         user = execute_query(c,
-            "SELECT * FROM users WHERE username = ? AND role = 'customer'", 
+            "SELECT * FROM users WHERE username = ? AND role = 'customer'",
             (username,)
         ).fetchone()
-        conn.close()
-        
+
+        # ✅ Check lockout status BEFORE verifying password
+        if user:
+            lockout = get_lockout_status(c, user["id"])
+            if lockout["locked"]:
+                log_login_attempt(
+                    user_id=user["id"],
+                    username_attempted=username,
+                    success=False,
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent"),
+                    failure_reason=f"Account locked ({lockout['minutes_remaining']} min remaining)"
+                )
+                conn.close()
+                flash(
+                    f"Account is locked due to too many failed attempts. "
+                    f"Try again in {lockout['minutes_remaining']} minute(s).",
+                    "danger"
+                )
+                return render_template("customer_login.html", title="Customer Login")
+
+        # ✅ Successful login
         if user and check_password_hash(user["password_hash"], password):
+            from datetime import datetime, timezone
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["role"] = user["role"]
             session["full_name"] = user["full_name"]
-            
+            session["last_activity"] = datetime.now(timezone.utc).timestamp()
+            session["twofa_verified"] = False   # ← force 2FA check on next request
+
+            log_login_attempt(
+                user_id=user["id"],
+                username_attempted=username,
+                success=True,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+            log_audit(
+                action="login_success",
+                entity_type="user",
+                entity_id=user["id"],
+                details=f"Customer {username} logged in",
+                user_id=user["id"],
+                username=user["username"],
+                user_role=user["role"],
+            )
+
+            reset_login_attempts(c, user["id"])
+
+            if maybe_rehash_password(c, user["id"], user["password_hash"], password):
+                log_audit(
+                    action="password_rehash",
+                    entity_type="user",
+                    entity_id=user["id"],
+                    details="Upgraded customer password hash to current scheme",
+                )
+
+            conn.commit()
+
             # Get customer ID
-            conn = db()
-            c = conn.cursor()
             customer = execute_query(c,
-                "SELECT id FROM customers WHERE user_id = ?", 
+                "SELECT id FROM customers WHERE user_id = ?",
                 (user["id"],)
             ).fetchone()
             conn.close()
-            
+
             if customer:
                 session["customer_id"] = customer["id"]
-            
-            flash(f"Welcome back, {user['full_name']}!", "success")
+
+            flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
             return redirect(url_for("customer_portal"))
-        
-        flash("Invalid username or password.", "danger")
-    
+
+        # ✅ Failed login — runs ONCE
+        log_login_attempt(
+            user_id=user["id"] if user else None,
+            username_attempted=username,
+            success=False,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+            failure_reason="Invalid credentials",
+        )
+
+        if user:
+            result = record_failed_login(c, user["id"])
+            conn.commit()
+            if result["locked"]:
+                log_audit(
+                    action="account_locked",
+                    entity_type="user",
+                    entity_id=user["id"],
+                    details=f"Account locked for {LOCKOUT_DURATION_MINUTES} min after {LOCKOUT_MAX_FAILURES} failed attempts"
+                )
+                flash(
+                    f"Too many failed attempts. Your account is locked for "
+                    f"{LOCKOUT_DURATION_MINUTES} minutes.",
+                    "danger"
+                )
+            else:
+                remaining = LOCKOUT_MAX_FAILURES - result["failed_count"]
+                flash(
+                    f"Invalid username or password. "
+                    f"{remaining} attempt(s) left before lockout.",
+                    "danger"
+                )
+        else:
+            flash("Invalid username or password.", "danger")
+
+        conn.close()
+        return render_template("customer_login.html", title="Customer Login")
+
+    # GET
     return render_template("customer_login.html", title="Customer Login")
+
+
+
 
 
 
@@ -2576,7 +2995,152 @@ def ensure_privacy_schema():
     conn.commit()
     conn.close()
 
+def ensure_2fa_schema():
+    """Idempotent migration for 2FA."""
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
 
+    if is_postgres:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS user_2fa(
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                secret TEXT NOT NULL,
+                enabled INTEGER DEFAULT 0,
+                confirmed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS user_2fa_backup_codes(
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash TEXT NOT NULL,
+                used_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        # Add columns to users if missing
+        execute_query(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_required INTEGER DEFAULT 0;")
+        execute_query(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_enabled INTEGER DEFAULT 0;")
+    else:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS user_2fa(
+                user_id INTEGER PRIMARY KEY,
+                secret TEXT NOT NULL,
+                enabled INTEGER DEFAULT 0,
+                confirmed_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS user_2fa_backup_codes(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                code_hash TEXT NOT NULL,
+                used_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+        # SQLite: add columns only if missing
+        def _add_col_if_missing(table, column, coltype):
+            rows = execute_query(c, f"PRAGMA table_info({table})").fetchall()
+            names = []
+            for row in rows:
+                names.append(row.get("name") if isinstance(row, dict) else row[1])
+            if column not in names:
+                execute_query(c, f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+        _add_col_if_missing("users", "twofa_required", "INTEGER DEFAULT 0")
+        _add_col_if_missing("users", "twofa_enabled", "INTEGER DEFAULT 0")
+
+    conn.commit()
+    conn.close()
+
+def backfill_2fa_required():
+    """Set twofa_required=1 for all admin and manager users."""
+    try:
+        conn = db()
+        c = conn.cursor()
+        execute_query(c, """
+            UPDATE users
+            SET twofa_required = 1
+            WHERE role IN ('admin', 'manager')
+              AND (twofa_required IS NULL OR twofa_required = 0)
+        """)
+        conn.commit()
+        conn.close()
+        print("✅ Backfilled 2FA requirement for admin/manager users.")
+    except Exception as e:
+        print(f"⚠️ backfill_2fa_required failed: {e}")
+
+
+import pyotp
+import qrcode
+import base64
+from io import BytesIO
+import secrets as _secrets
+
+
+def _generate_backup_codes(count=8):
+    """Generate N single-use backup codes (12 hex chars each)."""
+    codes = []
+    for _ in range(count):
+        # Format: XXXX-XXXX-XXXX
+        raw = _secrets.token_hex(6).upper()  # 12 chars
+        codes.append(f"{raw[:4]}-{raw[4:8]}-{raw[8:]}")
+    return codes
+
+
+def _hash_backup_code(code):
+    """Hash a backup code (they're short, so bcrypt via werkzeug is fine)."""
+    from werkzeug.security import generate_password_hash
+    return generate_password_hash(code.replace("-", "").upper())
+
+
+def _verify_backup_code(code, stored_hash):
+    """Check if a backup code matches a stored hash."""
+    from werkzeug.security import check_password_hash
+    return check_password_hash(stored_hash, code.replace("-", "").upper())
+
+
+def _generate_qr_png_base64(uri):
+    """Render a QR code from an otpauth:// URI and return a base64 PNG data URL."""
+    img = qrcode.make(uri)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def user_needs_2fa_setup(user):
+    """
+    Return True if the user has 2FA required but hasn't confirmed it yet.
+    `user` is a dict (from SELECT * FROM users).
+    """
+    required = user.get("twofa_required") or 0
+    enabled = user.get("twofa_enabled") or 0
+    return bool(required) and not bool(enabled)
+
+def maybe_rehash_password(cursor, user_id, stored_hash, plain_password):
+    """
+    If the stored hash uses an outdated scheme, re-hash the password
+    with the current default. Returns True if a re-hash happened.
+    """
+    try:
+        from werkzeug.security import generate_password_hash, check_password_hash
+        # Werkzeug prefixes hashes with the method (e.g. 'pbkdf2:sha256:...')
+        # Current default is 'scrypt'. We re-hash if the prefix isn't 'scrypt'.
+        if not stored_hash.startswith("scrypt:"):
+            new_hash = generate_password_hash(plain_password)
+            execute_query(cursor,
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_hash, user_id))
+            return True
+    except Exception as e:
+        print(f"⚠️ maybe_rehash_password failed: {e}")
+    return False
 
 
 def role_required(allowed_roles):
@@ -2672,15 +3236,25 @@ def users():
     conn = db()
     c = conn.cursor()
     
+    # users_list = execute_query(c, """
+    #     SELECT u.id, u.username, u.role, u.full_name, u.email, u.created_at,
+    #            s.name AS station_name
+    #     FROM users u
+    #     LEFT JOIN branches s ON s.id = u.branch_id
+    #     WHERE u.role != 'customer'
+    #     ORDER BY u.role, u.username
+    # """).fetchall()
     users_list = execute_query(c, """
         SELECT u.id, u.username, u.role, u.full_name, u.email, u.created_at,
-               s.name AS station_name
+               s.name AS station_name,
+               la.locked_until
         FROM users u
         LEFT JOIN branches s ON s.id = u.branch_id
+        LEFT JOIN login_attempts la ON la.user_id = u.id
         WHERE u.role != 'customer'
         ORDER BY u.role, u.username
     """).fetchall()
-    
+
     conn.close()
     
     # Format datetime for each user
@@ -2690,7 +3264,26 @@ def users():
                 user["created_at"] = user["created_at"].strftime("%Y-%m-%d")
             elif isinstance(user["created_at"], str):
                 user["created_at"] = user["created_at"]
-    
+
+    # from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for user in users_list:
+        # ... existing datetime formatting ...
+        lu = user.get("locked_until")
+        if lu:
+            try:
+                if isinstance(lu, datetime):
+                    locked_until = lu.replace(tzinfo=None) if lu.tzinfo is None else lu.astimezone(timezone.utc).replace(tzinfo=None)
+                else:
+                    locked_until = datetime.fromisoformat(str(lu))
+                    if locked_until.tzinfo is not None:
+                        locked_until = locked_until.astimezone(timezone.utc).replace(tzinfo=None)
+                user["is_locked"] = locked_until > now
+            except Exception:
+                user["is_locked"] = False
+        else:
+            user["is_locked"] = False
+
     return render_template("users.html", title="User Management", users=users_list)
   
 
@@ -2715,10 +3308,23 @@ def add_user():
         if branch_id:
             branch_id = int(branch_id)
 
+        # if not username or not password:
+        #     flash("Username and password are required.", "danger")
+        #     conn.close()
+        #     return redirect(url_for("add_user"))
+
         if not username or not password:
             flash("Username and password are required.", "danger")
             conn.close()
             return redirect(url_for("add_user"))
+
+        # ✅ Enforce password policy
+        ok, err = validate_password_strength(password)
+        if not ok:
+            flash(f"Password rejected: {err}", "danger")
+            conn.close()
+            return redirect(url_for("add_user"))
+
 
         try:
             execute_query(c, """
@@ -2777,7 +3383,17 @@ def edit_user(user_id):
         role = request.form.get("role", "staff")
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip()
-        new_password = request.form.get("new_password", "").strip()
+        new_password = request.form.get("new_password", "")
+
+        # ✅ Enforce password policy if a new password is set
+        if new_password:
+            ok, err = validate_password_strength(new_password)
+            if not ok:
+                flash(f"Password rejected: {err}", "danger")
+                conn.close()
+                return redirect(url_for("edit_user", user_id=user_id))
+
+
 
         # ✅ Optional: assign a station
         branch_id = request.form.get("branch_id") or None
@@ -2818,6 +3434,36 @@ def edit_user(user_id):
 
     conn.close()
     return render_template("edit_user.html", title="Edit User", user=user, stations=stations)
+
+
+@app.route("/users/<int:user_id>/unlock", methods=["POST"])
+@login_required
+@admin_required
+def unlock_user(user_id):
+    """Manually unlock a user account."""
+    conn = db()
+    c = conn.cursor()
+
+    user = execute_query(c, "SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        flash("User not found.", "danger")
+        return redirect(url_for("users"))
+    conn.close()
+
+    if unlock_user_account(user_id):
+        log_audit(
+            action="account_unlocked",
+            entity_type="user",
+            entity_id=user_id,
+            details=f"Admin manually unlocked user '{user['username']}'"
+        )
+        flash(f"User '{user['username']}' unlocked.", "success")
+    else:
+        flash("Failed to unlock user.", "danger")
+
+    return redirect(url_for("users"))
+
 
 @app.route("/staff-activity")
 @login_required
@@ -3171,6 +3817,10 @@ def delete_station(station_id):
     return redirect(url_for("stations"))
 
 
+
+
+
+
 @app.route("/users/<int:user_id>/delete", methods=["POST"])
 @login_required
 @admin_required
@@ -3293,11 +3943,14 @@ def reset_customer_password(customer_id):
         return redirect(url_for("customers"))
     
     if request.method == "POST":
-        new_password = request.form.get("new_password", "").strip()
-        
-        if not new_password or len(new_password) < 6:
-            flash("Password must be at least 6 characters.", "danger")
+        new_password = request.form.get("new_password", "")
+    
+
+        ok, err = validate_password_strength(new_password)
+        if not ok:
+            flash(f"Password rejected: {err}", "danger")
             return redirect(url_for("reset_customer_password", customer_id=customer_id))
+            
         
         # Update password
         execute_query(c,"""
@@ -3347,10 +4000,20 @@ def profile():
         current_password = request.form.get("current_password", "")
         new_password = request.form.get("new_password", "")
         
+
+
         if current_password and new_password:
+            # ✅ Enforce password policy
+            ok, err = validate_password_strength(new_password)
+            if not ok:
+                flash(f"Password rejected: {err}", "danger")
+                return redirect(url_for("profile"))
+
             if not check_password_hash(user["password_hash"], current_password):
                 flash("Current password is incorrect.", "danger")
                 return redirect(url_for("profile"))
+
+
             
             execute_query(c,"""
                 UPDATE users 
@@ -4233,11 +4896,29 @@ def customers():
                 username = f"cust_{phone}"
         
         # Generate random password
+        # import secrets
+        # import string
+        # temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+        # password_hash = generate_password_hash(temp_password)
+        
         import secrets
         import string
-        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-        password_hash = generate_password_hash(temp_password)
-        
+        # ✅ Generate a policy-compliant random password (10 chars, letters + digits + special)
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        temp_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+        # Guarantee at least one of each class in case of unlucky draw
+        temp_password = (
+            secrets.choice(string.ascii_letters)
+            + secrets.choice(string.digits)
+            + secrets.choice("!@#$%^&*")
+            + ''.join(secrets.choice(alphabet) for _ in range(9))
+        )
+        # Shuffle so the classes aren't always at the start
+        temp_list = list(temp_password)
+        secrets.SystemRandom().shuffle(temp_list)
+        temp_password = ''.join(temp_list)
+
+
         # Insert user
         try:
             execute_query(c, """
@@ -7739,6 +8420,199 @@ def view_announcement(announcement_id):
         comments=comments
     )
 
+@app.route("/2fa/setup", methods=["GET", "POST"])
+@login_required
+def twofa_setup():
+    """Enroll a user in TOTP."""
+    user_id = session.get("user_id")
+    conn = db()
+    c = conn.cursor()
+
+    user = execute_query(c, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        flash("User not found.", "danger")
+        return redirect(url_for("logout"))
+
+    # If already enabled, redirect to verify
+    if user.get("twofa_enabled"):
+        conn.close()
+        return redirect(url_for("twofa_verify"))
+
+    # Get or create a secret in user_2fa (not yet enabled)
+    row = execute_query(c, "SELECT * FROM user_2fa WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        secret = pyotp.random_base32()
+        execute_query(c, """
+            INSERT INTO user_2fa (user_id, secret, enabled)
+            VALUES (?, ?, 0)
+        """, (user_id, secret))
+        conn.commit()
+    else:
+        secret = row["secret"]
+
+    # Build the provisioning URI
+    issuer = "RAB Rent A Bike"
+    account_name = user["username"]
+    uri = pyotp.TOTP(secret).provisioning_uri(name=account_name, issuer_name=issuer)
+    qr_data = _generate_qr_png_base64(uri)
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip().replace(" ", "")
+        if pyotp.TOTP(secret).verify(code, valid_window=1):
+            # ✅ Correct code — enable 2FA
+            execute_query(c, """
+                UPDATE user_2fa
+                SET enabled = 1, confirmed_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (user_id,))
+            execute_query(c, """
+                UPDATE users SET twofa_enabled = 1 WHERE id = ?
+            """, (user_id,))
+
+            # Generate backup codes
+            codes = _generate_backup_codes()
+            for code_plain in codes:
+                execute_query(c, """
+                    INSERT INTO user_2fa_backup_codes (user_id, code_hash)
+                    VALUES (?, ?)
+                """, (user_id, _hash_backup_code(code_plain)))
+
+            conn.commit()
+            conn.close()
+
+            session["twofa_verified"] = True
+            log_audit(
+                action="2fa_enabled",
+                entity_type="user",
+                entity_id=user_id,
+                details="User enabled TOTP 2FA and generated backup codes"
+            )
+
+            # Store backup codes in flash — but that's visible to others; better to show on a page
+            session["show_backup_codes"] = codes
+            return redirect(url_for("twofa_backup_codes"))
+        else:
+            flash("Invalid code. Please try again.", "danger")
+
+    conn.close()
+    return render_template(
+        "twofa_setup.html",
+        title="Set Up 2FA",
+        qr_data=qr_data,
+        secret=secret,
+        user=user
+    )
+
+
+@app.route("/2fa/verify", methods=["GET", "POST"])
+@login_required
+def twofa_verify():
+    """Prompt user for a 6-digit TOTP code (or a backup code)."""
+    user_id = session.get("user_id")
+    conn = db()
+    c = conn.cursor()
+
+    user = execute_query(c, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = execute_query(c, "SELECT * FROM user_2fa WHERE user_id = ?", (user_id,)).fetchone()
+
+    if not user or not row or not row.get("enabled"):
+        conn.close()
+        flash("2FA is not set up for your account.", "warning")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip().replace(" ", "").upper()
+
+        # Try TOTP first
+        if pyotp.TOTP(row["secret"]).verify(code, valid_window=1):
+            session["twofa_verified"] = True
+            conn.close()
+            log_audit(
+                action="2fa_verified",
+                entity_type="user",
+                entity_id=user_id,
+                details="User passed 2FA verification"
+            )
+            return redirect(url_for("dashboard"))
+
+        # Try backup code (format XXXX-XXXX-XXXX)
+        if "-" in code or len(code) == 12:
+            codes = execute_query(c, """
+                SELECT id, code_hash FROM user_2fa_backup_codes
+                WHERE user_id = ? AND used_at IS NULL
+            """, (user_id,)).fetchall()
+            for bc in codes:
+                if _verify_backup_code(code, bc["code_hash"]):
+                    execute_query(c, """
+                        UPDATE user_2fa_backup_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?
+                    """, (bc["id"],))
+                    conn.commit()
+                    session["twofa_verified"] = True
+                    conn.close()
+                    log_audit(
+                        action="2fa_verified_backup",
+                        entity_type="user",
+                        entity_id=user_id,
+                        details="User passed 2FA using a backup code"
+                    )
+                    flash("Backup code accepted. Consider generating new backup codes soon.", "warning")
+                    return redirect(url_for("dashboard"))
+
+        flash("Invalid code. Please try again.", "danger")
+
+    conn.close()
+    return render_template("twofa_verify.html", title="Two-Factor Verification")
+
+
+@app.route("/2fa/backup-codes")
+@login_required
+def twofa_backup_codes():
+    """Show backup codes once (from session after enrollment)."""
+    codes = session.pop("show_backup_codes", None)
+    if not codes:
+        flash("No backup codes to display.", "info")
+        return redirect(url_for("dashboard"))
+
+    return render_template("twofa_backup_codes.html", title="Backup Codes", codes=codes)
+
+
+@app.route("/2fa/disable", methods=["POST"])
+@login_required
+def twofa_disable():
+    """Disable 2FA. Only allowed if not required for this role."""
+    user_id = session.get("user_id")
+    conn = db()
+    c = conn.cursor()
+    user = execute_query(c, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for("logout"))
+
+    if user.get("twofa_required"):
+        flash("2FA is mandatory for your role and cannot be disabled.", "danger")
+        return redirect(url_for("profile"))
+
+    conn = db()
+    c = conn.cursor()
+    execute_query(c, "DELETE FROM user_2fa WHERE user_id = ?", (user_id,))
+    execute_query(c, "DELETE FROM user_2fa_backup_codes WHERE user_id = ?", (user_id,))
+    execute_query(c, "UPDATE users SET twofa_enabled = 0 WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    session.pop("twofa_verified", None)
+    log_audit(
+        action="2fa_disabled",
+        entity_type="user",
+        entity_id=user_id,
+        details="User disabled 2FA"
+    )
+    flash("2FA disabled.", "success")
+    return redirect(url_for("profile"))
+
 
 @app.route("/announcements/create", methods=["GET", "POST"])
 @login_required
@@ -8809,6 +9683,9 @@ def discounts():
     
     conn.close()
     return render_template("discounts.html", title="Discount Codes", discounts=discounts)
+
+
+
 
 
 @app.route("/discounts/add", methods=["GET", "POST"])
@@ -10460,10 +11337,16 @@ with app.app_context():
         ensure_rental_extras_schema()
         ensure_audit_schema()
         ensure_privacy_schema()
+        ensure_lockout_schema()
+        ensure_2fa_schema()
+        backfill_2fa_required()  
         migrate_public_uploads_to_private()
         print("✅ Schema is up to date.")
     except Exception as e:
         print(f"⚠️ Schema bootstrap error: {e}")
+
+
+
 
 
 # =============================================

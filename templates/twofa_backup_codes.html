@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="max-width:600px;margin:0 auto;">
+<h1>🔑 Your Backup Codes</h1>
+<p class="sub">Save these in a safe place. Each code works once. If you lose your phone, these are your only way in.</p>
+
+<div class="card" style="background:#fff8e1;border-left:5px solid #ffd700;">
+    <p style="margin:0;color:#a66300;font-weight:bold;">
+        ⚠️ Print or write these down NOW. They will not be shown again.
+    </p>
+</div>
+
+<div class="card">
+    <div style="font-family:monospace;font-size:18px;line-height:2;padding:15px;background:#f8f9fa;border-radius:8px;text-align:center;">
+        {% for c in codes %}
+            <div>{{ c }}</div>
+        {% endfor %}
+    </div>
+    <div style="margin-top:15px;text-align:center;">
+        <button onclick="window.print()" class="btn small">🖨️ Print</button>
+        <a href="{{ url_for('dashboard') }}" class="btn small yellow">✅ I've saved them →</a>
+    </div>
+</div>
+</div>
+
+{% endblock %}

@@ -29,4 +29,7 @@ env/
 
 # OS
 .DS_Store
-Thumbs.db
+
+# Temp dev scripts
+check_2fa.py
+reset_2fa.py

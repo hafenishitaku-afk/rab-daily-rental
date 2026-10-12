@@ -42,10 +42,21 @@
                 </small>
             </label>
 
-            <label>
+            <!-- <label>
                 New Password
                 <input type="password" name="new_password" placeholder="Leave blank to keep current">
+            </label> -->
+
+            <label>
+                New Password
+                <input type="password" name="new_password" minlength="10"
+                       placeholder="Leave blank to keep current"
+                       title="At least 10 characters, with a letter, a number, and a special character">
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    🔒 Leave blank to keep current. If setting a new one: at least 10 characters, with a letter, a number, and a special character.
+                </small>
             </label>
+
         </div>
         <div style="margin-top:20px;display:flex;gap:10px;">
             <button class="btn yellow" type="submit">💾 Save Changes</button>

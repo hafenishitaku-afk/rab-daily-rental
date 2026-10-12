@@ -39,10 +39,20 @@
                 Current Password
                 <input type="password" name="current_password" placeholder="Required to change password">
             </label>
+
+
             <label>
                 New Password
-                <input type="password" name="new_password" placeholder="Leave blank to keep current">
-            </label>
+                <input type="password" name="new_password" minlength="10"
+                       placeholder="Leave blank to keep current"
+                       title="At least 10 characters, with a letter, a number, and a special character">
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    🔒 Minimum 10 characters, with a letter, a number, and a special character.
+                </small>
+            </label>            
+
+
+
         </div>
         <div style="margin-top:20px;display:flex;gap:10px;">
             <button class="btn yellow" type="submit">💾 Update Profile</button>
@@ -58,6 +68,32 @@
 
 </div>
 
-
+<div class="card" style="background:#f8f9fa;">
+    <h2>🔐 Two-Factor Authentication</h2>
+    {% if user.twofa_enabled %}
+        <p style="color:#16834b;font-weight:bold;">✅ 2FA is enabled</p>
+        <p style="color:#667085;font-size:13px;">
+            Your account is protected. Login will require a 6-digit code from your authenticator app.
+        </p>
+        {% if not user.twofa_required %}
+        <form method="post" action="{{ url_for('twofa_disable') }}" style="margin-top:10px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn small" style="background:#dc3545;color:#fff;"
+                    onclick="return confirm('Disable 2FA? Your account will be less secure.');">
+                Disable 2FA
+            </button>
+        </form>
+        {% endif %}
+    {% else %}
+        <p style="color:#a66300;font-weight:bold;">⚠️ 2FA is not enabled</p>
+        <p style="color:#667085;font-size:13px;">
+            Add a second layer of security to your account.
+            {% if user.twofa_required %}
+            <br><b>2FA is mandatory for your role.</b>
+            {% endif %}
+        </p>
+        <a href="{{ url_for('twofa_setup') }}" class="btn small yellow" style="margin-top:10px;">🔐 Enable 2FA</a>
+    {% endif %}
+</div>
 
 {% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="max-width:600px;margin:0 auto;">
+<h1>🔐 Set Up Two-Factor Authentication</h1>
+<p class="sub">Scan the QR code below with Google Authenticator, Authy, 1Password, or Microsoft Authenticator.</p>
+
+<div class="card" style="text-align:center;">
+    <img src="{{ qr_data }}" alt="QR Code" style="max-width:250px;border:1px solid #ddd;border-radius:8px;padding:10px;">
+
+    <details style="margin-top:15px;text-align:left;">
+        <summary style="cursor:pointer;color:#667085;font-size:13px;">Can't scan? Enter this code manually</summary>
+        <div style="background:#f8f9fa;padding:10px;border-radius:6px;margin-top:8px;font-family:monospace;word-break:break-all;">
+            {{ secret }}
+        </div>
+    </details>
+</div>
+
+<div class="card">
+    <h2>Confirm Your Code</h2>
+    <p class="sub">Enter the 6-digit code your authenticator app is showing.</p>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+            6-Digit Code
+            <input type="text" name="code" inputmode="numeric" pattern="[0-9 ]{6,8}"
+                   autocomplete="one-time-code" placeholder="000000" required
+                   style="font-size:20px;letter-spacing:8px;text-align:center;font-family:monospace;">
+        </label>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" class="btn yellow">✅ Verify and Enable</button>
+            <a href="{{ url_for('logout') }}" class="btn">Log out</a>
+        </div>
+    </form>
+</div>
+</div>
+
+{% endblock %}

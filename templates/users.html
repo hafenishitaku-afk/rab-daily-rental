@@ -30,6 +30,10 @@
                     <span class="badge {% if u.role == 'admin' %}green{% elif u.role == 'manager' %}blue{% else %}orange{% endif %}">
                         {{ u.role }}
                     </span>
+
+                    {% if u.is_locked %}
+                    <span class="badge red">🔒 Locked</span>
+                    {% endif %}
                 </td>
                 <td>
                     {% if u.station_name %}
@@ -42,6 +46,17 @@
                 <td>{{ u.created_at }}</td>
                 <td>
                     <a class="btn small" href="{{ url_for('edit_user', user_id=u.id) }}">✏️ Edit</a>
+
+                    {% if u.is_locked %}
+                    <form method="post" 
+                          action="{{ url_for('unlock_user', user_id=u.id) }}" 
+                          style="display:inline;"
+                          onsubmit="return confirm('Unlock {{ u.username }}?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn small" style="background:#16834b;color:#fff;">🔓 Unlock</button>
+                    </form>
+                    {% endif %}
+
                     {% if u.id != session.user_id %}
                     <form method="post" action="{{ url_for('delete_user', user_id=u.id) }}" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -50,7 +65,7 @@
                     {% endif %}
                 </td>
             </tr>
-            {% endfor %}          
+            {% endfor %}
         </table>
     </div>
 </div>
