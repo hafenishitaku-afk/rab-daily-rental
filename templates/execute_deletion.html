@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width:700px;margin:0 auto;">
+<h1 style="color:#dc3545;">⚠️ Execute Account Anonymization</h1>
+<p class="sub">This action cannot be undone.</p>
+
+<div class="card" style="background:#fdeceb;border-left:5px solid #dc3545;">
+    <h3 style="color:#dc3545;margin-top:0;">Irreversible Operation</h3>
+    <p>The following will happen for customer <b>{{ request_row.customer_name }}</b> (ID #{{ request_row.customer_id }}):</p>
+    <ul style="line-height:1.8;">
+        <li>✅ All uploaded ID documents and photos will be <b>permanently deleted</b> from the server and from Cloudinary</li>
+        <li>✅ Name will be replaced with "Deleted User #{{ request_row.customer_id }}"</li>
+        <li>✅ Phone, email, address, ID number, and signature will be erased</li>
+        <li>✅ Login will be disabled (username scrambled, password randomized)</li>
+        <li>✅ Rental and payment records will be <b>kept in anonymized form</b> (required by accounting law)</li>
+        <li>✅ The request will be marked <b>Completed</b></li>
+    </ul>
+</div>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+            Type <code>DELETE</code> to confirm:
+            <input type="text" name="confirm" placeholder="DELETE" autocomplete="off" required>
+        </label>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" class="btn" style="background:#dc3545;color:#fff;"
+                    onclick="return confirm('Final confirmation: execute deletion now?');">
+                ⚠️ Execute Anonymization
+            </button>
+            <a href="{{ url_for('privacy_requests_dashboard') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+</div>
+
+{% endblock %}

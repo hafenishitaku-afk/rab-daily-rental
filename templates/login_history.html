@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🔐 Login History</h1>
+<p class="sub">Every login attempt — successful and failed.</p>
+
+<!-- Stats -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Attempts</div>
+        <div class="value">{{ total_attempts }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Successful</div>
+        <div class="value" style="color:#16834b;">{{ total_success }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">Failed (all time)</div>
+        <div class="value" style="color:#dc3545;">{{ total_failed }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #ffd700;">
+        <div class="label">Failed (last hour)</div>
+        <div class="value" style="color:#a66300;">{{ failed_last_hour }}</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filter</h2>
+    <form method="get" action="{{ url_for('login_history') }}" 
+          style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+        <label style="flex:1;min-width:150px;">
+            Date from
+            <input type="date" name="date_from" value="{{ date_from or '' }}">
+        </label>
+        <label style="flex:1;min-width:150px;">
+            Date to
+            <input type="date" name="date_to" value="{{ date_to or '' }}">
+        </label>
+        <label style="flex:1;min-width:180px;">
+            User contains
+            <input type="text" name="user_filter" value="{{ user_filter or '' }}" placeholder="username or attempted">
+        </label>
+        <label style="flex:1;min-width:140px;">
+            Status
+            <select name="status_filter">
+                <option value="">All</option>
+                <option value="success" {% if status_filter == 'success' %}selected{% endif %}>✅ Successful</option>
+                <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>❌ Failed</option>
+            </select>
+        </label>
+        <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn yellow">🔍 Filter</button>
+            <a href="{{ url_for('login_history') }}" class="btn">Clear</a>
+        </div>
+
+        <!-- Export -->
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e4e7ec;display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="btn small" 
+                href="{{ url_for('login_history_export_csv', date_from=date_from, date_to=date_to, user_filter=user_filter, status_filter=status_filter) }}">
+                📥 Export CSV (current filter)
+            </a>
+            <a class="btn small" href="{{ url_for('login_history_export_csv') }}">
+                📥 Export CSV (all time)
+            </a>
+            <a class="btn small" 
+                href="{{ url_for('login_history_export_pdf', date_from=date_from, date_to=date_to, user_filter=user_filter, status_filter=status_filter) }}">
+                📄 Export PDF (current filter)
+            </a>
+            <a class="btn small" href="{{ url_for('login_history_export_pdf') }}">
+                📄 Export PDF (all time)
+            </a>
+        </div>
+
+    </form>
+</div>
+
+
+
+
+
+
+<!-- Table -->
+<div class="card">
+    <h2>Attempts</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date / Time</th>
+                <th>User</th>
+                <th>Status</th>
+                <th>Device</th>
+                <th>IP Address</th>
+                <th>Failure Reason</th>
+            </tr>
+            {% if entries %}
+                {% for e in entries %}
+                <tr>
+                    <td>{{ e.created_at_display }}</td>
+                    <td>
+                        {% if e.user_username %}
+                            <b>{{ e.user_username }}</b>
+                            {% if e.user_full_name %}
+                            <br><small style="color:#667085;">{{ e.user_full_name }}</small>
+                            {% endif %}
+                        {% else %}
+                            <span style="color:#667085;">{{ e.username_attempted or '—' }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if e.success %}
+                            <span class="badge green">✅ Success</span>
+                        {% else %}
+                            <span class="badge red">❌ Failed</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ e.device_summary or '—' }}</td>
+                    <td><code>{{ e.ip_display }}</code></td>
+                    <td>{{ e.failure_reason or '—' }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align:center;color:#667085;padding:20px;">
+                        No login attempts match your filters.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div style="margin-top:15px;display:flex;gap:8px;justify-content:center;align-items:center;">
+        {% if page > 1 %}
+            <a href="{{ url_for('login_history', page=page-1, date_from=date_from, date_to=date_to, user_filter=user_filter, status_filter=status_filter) }}" class="btn small">← Prev</a>
+        {% endif %}
+        <span style="color:#667085;">Page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a href="{{ url_for('login_history', page=page+1, date_from=date_from, date_to=date_to, user_filter=user_filter, status_filter=status_filter) }}" class="btn small">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('login_history') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

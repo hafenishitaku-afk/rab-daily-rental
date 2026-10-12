@@ -41,6 +41,12 @@
                 </button>
             </form>
             
+            <p style="margin-top:15px;font-size:12px;color:#667085;text-align:center;">
+                By logging in you agree to our
+                <a href="{{ url_for('privacy_policy') }}" style="color:#0d1f46;">Privacy Policy</a>.
+            </p>
+
+
             {% with msgs = get_flashed_messages(with_categories=true) %}
                 {% for cat, msg in msgs %}
                     <div class="flash {{ cat }}" style="margin-top:15px;">{{ msg }}</div>

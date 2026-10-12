@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🔒 Privacy Requests</h1>
+<p class="sub">Customer requests to access or delete their data.</p>
+
+<div class="grid">
+    <div class="metric" style="border-left:4px solid #ffd700;">
+        <div class="label">Pending</div>
+        <div class="value" style="color:#a66300;">{{ pending_count }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #0d1f46;">
+        <div class="label">Approved</div>
+        <div class="value">{{ approved_count }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Completed</div>
+        <div class="value" style="color:#16834b;">{{ completed_count }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">Rejected</div>
+        <div class="value" style="color:#dc3545;">{{ rejected_count }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <form method="get" style="display:flex;gap:10px;align-items:end;">
+        <label>
+            Status
+            <select name="status" onchange="this.form.submit()">
+                <option value="">All statuses</option>
+                <option value="Pending" {% if status_filter == 'Pending' %}selected{% endif %}>Pending</option>
+                <option value="Approved" {% if status_filter == 'Approved' %}selected{% endif %}>Approved</option>
+                <option value="Rejected" {% if status_filter == 'Rejected' %}selected{% endif %}>Rejected</option>
+                <option value="Completed" {% if status_filter == 'Completed' %}selected{% endif %}>Completed</option>
+            </select>
+        </label>
+        <a href="{{ url_for('privacy_requests_dashboard') }}" class="btn">Clear</a>
+    </form>
+</div>
+
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Type</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Reviewed By</th>
+                <th>Actions</th>
+            </tr>
+            {% if requests_list %}
+                {% for r in requests_list %}
+                <tr>
+                    <td><b>#{{ r.id }}</b></td>
+                    <td>
+                        <b>{{ r.customer_name or '—' }}</b>
+                        {% if r.customer_phone %}
+                        <br><small style="color:#667085;">{{ r.customer_phone }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.request_type }}</td>
+                    <td>{{ r.reason or '—' }}</td>
+                    <td>
+                        <span class="badge 
+                            {% if r.status == 'Pending' %}orange
+                            {% elif r.status == 'Approved' %}blue
+                            {% elif r.status == 'Completed' %}green
+                            {% else %}red{% endif %}">
+                            {{ r.status }}
+                        </span>
+                    </td>
+                    <td>{{ r.requested_at or '—' }}</td>
+                    <td>{{ r.reviewed_by_username or '—' }}</td>
+                    <td>
+                        {% if r.status == 'Pending' %}
+                            <form method="post" 
+                                  action="{{ url_for('review_privacy_request', request_id=r.id) }}" 
+                                  style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="action" value="approve">
+                                <button class="btn small yellow" onclick="return confirm('Approve deletion?');">✅ Approve</button>
+                            </form>
+                            <form method="post" 
+                                  action="{{ url_for('review_privacy_request', request_id=r.id) }}" 
+                                  style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="action" value="reject">
+                                <button class="btn small" style="background:#dc3545;color:#fff;" onclick="return confirm('Reject this request?');">❌ Reject</button>
+                            </form>
+                        {% elif r.status == 'Approved' %}
+                            <a href="{{ url_for('execute_deletion', request_id=r.id) }}" class="btn small" style="background:#dc3545;color:#fff;">
+                                ⚠️ Execute Anonymization
+                            </a>
+                        {% else %}
+                            <span style="color:#667085;font-size:12px;">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#667085;padding:20px;">
+                        No privacy requests yet.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

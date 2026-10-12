@@ -58,6 +58,9 @@
     </div>
 </div>
 
+
+
+
 <!-- Rental History -->
 <div class="card">
     <h2>📋 My Rentals</h2>
@@ -107,14 +110,118 @@
     </div>
 </div>
 
+{# ✅ Outstanding damage balance #}
+{% set unpaid = namespace(amount=0) %}
+{% for r in rentals %}
+    {# We can't compute from rentals directly — needs a separate query. Skip if not available. #}
+{% endfor %}
+
+{# The route should pass `damage_balance` — if not, we hide the card #}
+{% if damage_balance is defined and damage_balance > 0 %}
+<div class="card" style="background:#fdeceb;border-left:5px solid #dc3545;">
+    <h3 style="margin:0;color:#dc3545;">⚠️ Outstanding Damage Balance</h3>
+    <div style="font-size:32px;font-weight:800;color:#dc3545;margin-top:5px;">
+        N$ {{ "%.2f"|format(damage_balance) }}
+    </div>
+    <p style="color:#667085;margin:5px 0 0 0;font-size:13px;">
+        Please settle this balance at any pickup point before renting again.
+    </p>
+</div>
+{% endif %}
+
+
+
 <!-- Quick Actions -->
 <div class="card">
     <h2>🔧 Quick Actions</h2>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <a href="{{ url_for('customer_stations') }}" class="btn yellow">📍 Find a Pickup Point</a>
         <a href="{{ url_for('profile') }}" class="btn">👤 Edit Profile</a>
+        <a href="{{ url_for('privacy_policy') }}" class="btn">🔒 Privacy Policy</a>
     </div>
 </div>
 
+<!-- Privacy -->
+<div class="card" style="background:#f8f9fa;">
+    <h2>🔒 Privacy</h2>
+    <p style="color:#667085;margin-top:0;">
+        You have the right to access a copy of all the personal data we hold about you.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <a href="{{ url_for('customer_data_export') }}" class="btn small yellow">
+            📥 Download My Data (ZIP)
+        </a>
+        <a href="{{ url_for('privacy_policy') }}" class="btn small" target="_blank">
+            📄 Read Privacy Policy
+        </a>
+    </div>
+
+    <hr style="margin:20px 0;border:none;border-top:1px solid #e4e7ec;">
+
+    {# ✅ Show status ABOVE the form so customer sees it without expanding #}
+    {% if privacy_request and privacy_request.status == 'Pending' %}
+    <div style="background:#fff8e1;border-left:4px solid #ffd700;padding:12px;border-radius:6px;margin-bottom:15px;">
+        <b>⏳ Deletion Request Pending</b>
+        <p style="margin:6px 0 0 0;color:#667085;font-size:13px;">
+            You submitted a deletion request on
+            <b>{{ privacy_request.requested_at }}</b>.
+            An administrator will review it within 30 days.
+        </p>
+    </div>
+    {% elif privacy_request and privacy_request.status == 'Rejected' %}
+    <div style="background:#fdeceb;border-left:4px solid #dc3545;padding:12px;border-radius:6px;margin-bottom:15px;">
+        <b>❌ Deletion Request Rejected</b>
+        <p style="margin:6px 0 0 0;color:#667085;font-size:13px;">
+            Your request was reviewed on <b>{{ privacy_request.reviewed_at }}</b>.
+            {% if privacy_request.review_notes %}
+            <br><b>Notes:</b> {{ privacy_request.review_notes }}
+            {% endif %}
+        </p>
+    </div>
+    {% elif privacy_request and privacy_request.status == 'Completed' %}
+    <div style="background:#e8f7ef;border-left:4px solid #16834b;padding:12px;border-radius:6px;margin-bottom:15px;">
+        <b>✅ Account Deletion Completed</b>
+        <p style="margin:6px 0 0 0;color:#667085;font-size:13px;">
+            Your account was anonymized on <b>{{ privacy_request.completed_at }}</b>.
+        </p>
+    </div>
+    {% endif %}
+
+    <h4 style="margin:0 0 8px 0;color:#dc3545;">Request Account Deletion</h4>
+    <p style="color:#667085;font-size:13px;margin:0 0 10px 0;">
+        This will ask us to permanently anonymize your account and delete your ID documents and photo.
+        Rental records required by law will be kept in anonymized form.
+        An administrator will review your request within 30 days.
+    </p>
+
+    {% if not privacy_request or privacy_request.status not in ('Pending', 'Completed') %}
+    <details>
+        <summary style="cursor:pointer;color:#dc3545;font-weight:bold;font-size:14px;">
+            ⚠️ Click here to submit a deletion request
+        </summary>
+        <form method="post" action="{{ url_for('request_account_deletion') }}" style="margin-top:10px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+                Reason (optional)
+                <textarea name="reason" rows="2" placeholder="Why are you leaving?"></textarea>
+            </label>
+            <div style="margin-top:10px;">
+                <button type="submit" class="btn small" style="background:#dc3545;color:#fff;"
+                        onclick="return confirm('Submit account deletion request? This action cannot be undone once approved.');">
+                    ⚠️ Submit Deletion Request
+                </button>
+            </div>
+        </form>
+    </details>
+    {% else %}
+    <p style="color:#667085;font-size:12px;margin:0;">
+        {% if privacy_request.status == 'Pending' %}
+        You cannot submit another request while one is pending.
+        {% elif privacy_request.status == 'Completed' %}
+        This account has been anonymized and cannot submit new requests.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
 
 {% endblock %}

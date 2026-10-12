@@ -6,6 +6,7 @@ from io import StringIO, BytesIO
 from pathlib import Path
 from functools import wraps
 from datetime import datetime, date, timedelta
+from datetime import timezone
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -22,10 +23,19 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
+
+
+
+from reportlab.pdfgen import canvas
+from io import BytesIO
+
+
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
+
+import shutil
 
 def dict_factory(cursor, row):
     return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -54,6 +64,91 @@ def to_namibia_time(value):
 
     return str(value)
 
+
+import csv
+from io import StringIO
+
+
+def build_csv_response(rows, columns, filename):
+    """
+    Build a Flask response that downloads a CSV file.
+    `columns` is a list of (key, header) tuples.
+    `rows` is a list of dicts.
+    """
+    si = StringIO()
+    # Use UTF-8 BOM so Excel opens accented characters correctly
+    si.write('\ufeff')
+    writer = csv.writer(si)
+
+    # Header
+    writer.writerow([header for _, header in columns])
+
+    # Rows
+    for row in rows:
+        out = []
+        for key, _ in columns:
+            val = row.get(key) if isinstance(row, dict) else None
+            if val is None:
+                out.append("")
+            else:
+                out.append(str(val))
+        writer.writerow(out)
+
+    output = si.getvalue()
+    response = make_response(output)
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _export_filename(prefix, filtered=False):
+    """e.g. audit_log_filtered_2026-10-11_22-45.csv"""
+    from datetime import datetime
+    suffix = "_filtered" if filtered else ""
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    return f"{prefix}{suffix}_{ts}.csv"
+
+
+def _build_filters_from_request(prefix=""):
+    """
+    Read the same filter params used by login-history and audit-log pages.
+    Returns (where_clause, params, meta_dict).
+    `meta_dict` describes the filters for the PDF header.
+    """
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    status_filter = (request.args.get("status_filter") or "").strip()
+    action_filter = (request.args.get("action_filter") or "").strip()
+    entity_filter = (request.args.get("entity_filter") or "").strip()
+
+    where = " WHERE 1=1"
+    params = []
+
+    if date_from:
+        where += f" AND date({prefix}created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        where += f" AND date({prefix}created_at) <= ?"
+        params.append(date_to)
+
+    meta = {
+        "date_from": date_from or "—",
+        "date_to": date_to or "—",
+        "user_filter": user_filter or "—",
+        "status_filter": status_filter or "—",
+        "action_filter": action_filter or "—",
+        "entity_filter": entity_filter or "—",
+    }
+
+    return where, params, meta, {
+        "date_from": date_from,
+        "date_to": date_to,
+        "user_filter": user_filter,
+        "status_filter": status_filter,
+        "action_filter": action_filter,
+        "entity_filter": entity_filter,
+    }
 
 # =============================================
 # LOAD ENVIRONMENT VARIABLES
@@ -84,6 +179,31 @@ if not _secret_key:
         )
 app.secret_key = _secret_key
 
+
+# =============================================
+# BACKGROUND SCHEDULER (retention cleanup)
+# =============================================
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
+
+def _scheduled_cleanup():
+    """Wrapper so we always log success/failure."""
+    try:
+        with app.app_context():
+            cleanup_old_logs()
+    except Exception as e:
+        print(f"⚠️ Scheduled cleanup failed: {e}")
+
+# Only start the scheduler if we're not in a Flask reloader child process
+# (avoids duplicate schedules when debug=True spawns two processes)
+import os as _os
+if _os.environ.get("WERKZEUG_RUN_MAIN") != "true" or not _os.environ.get("FLASK_DEBUG"):
+    scheduler = BackgroundScheduler(daemon=True)
+    # Every day at 03:00 local server time (UTC on Render = 05:00 Namibia)
+    scheduler.add_job(_scheduled_cleanup, "cron", hour=3, minute=0)
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown(wait=False))
+    print("✅ Retention scheduler started (runs daily at 03:00 UTC)")
 
 # =============================================
 # SECURITY INITIALIZATION
@@ -145,6 +265,36 @@ app.config.update(
 UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Public uploads (legacy, no longer used for new files)
+UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ✅ New: private uploads (NOT under static/) — served only via authenticated route
+PRIVATE_UPLOAD_FOLDER = os.path.join(BASE, 'private_uploads')
+os.makedirs(PRIVATE_UPLOAD_FOLDER, exist_ok=True)
+
+# File validation constants
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
+ALLOWED_MIME_TYPES = {
+    "image/jpeg", "image/jpg", "image/png",
+    "application/pdf",
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# =============================================
+# DATA RETENTION POLICY (single source of truth)
+# =============================================
+RETENTION = {
+    "rental_records_years": 7,        # accounting / tax — Namibian company records
+    "payment_records_years": 7,       # accounting / tax
+    "customer_documents_years": 2,    # after last rental
+    "login_history_days": 90,
+    "audit_log_days": 180,
+    "document_views_days": 90,
+    "damage_claims_years": 7,         # accounting
+}
+
+PRIVACY_EMAIL = "privacy@rab.com"
 
 
 def db():
@@ -169,6 +319,81 @@ def db():
         return conn
 
 
+def validate_upload(file_storage):
+    """
+    Validate an uploaded file.
+    Returns (ok: bool, error_message: str or None, ext: str or None)
+    """
+    if not file_storage or not file_storage.filename:
+        return (True, None, None)  # nothing uploaded, not an error
+
+    # Extension check
+    filename = file_storage.filename
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return (False, f"File type '{ext}' is not allowed. Use JPG, PNG, or PDF.", None)
+
+    # MIME check (client-supplied, but worth verifying)
+    if file_storage.mimetype and file_storage.mimetype not in ALLOWED_MIME_TYPES:
+        return (False, f"Invalid MIME type '{file_storage.mimetype}'.", None)
+
+    # Size check — read a bit, then rewind
+    try:
+        file_storage.stream.seek(0, os.SEEK_END)
+        size = file_storage.stream.tell()
+        file_storage.stream.seek(0)
+    except Exception:
+        size = 0
+
+    if size > MAX_FILE_SIZE:
+        return (False, f"File is too large ({size // 1024 // 1024} MB). Maximum is 10 MB.", None)
+
+    return (True, None, ext)
+
+
+def migrate_public_uploads_to_private():
+    """
+    Move any files currently in static/uploads/ to private_uploads/ and
+    update the DB paths accordingly. Safe to run on every boot — it's idempotent.
+    """
+    conn = db()
+    c = conn.cursor()
+
+    # Only handle local paths (skip Cloudinary URLs)
+    rows = execute_query(c, """
+        SELECT id, file_path FROM customer_documents
+        WHERE file_path LIKE 'uploads/%'
+    """).fetchall()
+
+    if not rows:
+        conn.close()
+        return
+
+    moved = 0
+    for row in rows:
+        rel_path = row["file_path"]  # e.g. "uploads/id_3_x.png"
+        filename = os.path.basename(rel_path)
+        old_path = os.path.join(BASE, 'static', rel_path)     # static/uploads/...
+        new_rel = f"private_uploads/{filename}"
+        new_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+
+        if os.path.exists(old_path):
+            try:
+                shutil.move(old_path, new_path)
+                moved += 1
+            except Exception as e:
+                print(f"⚠️ Could not move {old_path}: {e}")
+                continue
+
+        # Update DB regardless — even if file was already moved in a prior run
+        execute_query(c, """
+            UPDATE customer_documents SET file_path = ? WHERE id = ?
+        """, (new_rel, row["id"]))
+
+    conn.commit()
+    conn.close()
+    if moved:
+        print(f"✅ Migrated {moved} file(s) from static/uploads to private_uploads.")
 
 
 def execute_query(cursor, query, params=None):
@@ -200,6 +425,220 @@ def get_single_value(cursor, query, params=None):
     else:
         # For SQLite tuple
         return result[0] if result else 0
+
+
+def parse_user_agent(ua_string):
+    """Return a short human-readable summary like 'Chrome on Windows'."""
+    if not ua_string:
+        return "Unknown"
+
+    ua = ua_string.lower()
+
+    # Browser
+    if "edg" in ua:
+        browser = "Edge"
+    elif "chrome" in ua and "edg" not in ua:
+        browser = "Chrome"
+    elif "firefox" in ua:
+        browser = "Firefox"
+    elif "safari" in ua and "chrome" not in ua:
+        browser = "Safari"
+    elif "opera" in ua or "opr" in ua:
+        browser = "Opera"
+    else:
+        browser = "Unknown browser"
+
+    # OS
+    if "windows" in ua:
+        os_name = "Windows"
+    elif "iphone" in ua or "ipad" in ua:
+        os_name = "iOS"
+    elif "android" in ua:
+        os_name = "Android"
+    elif "mac os" in ua or "macintosh" in ua:
+        os_name = "macOS"
+    elif "linux" in ua:
+        os_name = "Linux"
+    else:
+        os_name = "Unknown OS"
+
+    return f"{browser} on {os_name}"
+
+
+def mask_ip(ip):
+    """Mask an IP for non-admin display: 192.168.1.42 → 192.168.***.***"""
+    if not ip:
+        return "unknown"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.***.***"
+    # IPv6 or weird format
+    return ip[:6] + "***"
+
+def check_suspicious_login(user, ip_address, ua_string):
+    """
+    Fire alerts (email) if login looks suspicious.
+    - Outside business hours (22:00–06:00 Namibia time)
+    - ≥5 failed attempts for this username in last 10 minutes
+    - New IP for this user (first time seen, and user has prior login history)
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        conn = db()
+        c = conn.cursor()
+
+        alerts = []
+
+        # 1. Non-working hours
+        # local_hour = (utc_now() + timedelta(hours=2)).hour
+        local_hour = (datetime.now(timezone.utc) + timedelta(hours=2)).hour
+        if local_hour >= 22 or local_hour < 6:
+            alerts.append(f"Login at {local_hour:02d}:00 (outside business hours)")
+
+        # 2. Failed attempts
+        failed = get_single_value(c, """
+            SELECT COUNT(*) FROM login_history
+            WHERE username_attempted = ?
+              AND success = 0
+              AND created_at >= datetime('now', '-10 minutes')
+        """ if not os.environ.get("DATABASE_URL") else """
+            SELECT COUNT(*) FROM login_history
+            WHERE username_attempted = %s
+              AND success = 0
+              AND created_at >= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+        """, (user["username"],))
+        if failed and int(failed) >= 5:
+            alerts.append(f"{failed} failed login attempts in the last 10 minutes")
+
+        # 3. New IP for this user
+        if ip_address:
+            prior = get_single_value(c, """
+                SELECT COUNT(*) FROM login_history
+                WHERE user_id = ? AND ip_address = ? AND success = 1
+            """, (user["id"], ip_address))
+            total = get_single_value(c, """
+                SELECT COUNT(*) FROM login_history
+                WHERE user_id = ? AND success = 1
+            """, (user["id"],))
+            # New IP: user has prior logins (>=1) but not from this IP
+            if (total or 0) > 0 and (prior or 0) == 0:
+                alerts.append(f"New IP address: {ip_address}")
+
+        conn.close()
+
+        # Send email if there are alerts
+        if alerts:
+            subject = f"⚠️ Suspicious login: {user['username']}"
+            body = (
+                f"A login for user '{user['username']}' ({user.get('full_name', '')}) "
+                f"was flagged as suspicious:\n\n"
+                + "\n".join(f"• {a}" for a in alerts)
+                + f"\n\nIP: {ip_address}\nDevice: {parse_user_agent(ua_string)}"
+                + f"\nTime (UTC): {utc_now().isoformat()}"
+                + "\n\n— RAB Daily Rental Security"
+            )
+            # Send to admins
+            admin_emails = execute_query(c, """
+                SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email != ''
+            """).fetchall() if False else []  # need a fresh connection
+            # Fresh query
+            conn2 = db()
+            c2 = conn2.cursor()
+            admin_rows = execute_query(c2, """
+                SELECT email FROM users WHERE role = 'admin' 
+                AND email IS NOT NULL AND email != ''
+            """).fetchall()
+            conn2.close()
+
+            for admin in admin_rows:
+                try:
+                    send_email_notification(admin["email"], subject, body)
+                except Exception as e:
+                    print(f"⚠️ Alert email failed: {e}")
+
+    except Exception as e:
+        print(f"⚠️ check_suspicious_login failed: {e}")
+
+
+
+def log_login_attempt(user_id, username_attempted, success,
+                      ip_address=None, user_agent=None, failure_reason=None):
+    """Insert a row in login_history."""
+    try:
+        conn = db()
+        c = conn.cursor()
+        execute_query(c, """
+            INSERT INTO login_history
+            (user_id, username_attempted, success, ip_address, user_agent,
+             device_summary, failure_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            username_attempted,
+            1 if success else 0,
+            ip_address,
+            user_agent,
+            parse_user_agent(user_agent),
+            failure_reason
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ log_login_attempt failed: {e}")
+
+
+def log_audit(action, entity_type=None, entity_id=None, details=None,
+              user_id=None, username=None, user_role=None):
+    """
+    Insert a row in audit_log. If user_id/username/role aren't passed,
+    it will try to read from the current session.
+    """
+    try:
+        # Try to grab from session
+        if user_id is None:
+            user_id = session.get("user_id")
+        if username is None:
+            username = session.get("username")
+        if user_role is None:
+            user_role = session.get("role")
+
+        conn = db()
+        c = conn.cursor()
+        execute_query(c, """
+            INSERT INTO audit_log
+            (user_id, username, user_role, action, entity_type, entity_id,
+             details, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            username,
+            user_role,
+            action,
+            entity_type,
+            entity_id,
+            details,
+            request.remote_addr if request else None,
+            request.headers.get("User-Agent") if request else None
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ log_audit failed: {e}")
+
+
+def get_customer_unpaid_damages(cursor, customer_id):
+    """Return total unpaid damage amount for a customer."""
+    result = execute_query(cursor, """
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM damage_claims
+        WHERE customer_id = ? AND status != 'Paid' AND status != 'Waived'
+    """, (customer_id,)).fetchone()
+    if not result:
+        return 0.0
+    if isinstance(result, dict):
+        return float(list(result.values())[0] or 0)
+    return float(result[0] or 0)
 
 
 
@@ -289,12 +728,95 @@ if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
 else:
     print("⚠️ Cloudinary credentials not set. Using local storage.")
 
+def utc_now():
+    """Return current UTC time as a naive datetime (compatible with our storage)."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# def cleanup_old_logs():
+#     """Delete logs older than retention window. Run once a day."""
+#     try:
+#         conn = db()
+#         c = conn.cursor()
+#         is_postgres = os.environ.get("DATABASE_URL") is not None
 
+#         if is_postgres:
+#             execute_query(c, """
+#                 DELETE FROM login_history 
+#                 WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'
+#             """)
+#             execute_query(c, """
+#                 DELETE FROM audit_log 
+#                 WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '180 days'
+#             """)
+#             execute_query(c, """
+#                 DELETE FROM document_views 
+#                 WHERE viewed_at < CURRENT_TIMESTAMP - INTERVAL '90 days'
+#             """)
+#         else:
+#             execute_query(c, """
+#                 DELETE FROM login_history 
+#                 WHERE created_at < datetime('now', '-90 days')
+#             """)
+#             execute_query(c, """
+#                 DELETE FROM audit_log 
+#                 WHERE created_at < datetime('now', '-180 days')
+#             """)
+#             execute_query(c, """
+#                 DELETE FROM document_views 
+#                 WHERE viewed_at < datetime('now', '-90 days')
+#             """)
 
+#         conn.commit()
+#         conn.close()
+#         print("✅ Log cleanup complete.")
+#     except Exception as e:
+#         print(f"⚠️ cleanup_old_logs failed: {e}")
 
+def cleanup_old_logs():
+    """Delete logs older than retention window. Run once a day."""
+    try:
+        conn = db()
+        c = conn.cursor()
+        is_postgres = os.environ.get("DATABASE_URL") is not None
 
+        login_days = RETENTION["login_history_days"]
+        audit_days = RETENTION["audit_log_days"]
+        doc_days = RETENTION["document_views_days"]
+
+        if is_postgres:
+            execute_query(c, f"""
+                DELETE FROM login_history 
+                WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '{login_days} days'
+            """)
+            execute_query(c, f"""
+                DELETE FROM audit_log 
+                WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '{audit_days} days'
+            """)
+            execute_query(c, f"""
+                DELETE FROM document_views 
+                WHERE viewed_at < CURRENT_TIMESTAMP - INTERVAL '{doc_days} days'
+            """)
+        else:
+            execute_query(c, f"""
+                DELETE FROM login_history 
+                WHERE created_at < datetime('now', '-{login_days} days')
+            """)
+            execute_query(c, f"""
+                DELETE FROM audit_log 
+                WHERE created_at < datetime('now', '-{audit_days} days')
+            """)
+            execute_query(c, f"""
+                DELETE FROM document_views 
+                WHERE viewed_at < datetime('now', '-{doc_days} days')
+            """)
+
+        conn.commit()
+        conn.close()
+        print("✅ Log cleanup complete.")
+    except Exception as e:
+        print(f"⚠️ cleanup_old_logs failed: {e}")
 
 
 def login_required(f):
@@ -983,13 +1505,80 @@ def init_db():
     conn.commit()
     conn.close()
 
-    with app.app_context():
+
+    def _database_is_initialized():
+        """Check if the 'users' table exists — works on both SQLite and PostgreSQL."""
         try:
-            # init_db()
+            conn = db()
+            c = conn.cursor()
+            if os.environ.get("DATABASE_URL"):
+                # PostgreSQL
+                execute_query(c, """
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = 'users'
+                    ) AS exists_flag
+                """)
+                row = c.fetchone()
+                if isinstance(row, dict):
+                    return bool(list(row.values())[0])
+                return bool(row[0]) if row else False
+            else:
+                # SQLite
+                rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
+                return len(rows) > 0
+        except Exception as e:
+            print(f"⚠️ Database init check failed: {e}")
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+
+    with app.app_context():
+        if not _database_is_initialized():
+            print("Database tables not found. Initializing...")
+           # init_db()
+            print("Database initialized successfully!")
+        else:
+            print("Database already initialized.")
+
+        try:
             ensure_schema_columns()
+            ensure_rental_extras_schema()
+            ensure_audit_schema()
+            ensure_privacy_schema()                     # ← NEW
+            migrate_public_uploads_to_private()
             print("✅ Schema is up to date.")
         except Exception as e:
-            print(f"⚠️ Schema bootstrap error: {e}")
+            print(f"⚠️ Schema bootstrap error: {e}")    
+
+
+    # with app.app_context():
+    #     try:
+    #         #init_db()
+    #         ensure_schema_columns()
+    #         ensure_rental_extras_schema()
+    #         migrate_public_uploads_to_private()
+    #         print("✅ Schema is up to date.")
+    #     except Exception as e:
+    #         print(f"⚠️ Schema bootstrap error: {e}")
+
+
+
+    # with app.app_context():
+    #     try:
+    #         init_db()
+    #         ensure_schema_columns()
+    #         ensure_rental_extras_schema()
+    #         print("✅ Schema is up to date.")
+    #     except Exception as e:
+    #         print(f"⚠️ Schema bootstrap error: {e}")
+
+
 
 def ci_like(column, param):
     """
@@ -1063,6 +1652,310 @@ def ensure_schema_columns():
     conn.close()
 
 
+
+
+
+def ensure_rental_extras_schema():
+    """
+    Idempotent migration for the new rental extras:
+    - items catalogue
+    - rental_items join table
+    - damage_claims table
+    - extra columns on bicycles and daily_rentals
+    Safe to run on every startup.
+    """
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+
+
+    if is_postgres:
+        # ---------- PostgreSQL ----------
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS items(
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS rental_items(
+                id SERIAL PRIMARY KEY,
+                rental_id INTEGER NOT NULL REFERENCES daily_rentals(id) ON DELETE CASCADE,
+                item_id INTEGER NOT NULL REFERENCES items(id),
+                given_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                given_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                returned_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                returned_at TIMESTAMP,
+                condition_on_return TEXT,
+                notes TEXT,
+                UNIQUE(rental_id, item_id)
+            );
+        """)
+
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS damage_claims(
+                id SERIAL PRIMARY KEY,
+                rental_id INTEGER REFERENCES daily_rentals(id) ON DELETE SET NULL,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                bicycle_id INTEGER REFERENCES bicycles(id) ON DELETE SET NULL,
+                item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                status TEXT DEFAULT 'Pending',
+                charged_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                charged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMP,
+                payment_method TEXT,
+                signature_data TEXT,
+                signed_agreement_path TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS document_views(
+                id SERIAL PRIMARY KEY,
+                document_id INTEGER NOT NULL REFERENCES customer_documents(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip_address TEXT
+            );
+        """)
+
+
+        # Add columns idempotently
+        execute_query(c, "ALTER TABLE bicycles ADD COLUMN IF NOT EXISTS condition_notes TEXT;")
+        execute_query(c, "ALTER TABLE daily_rentals ADD COLUMN IF NOT EXISTS start_condition_note TEXT;")
+        execute_query(c, "ALTER TABLE daily_rentals ADD COLUMN IF NOT EXISTS damage_charge REAL DEFAULT 0;")
+
+    else:
+        # ---------- SQLite ----------
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS rental_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rental_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            given_by_user_id INTEGER,
+            given_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            returned_by_user_id INTEGER,
+            returned_at TEXT,
+            condition_on_return TEXT,
+            notes TEXT,
+            UNIQUE(rental_id, item_id),
+            FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE,
+            FOREIGN KEY (item_id) REFERENCES items(id),
+            FOREIGN KEY (given_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (returned_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS damage_claims(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rental_id INTEGER,
+            customer_id INTEGER NOT NULL,
+            bicycle_id INTEGER,
+            item_id INTEGER,
+            description TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            status TEXT DEFAULT 'Pending',
+            charged_by_user_id INTEGER,
+            charged_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            paid_at TEXT,
+            payment_method TEXT,
+            signature_data TEXT,
+            signed_agreement_path TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE SET NULL,
+            FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+            FOREIGN KEY (bicycle_id) REFERENCES bicycles(id) ON DELETE SET NULL,
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+            FOREIGN KEY (charged_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        -- Add columns if they don't exist (SQLite lacks IF NOT EXISTS for ADD COLUMN)
+        """)
+
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS document_views(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id INTEGER NOT NULL,
+                user_id INTEGER,
+                viewed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                ip_address TEXT,
+                FOREIGN KEY (document_id) REFERENCES customer_documents(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+        """)
+
+        # SQLite helper to add column only if missing
+        def _add_col_if_missing(table, column, coltype):
+            rows = execute_query(c, f"PRAGMA table_info({table})").fetchall()
+            names = []
+            for row in rows:
+                names.append(row.get("name") if isinstance(row, dict) else row[1])
+            if column not in names:
+                execute_query(c, f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+        _add_col_if_missing("bicycles", "condition_notes", "TEXT")
+        _add_col_if_missing("daily_rentals", "start_condition_note", "TEXT")
+        _add_col_if_missing("daily_rentals", "damage_charge", "REAL DEFAULT 0")
+
+    # ---------- Seed default items (both DBs) ----------
+    default_items = [
+        "Helmet", "Lock", "Pump", "Water Bottle", "Child Seat", "Phone Holder"
+    ]
+    for item_name in default_items:
+        try:
+            if is_postgres:
+                execute_query(c, """
+                    INSERT INTO items (name) VALUES (%s)
+                    ON CONFLICT (name) DO NOTHING
+                """, (item_name,))
+            else:
+                execute_query(c, """
+                    INSERT OR IGNORE INTO items (name) VALUES (?)
+                """, (item_name,))
+        except Exception as e:
+            print(f"seed items skip {item_name}: {e}")
+
+    conn.commit()
+    conn.close()
+
+
+
+def ensure_audit_schema():
+    """
+    Idempotent migration for Phase 3:
+    - login_history
+    - audit_log
+    - retention settings (nothing to add — just policies)
+    """
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+
+    if is_postgres:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS login_history(
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                username_attempted TEXT,
+                success INTEGER DEFAULT 0,
+                ip_address TEXT,
+                user_agent TEXT,
+                device_summary TEXT,
+                failure_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        execute_query(c, """
+            CREATE INDEX IF NOT EXISTS idx_login_history_user_time
+            ON login_history(user_id, created_at DESC);
+        """)
+
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS audit_log(
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                username TEXT,
+                user_role TEXT,
+                action TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id INTEGER,
+                details TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        execute_query(c, """
+            CREATE INDEX IF NOT EXISTS idx_audit_log_entity
+            ON audit_log(entity_type, entity_id);
+        """)
+
+        execute_query(c, """
+            CREATE INDEX IF NOT EXISTS idx_audit_log_time
+            ON audit_log(created_at DESC);
+        """)
+    else:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS login_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username_attempted TEXT,
+            success INTEGER DEFAULT 0,
+            ip_address TEXT,
+            user_agent TEXT,
+            device_summary TEXT,
+            failure_reason TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_login_history_user_time
+        ON login_history(user_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS audit_log(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            user_role TEXT,
+            action TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id INTEGER,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_log_entity
+        ON audit_log(entity_type, entity_id);
+
+        CREATE INDEX IF NOT EXISTS idx_audit_log_time
+        ON audit_log(created_at DESC);
+        """)
+
+    conn.commit()
+    conn.close()
+
+
+    # with app.app_context():
+    #     if not _database_is_initialized():
+    #         print("Database tables not found. Initializing...")
+    #         init_db()
+    #         print("Database initialized successfully!")
+    #     else:
+    #         print("Database already initialized.")
+
+    #     try:
+    #         ensure_schema_columns()
+    #         ensure_rental_extras_schema()
+    #         ensure_audit_schema()                     # ← NEW
+    #         migrate_public_uploads_to_private()
+    #         print("✅ Schema is up to date.")
+    #     except Exception as e:
+    #         print(f"⚠️ Schema bootstrap error: {e}")    
+
+
+
+
 @app.route("/")
 def home():
     return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
@@ -1084,6 +1977,29 @@ def login():
         
         
         if user and check_password_hash(user["password_hash"], password):
+
+
+            # ✅ Log the successful login
+            log_login_attempt(
+                user_id=user["id"],
+                username_attempted=username,
+                success=True,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+                        # ✅ Fire alerts if suspicious
+            check_suspicious_login(user, request.remote_addr, request.headers.get("User-Agent"))
+            log_audit(
+                action="login_success",
+                entity_type="user",
+                entity_id=user["id"],
+                details=f"User {username} logged in",
+                user_id=user["id"],
+                username=user["username"],
+                user_role=user["role"],
+            )
+
+
             # ✅ Check if user is customer - redirect to customer portal
             if user["role"] == "customer":
                 session["user_id"] = user["id"]
@@ -1115,11 +2031,229 @@ def login():
             
             flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
             return redirect(url_for("dashboard"))
-        
+
+        # ✅ Log the failed login
+        log_login_attempt(
+            user_id=user["id"] if user else None,
+            username_attempted=username,
+            success=False,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+            failure_reason="Invalid credentials",
+        )
+
         flash("Invalid username or password.", "danger")
-    
+
     return render_template("login.html", title="Login - Daily Rentals")
 
+# @app.route("/login-history")
+# @login_required
+# @manager_required
+# def login_history():
+#     """Admin/Manager: view all login attempts."""
+#     from datetime import datetime, timedelta
+
+#     conn = db()
+#     c = conn.cursor()
+
+#     # Filters
+#     date_from = (request.args.get("date_from") or "").strip()
+#     date_to = (request.args.get("date_to") or "").strip()
+#     user_filter = (request.args.get("user_filter") or "").strip()
+#     status_filter = (request.args.get("status_filter") or "").strip()
+#     page = int(request.args.get("page", 1))
+#     per_page = 50
+#     offset = (page - 1) * per_page
+
+#     query = """
+#         SELECT 
+#             lh.*,
+#             u.username AS user_username,
+#             u.full_name AS user_full_name,
+#             u.role AS user_role
+#         FROM login_history lh
+#         LEFT JOIN users u ON u.id = lh.user_id
+#         WHERE 1=1
+#     """
+#     params = []
+
+#     if date_from:
+#         query += " AND date(lh.created_at) >= ?"
+#         params.append(date_from)
+#     if date_to:
+#         query += " AND date(lh.created_at) <= ?"
+#         params.append(date_to)
+#     if user_filter:
+#         query += " AND (lh.username_attempted LIKE ? OR u.username LIKE ?)"
+#         like = f"%{user_filter}%"
+#         params.extend([like, like])
+#     if status_filter == "success":
+#         query += " AND lh.success = 1"
+#     elif status_filter == "failed":
+#         query += " AND lh.success = 0"
+
+#     # Get total count for pagination
+#     count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
+#     total_count = get_single_value(c, count_query, params)
+
+#     query += " ORDER BY lh.created_at DESC LIMIT ? OFFSET ?"
+#     params.extend([per_page, offset])
+
+#     entries = execute_query(c, query, params).fetchall()
+
+#     # Convert UTC → Namibia local time for display
+#     for e in entries:
+#         if e.get("created_at"):
+#             e["created_at_display"] = to_namibia_time(e["created_at"])
+#         else:
+#             e["created_at_display"] = "—"
+
+#         # IP masking — admin sees full, manager sees masked
+#         if session.get("role") == "admin":
+#             e["ip_display"] = e.get("ip_address") or "—"
+#         else:
+#             e["ip_display"] = mask_ip(e.get("ip_address"))
+
+#     # Stats
+#     total_attempts = get_single_value(c, "SELECT COUNT(*) FROM login_history")
+#     total_success = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 1")
+#     total_failed = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 0")
+
+#     # Failed in last hour
+#     if os.environ.get("DATABASE_URL"):
+#         failed_last_hour = get_single_value(c, """
+#             SELECT COUNT(*) FROM login_history
+#             WHERE success = 0 AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
+#         """)
+#     else:
+#         failed_last_hour = get_single_value(c, """
+#             SELECT COUNT(*) FROM login_history
+#             WHERE success = 0 AND created_at >= datetime('now', '-1 hour')
+#         """)
+
+#     total_pages = max(1, (total_count + per_page - 1) // per_page)
+
+#     conn.close()
+
+#     return render_template(
+#         "login_history.html",
+#         title="Login History",
+#         entries=entries,
+#         total_attempts=total_attempts,
+#         total_success=total_success,
+#         total_failed=total_failed,
+#         failed_last_hour=failed_last_hour,
+#         date_from=date_from,
+#         date_to=date_to,
+#         user_filter=user_filter,
+#         status_filter=status_filter,
+#         page=page,
+#         total_pages=total_pages,
+#     )
+
+
+# @app.route("/audit-log")
+# @login_required
+# @admin_required
+# def audit_log_page():
+#     """Admin only: view general audit log."""
+#     conn = db()
+#     c = conn.cursor()
+
+#     # Filters
+#     date_from = (request.args.get("date_from") or "").strip()
+#     date_to = (request.args.get("date_to") or "").strip()
+#     user_filter = (request.args.get("user_filter") or "").strip()
+#     action_filter = (request.args.get("action_filter") or "").strip()
+#     entity_filter = (request.args.get("entity_filter") or "").strip()
+#     page = int(request.args.get("page", 1))
+#     per_page = 100
+#     offset = (page - 1) * per_page
+
+#     query = "SELECT * FROM audit_log WHERE 1=1"
+#     params = []
+
+#     if date_from:
+#         query += " AND date(created_at) >= ?"
+#         params.append(date_from)
+#     if date_to:
+#         query += " AND date(created_at) <= ?"
+#         params.append(date_to)
+#     if user_filter:
+#         query += " AND (username LIKE ? OR user_role LIKE ?)"
+#         like = f"%{user_filter}%"
+#         params.extend([like, like])
+#     if action_filter:
+#         query += " AND action = ?"
+#         params.append(action_filter)
+#     if entity_filter:
+#         query += " AND entity_type = ?"
+#         params.append(entity_filter)
+
+#     # Count for pagination
+#     count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
+#     total_count = get_single_value(c, count_query, params)
+
+#     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+#     params.extend([per_page, offset])
+
+#     entries = execute_query(c, query, params).fetchall()
+
+#     # Convert UTC → Namibia local time
+#     for e in entries:
+#         if e.get("created_at"):
+#             e["created_at_display"] = to_namibia_time(e["created_at"])
+#         else:
+#             e["created_at_display"] = "—"
+#         if session.get("role") == "admin":
+#             e["ip_display"] = e.get("ip_address") or "—"
+#         else:
+#             e["ip_display"] = mask_ip(e.get("ip_address"))
+
+#     # Get the list of distinct actions for the filter dropdown
+#     actions = execute_query(c, """
+#         SELECT DISTINCT action FROM audit_log ORDER BY action
+#     """).fetchall()
+#     action_list = [a["action"] if isinstance(a, dict) else a[0] for a in actions]
+
+#     # Distinct entity types
+#     entities = execute_query(c, """
+#         SELECT DISTINCT entity_type FROM audit_log 
+#         WHERE entity_type IS NOT NULL ORDER BY entity_type
+#     """).fetchall()
+#     entity_list = [a["entity_type"] if isinstance(a, dict) else a[0] for a in entities]
+
+#     total_pages = max(1, (total_count + per_page - 1) // per_page)
+#     conn.close()
+
+#     return render_template(
+#         "audit_log.html",
+#         title="Audit Log",
+#         entries=entries,
+#         action_list=action_list,
+#         entity_list=entity_list,
+#         date_from=date_from,
+#         date_to=date_to,
+#         user_filter=user_filter,
+#         action_filter=action_filter,
+#         entity_filter=entity_filter,
+#         page=page,
+#         total_pages=total_pages,
+#     )
+
+# @app.route("/admin/run-cleanup", methods=["POST"])
+# @login_required
+# @admin_required
+# def admin_run_cleanup():
+#     """Manually trigger the retention cleanup."""
+#     cleanup_old_logs()
+#     log_audit(
+#         action="run_cleanup",
+#         entity_type="system",
+#         details="Manual retention cleanup executed",
+#     )
+#     flash("Retention cleanup completed. Old logs purged.", "success")
+#     return redirect(url_for("audit_log_page"))
 
 
 @app.route("/customer-login", methods=["GET", "POST"])
@@ -1165,6 +2299,282 @@ def customer_login():
     return render_template("customer_login.html", title="Customer Login")
 
 
+
+def _gather_customer_data(customer_id):
+    """
+    Fetch everything we hold about a customer.
+    Returns a dict suitable for JSON export.
+    """
+    conn = db()
+    c = conn.cursor()
+
+    customer = execute_query(c, """
+        SELECT id, full_name, id_number, phone, email, address,
+               verification_status, verification_notes,
+               terms_accepted, terms_accepted_date, signature_data,
+               created_at
+        FROM customers WHERE id = ?
+    """, (customer_id,)).fetchone()
+
+    if not customer:
+        conn.close()
+        return None
+
+    documents = execute_query(c, """
+        SELECT id, document_type, file_path, uploaded_at
+        FROM customer_documents WHERE customer_id = ?
+        ORDER BY uploaded_at
+    """, (customer_id,)).fetchall()
+
+    rentals = execute_query(c, """
+        SELECT r.id, r.start_time, r.end_time, r.total_hours, r.total_cost,
+               r.deposit_paid, r.late_fee, r.payment_status, r.status,
+               r.start_condition_note, r.condition_before, r.condition_after,
+               b.bike_code, b.brand, b.model,
+               ss.name AS start_station, es.name AS end_station
+        FROM daily_rentals r
+        LEFT JOIN bicycles b ON b.id = r.bicycle_id
+        LEFT JOIN branches ss ON ss.id = r.start_station_id
+        LEFT JOIN branches es ON es.id = r.end_station_id
+        WHERE r.customer_id = ?
+        ORDER BY r.start_time DESC
+    """, (customer_id,)).fetchall()
+
+    payments = execute_query(c, """
+        SELECT p.id, p.amount, p.payment_date, p.payment_method, p.status,
+               p.daily_rental_id
+        FROM rental_payments p
+        JOIN daily_rentals r ON r.id = p.daily_rental_id
+        WHERE r.customer_id = ?
+        ORDER BY p.payment_date DESC
+    """, (customer_id,)).fetchall()
+
+    damage_claims = execute_query(c, """
+        SELECT id, description, amount, status, charged_at, paid_at,
+               payment_method, bicycle_id, item_id
+        FROM damage_claims WHERE customer_id = ?
+        ORDER BY charged_at DESC
+    """, (customer_id,)).fetchall()
+
+    loyalty = execute_query(c, """
+        SELECT points, total_spent, total_rentals, tier, updated_at
+        FROM loyalty_points WHERE customer_id = ?
+    """, (customer_id,)).fetchone()
+
+    conn.close()
+
+    # Convert datetime fields to Namibia-local strings for display
+    for r in rentals:
+        if r.get("start_time"):
+            r["start_time"] = to_namibia_time(r["start_time"])
+        if r.get("end_time"):
+            r["end_time"] = to_namibia_time(r["end_time"])
+    for p in payments:
+        if p.get("payment_date"):
+            p["payment_date"] = to_namibia_time(p["payment_date"])
+    for d in damage_claims:
+        for k in ("charged_at", "paid_at"):
+            if d.get(k):
+                d[k] = to_namibia_time(d[k])
+    for d in documents:
+        if d.get("uploaded_at"):
+            d["uploaded_at"] = to_namibia_time(d["uploaded_at"])
+
+    return {
+        "customer": dict(customer) if hasattr(customer, "keys") else customer,
+        "documents": documents,
+        "rentals": rentals,
+        "payments": payments,
+        "damage_claims": damage_claims,
+        "loyalty": dict(loyalty) if loyalty and hasattr(loyalty, "keys") else loyalty,
+    }
+
+
+def _build_customer_data_pdf(customer, documents, rentals, payments,
+                             damage_claims, loyalty):
+    """Build a customer data export PDF and return as BytesIO."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from io import BytesIO
+    from datetime import datetime
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    x = 20 * mm
+    y = height - 20 * mm
+
+    # Header
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(x, y, "RAB — Personal Data Export")
+    y -= 8 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(x, y, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    y -= 10 * mm
+
+    def section(title):
+        nonlocal y
+        if y < 40 * mm:
+            pdf.showPage()
+            y = height - 20 * mm
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.setFillColor(colors.HexColor("#0d1f46"))
+        pdf.drawString(x, y, title)
+        y -= 6 * mm
+        pdf.setFont("Helvetica", 9)
+        pdf.setFillColor(colors.HexColor("#111111"))
+
+    def line(label, value):
+        nonlocal y
+        if y < 20 * mm:
+            pdf.showPage()
+            y = height - 20 * mm
+            pdf.setFont("Helvetica", 9)
+            pdf.setFillColor(colors.HexColor("#111111"))
+        text = f"{label}: {value if value not in (None, '') else '—'}"
+        # Wrap long lines
+        max_chars = 110
+        if len(text) > max_chars:
+            pdf.drawString(x + 3 * mm, y, text[:max_chars])
+            y -= 5 * mm
+            remaining = text[max_chars:]
+            while remaining:
+                pdf.drawString(x + 3 * mm, y, "  " + remaining[:max_chars])
+                y -= 5 * mm
+                remaining = remaining[max_chars:]
+        else:
+            pdf.drawString(x + 3 * mm, y, text)
+            y -= 5 * mm
+
+    # 1. Identity
+    section("1. Your Identity")
+    line("Full name", customer.get("full_name"))
+    line("ID / Passport number", customer.get("id_number"))
+    line("Phone", customer.get("phone"))
+    line("Email", customer.get("email"))
+    line("Address", customer.get("address"))
+    line("Verification status", customer.get("verification_status"))
+    line("Verification notes", customer.get("verification_notes"))
+    line("Account created", to_namibia_time(customer.get("created_at")))
+    line("Terms accepted", "Yes" if customer.get("terms_accepted") else "No")
+    line("Terms accepted on", to_namibia_time(customer.get("terms_accepted_date")))
+    y -= 4 * mm
+
+    # 2. Documents
+    section(f"2. Uploaded Documents ({len(documents)})")
+    if documents:
+        for d in documents:
+            line(d.get("document_type", "document"), 
+                 f"uploaded {d.get('uploaded_at')}")
+    else:
+        line("(none)", "")
+    y -= 4 * mm
+
+    # 3. Rentals
+    section(f"3. Rental History ({len(rentals)})")
+    if rentals:
+        for r in rentals:
+            line(f"#{r.get('id')} — {r.get('bike_code')}",
+                 f"{r.get('start_time')} → {r.get('end_time') or 'active'} | "
+                 f"{r.get('total_hours') or 0:.1f}h | N${r.get('total_cost') or 0:.2f} | "
+                 f"{r.get('status')}")
+    else:
+        line("(no rentals)", "")
+    y -= 4 * mm
+
+    # 4. Payments
+    section(f"4. Payments ({len(payments)})")
+    if payments:
+        for p in payments:
+            line(f"#{p.get('id')}",
+                 f"{p.get('payment_date')} | N${p.get('amount') or 0:.2f} | "
+                 f"{p.get('payment_method') or '—'} | {p.get('status')}")
+    else:
+        line("(no payments)", "")
+    y -= 4 * mm
+
+    # 5. Damage claims
+    section(f"5. Damage Claims ({len(damage_claims)})")
+    if damage_claims:
+        for d in damage_claims:
+            line(f"#{d.get('id')}",
+                 f"{d.get('charged_at')} | N${d.get('amount') or 0:.2f} | "
+                 f"{d.get('status')} | {d.get('description', '')[:80]}")
+    else:
+        line("(no claims)", "")
+    y -= 4 * mm
+
+    # 6. Loyalty
+    section("6. Loyalty Program")
+    if loyalty:
+        line("Points balance", loyalty.get("points"))
+        line("Total spent", f"N${loyalty.get('total_spent') or 0:.2f}")
+        line("Total rentals", loyalty.get("total_rentals"))
+        line("Tier", loyalty.get("tier"))
+    else:
+        line("(not enrolled)", "")
+
+    y -= 10 * mm
+    pdf.setFont("Helvetica", 8)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(x, y, 
+                   "This is a summary of personal data held by RAB Rent A Bike. "
+                   "A machine-readable JSON version accompanies this PDF in the export.")
+    y -= 4 * mm
+    pdf.drawString(x, y, 
+                   "For questions, contact privacy@rab.com")
+
+    pdf.save()
+    buf.seek(0)
+    return buf
+
+
+def ensure_privacy_schema():
+    """Idempotent migration for privacy requests."""
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+
+    if is_postgres:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS privacy_requests(
+                id SERIAL PRIMARY KEY,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                request_type TEXT NOT NULL,         -- 'delete' or 'export'
+                reason TEXT,
+                status TEXT DEFAULT 'Pending',      -- Pending / Approved / Rejected / Completed
+                reviewed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                reviewed_at TIMESTAMP,
+                review_notes TEXT,
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            );
+        """)
+    else:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS privacy_requests(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL,
+                request_type TEXT NOT NULL,
+                reason TEXT,
+                status TEXT DEFAULT 'Pending',
+                reviewed_by_user_id INTEGER,
+                reviewed_at TEXT,
+                review_notes TEXT,
+                requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+                FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+        """)
+
+    conn.commit()
+    conn.close()
 
 
 
@@ -1316,6 +2726,13 @@ def add_user():
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (username, generate_password_hash(password), role, full_name, email, branch_id))
             conn.commit()
+
+            log_audit(
+                action="user_create",
+                entity_type="user",
+                details=f"Created user '{username}' (role={role})"
+            )
+
             flash(f"User '{username}' created successfully!", "success")
         except sqlite3.IntegrityError:
             flash(f"Username '{username}' already exists.", "danger")
@@ -1381,6 +2798,14 @@ def edit_user(user_id):
             """, (role, full_name, email, branch_id, user_id))
 
         conn.commit()
+
+        log_audit(
+            action="user_edit",
+            entity_type="user",
+            entity_id=user_id,
+            details=f"Edited user '{user['username']}' (role={role})"
+        )
+
         conn.close()
 
         flash(f"User '{user['username']}' updated successfully!", "success")
@@ -1520,6 +2945,13 @@ def stations():
                     VALUES (?, ?, ?, ?, ?, 1)
                 """, (name, location, address, phone, email))
                 conn.commit()
+
+                log_audit(
+                    action="station_create",
+                    entity_type="branch",
+                    details=f"Added station '{name}'"
+                )
+
                 flash(f"Station '{name}' added.", "success")
             except Exception as e:
                 conn.rollback()
@@ -1538,6 +2970,127 @@ def stations():
 
     conn.close()
     return render_template("stations.html", title="Stations", stations=stations_list)
+
+
+
+@app.route("/items", methods=["GET", "POST"])
+@login_required
+@admin_required
+def items():
+    """Admin: manage items provided with rentals."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        description = (request.form.get("description") or "").strip()
+
+        if not name:
+            flash("Item name is required.", "danger")
+        else:
+            try:
+                execute_query(c, """
+                    INSERT INTO items (name, description, is_active)
+                    VALUES (?, ?, 1)
+                """, (name, description))
+                conn.commit()
+
+                log_audit(
+                    action="item_create",
+                    entity_type="item",
+                    details=f"Added item '{name}'"
+                )
+
+                flash(f"Item '{name}' added.", "success")
+            except Exception as e:
+                conn.rollback()
+                flash(f"Error: {e}", "danger")
+
+        conn.close()
+        return redirect(url_for("items"))
+
+    items_list = execute_query(c, """
+        SELECT * FROM items ORDER BY name
+    """).fetchall()
+    conn.close()
+    return render_template("items.html", title="Items", items=items_list)
+
+
+@app.route("/items/<int:item_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_item(item_id):
+    conn = db()
+    c = conn.cursor()
+
+    item = execute_query(c, "SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        conn.close()
+        flash("Item not found.", "danger")
+        return redirect(url_for("items"))
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        is_active = 1 if request.form.get("is_active") == "on" else 0
+
+        if not name:
+            flash("Item name is required.", "danger")
+        else:
+            execute_query(c, """
+                UPDATE items SET name = ?, description = ?, is_active = ?
+                WHERE id = ?
+            """, (name, description, is_active, item_id))
+            conn.commit()
+
+            log_audit(
+                action="item_edit",
+                entity_type="item",
+                entity_id=item_id,
+                details=f"Edited item '{name}'"
+            )
+
+            flash(f"Item '{name}' updated.", "success")
+            conn.close()
+            return redirect(url_for("items"))
+
+    conn.close()
+    return render_template("edit_item.html", title="Edit Item", item=item)
+
+
+@app.route("/items/<int:item_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_item(item_id):
+    conn = db()
+    c = conn.cursor()
+
+    # Block if any rental is currently using it (not yet returned)
+    in_use = get_single_value(c, """
+        SELECT COUNT(*) FROM rental_items ri
+        JOIN daily_rentals r ON r.id = ri.rental_id
+        WHERE ri.item_id = ? AND ri.returned_at IS NULL
+          AND r.status = 'Active'
+    """, (item_id,))
+
+    if in_use and int(in_use) > 0:
+        conn.close()
+        flash(f"Cannot delete: {in_use} active rental(s) still have this item.", "danger")
+        return redirect(url_for("items"))
+
+
+    log_audit(
+        action="item_delete",
+        entity_type="item",
+        entity_id=item_id,
+        details=f"Deleted item #{item_id}"
+    )
+
+    execute_query(c, "DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+    flash("Item deleted.", "success")
+    return redirect(url_for("items"))
 
 
 @app.route("/stations/<int:station_id>/edit", methods=["GET", "POST"])
@@ -1573,6 +3126,14 @@ def edit_station(station_id):
                 WHERE id = ?
             """, (name, location, address, phone, email, is_active, station_id))
             conn.commit()
+
+            log_audit(
+                action="station_edit",
+                entity_type="branch",
+                entity_id=station_id,
+                details=f"Edited station '{name}'"
+            )
+
             flash(f"Station '{name}' updated.", "success")
             conn.close()
             return redirect(url_for("stations"))
@@ -1595,6 +3156,13 @@ def delete_station(station_id):
         conn.close()
         flash(f"Cannot delete: {bikes_here} bicycle(s) are currently at this station.", "danger")
         return redirect(url_for("stations"))
+
+    log_audit(
+        action="station_delete",
+        entity_type="branch",
+        entity_id=station_id,
+        details=f"Deleted station '{station_id}'"
+    )
 
     execute_query(c, "DELETE FROM branches WHERE id = ?", (station_id,))
     conn.commit()
@@ -1672,7 +3240,14 @@ def delete_user(user_id):
         
         # ✅ STEP 13: Delete bike conditions where user is checker
         execute_query(c,"DELETE FROM bike_conditions WHERE checked_by = ?", (user_id,))
-        
+
+        log_audit(
+            action="user_delete",
+            entity_type="user",
+            entity_id=user_id,
+            details=f"Deleted user '{user['username']}' (role={user['role']})"
+        )
+
         # ✅ STEP 14: Finally delete the user
         execute_query(c,"DELETE FROM users WHERE id = ?", (user_id,))
         
@@ -1732,6 +3307,14 @@ def reset_customer_password(customer_id):
         """, (generate_password_hash(new_password), customer["user_id"]))
         
         conn.commit()
+
+        log_audit(
+            action="customer_password_reset",
+            entity_type="customer",
+            entity_id=customer_id,
+            details=f"Password reset for customer '{customer['full_name']}'"
+        )
+
         conn.close()
         
         flash(f"Password reset successful for {customer['full_name']}!", "success")
@@ -1782,6 +3365,14 @@ def profile():
             """, (full_name, email, session["user_id"]))
         
         conn.commit()
+
+        log_audit(
+            action="password_change",
+            entity_type="user",
+            entity_id=session["user_id"],
+            details="Changed own password"
+        )
+
         conn.close()
         
         flash("Profile updated successfully!", "success")
@@ -1792,7 +3383,139 @@ def profile():
 
 
 
+@app.route("/my-data/export.zip")
+@login_required
+@customer_required
+def customer_data_export():
+    """Customer: download a ZIP with all personal data held."""
+    import zipfile
+    from io import BytesIO
 
+    # Find the customer ID for this user
+    conn = db()
+    c = conn.cursor()
+    customer_row = execute_query(c, 
+        "SELECT id FROM customers WHERE user_id = ?", (session["user_id"],)
+    ).fetchone()
+    conn.close()
+
+    if not customer_row:
+        flash("No customer profile found.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    customer_id = customer_row["id"]
+    data = _gather_customer_data(customer_id)
+    if not data:
+        flash("Could not gather your data.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    customer = data["customer"]
+    documents = data["documents"]
+    rentals = data["rentals"]
+    payments = data["payments"]
+    damage_claims = data["damage_claims"]
+    loyalty = data["loyalty"]
+
+    # Build the ZIP
+    zip_buffer = BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        # README
+        readme = (
+            "RAB RENT A BIKE — PERSONAL DATA EXPORT\n"
+            "======================================\n\n"
+            f"Customer: {customer.get('full_name')}\n"
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            "Contents of this archive:\n"
+            "  - personal_data.json      Machine-readable data (portable format)\n"
+            "  - personal_data.pdf       Human-readable summary\n"
+            "  - documents/              Uploaded ID documents and photos\n"
+            "  - signatures/signature.png Your digital signature (if on file)\n\n"
+            "Your rights under the Namibian Data Protection Act (Act 5 of 2022):\n"
+            "  - Access, correction, deletion, portability, objection\n\n"
+            "Questions: privacy@rab.com\n"
+        )
+        zf.writestr("README.txt", readme)
+
+        # JSON
+        import json
+        json_data = {
+            "export_generated": datetime.now().isoformat(),
+            "export_generated_by": session.get("username"),
+            "customer": {k: v for k, v in customer.items() if k != "signature_data"},
+            "documents": [
+                {k: v for k, v in d.items() if k != "file_path"} for d in documents
+            ],
+            "rentals": rentals,
+            "payments": payments,
+            "damage_claims": damage_claims,
+            "loyalty": loyalty,
+        }
+        zf.writestr(
+            "personal_data.json",
+            json.dumps(json_data, indent=2, default=str)
+        )
+
+        # PDF
+        pdf_buf = _build_customer_data_pdf(
+            customer, documents, rentals, payments, damage_claims, loyalty
+        )
+        zf.writestr("personal_data.pdf", pdf_buf.getvalue())
+
+        # Documents
+        for doc in documents:
+            file_path = doc.get("file_path") or ""
+            filename = f"doc_{doc['id']}_{doc['document_type']}"
+
+            if file_path.startswith("http"):
+                # Cloudinary — skip actual file; note the URL
+                zf.writestr(
+                    f"documents/{filename}.url.txt",
+                    f"Stored on Cloudinary:\n{file_path}\n"
+                )
+            else:
+                local_name = os.path.basename(file_path)
+                full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, local_name)
+                if os.path.exists(full_path):
+                    ext = os.path.splitext(local_name)[1]
+                    zf.write(full_path, arcname=f"documents/{filename}{ext}")
+                else:
+                    zf.writestr(
+                        f"documents/{filename}.missing.txt",
+                        f"File was not found on server: {local_name}\n"
+                    )
+
+        # Signature
+        sig_data = customer.get("signature_data")
+        if sig_data:
+            try:
+                if sig_data.startswith("data:image"):
+                    header, b64 = sig_data.split(",", 1)
+                else:
+                    b64 = sig_data
+                import base64
+                sig_bytes = base64.b64decode(b64)
+                zf.writestr("signatures/signature.png", sig_bytes)
+            except Exception as e:
+                zf.writestr("signatures/signature_error.txt", f"Could not decode signature: {e}")
+
+    zip_buffer.seek(0)
+
+    # Log the export
+    log_audit(
+        action="customer_data_export",
+        entity_type="customer",
+        entity_id=customer_id,
+        details=f"Customer exported their data (self-service)"
+    )
+
+    filename = f"rab_personal_data_{customer_id}_{datetime.now().strftime('%Y-%m-%d')}.zip"
+    return send_file(
+        zip_buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/zip"
+    )
 
 
 
@@ -1993,7 +3716,10 @@ def dashboard():
         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
         ORDER BY r.end_time DESC
     """).fetchall()
-    
+        # ✅ Pending privacy requests
+    pending_privacy = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Pending'
+    """)
     # Format dates for unpaid rentals
     for rental in unpaid_rentals:
         if rental.get("start_time"):
@@ -2020,6 +3746,8 @@ def dashboard():
                 except:
                     rental["end_time"] = rental["end_time"]
     
+
+    
     conn.close()
     
     # Ensure revenue is never negative
@@ -2035,7 +3763,9 @@ def dashboard():
         pending_verification=pending_verification,
         today_revenue=today_revenue,
         rentals=rentals,
-        unpaid_rentals=unpaid_rentals
+        unpaid_rentals=unpaid_rentals,
+        pending_privacy=pending_privacy,
+        retention=RETENTION
     )
 
 
@@ -2056,7 +3786,18 @@ def start_rental():
         customer_id = request.form.get("customer_id")
         bicycle_id = request.form.get("bicycle_id")
         start_time = request.form.get("start_time")
-        
+        # ✅ Q11 — block if customer has unpaid damage claims
+        unpaid = get_customer_unpaid_damages(c, customer_id)
+        if unpaid > 0:
+            conn.close()
+            flash(
+                f"Cannot start rental: this customer has an unpaid damage balance of N$ {unpaid:.2f}. "
+                f"Please settle the balance first.",
+                "danger"
+            )
+            return redirect(url_for("customer_damages", customer_id=customer_id))
+
+
         # ✅ FIX: Convert local time to UTC for storage
         if start_time:
             # Parse local time (Namibia time)
@@ -2066,7 +3807,7 @@ def start_rental():
             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             # Use current UTC time
-            utc_dt = datetime.utcnow()
+            utc_dt = utc_now()
             start_time_utc = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
         
         # Debug: Print the time being saved
@@ -2121,7 +3862,36 @@ def start_rental():
         rental_id = c.lastrowid
         
         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
-        
+        # ✅ Save start condition note
+        start_condition_note = (request.form.get("start_condition_note") or "").strip()
+
+        # ✅ Save selected items
+        selected_items = request.form.getlist("items")
+
+        # ...after INSERT rental & getting rental_id...
+        execute_query(c, """
+            UPDATE daily_rentals 
+            SET start_condition_note = ?
+            WHERE id = ?
+        """, (start_condition_note, rental_id))
+
+        for item_id in selected_items:
+            try:
+                execute_query(c, """
+                    INSERT INTO rental_items (rental_id, item_id, given_by_user_id)
+                    VALUES (?, ?, ?)
+                """, (rental_id, int(item_id), session["user_id"]))
+            except Exception as e:
+                print(f"skip item {item_id}: {e}")  
+
+        log_audit(
+            action="rental_start",
+            entity_type="daily_rental",
+            entity_id=rental_id,
+            details=f"Started rental #{rental_id} — customer_id={customer_id}, bike_id={bicycle_id}, "
+                    f"deposit=N${deposit_paid:.2f}, station_id={start_station_id}"
+        )                
+
         conn.commit()
         conn.close()
         
@@ -2147,6 +3917,11 @@ def start_rental():
         ORDER BY name
     """).fetchall()
 
+    items_list = execute_query(c, """
+        SELECT id, name FROM items WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
+
     # Default station from session (user's assigned station) or first active station
     default_station_id = session.get("station_id")
     if not default_station_id and stations:
@@ -2164,9 +3939,234 @@ def start_rental():
         customers=customers,
         bicycles=bicycles,
         stations=stations,
+        items_list=items_list,
         default_station_id=default_station_id,
         now=local_now.strftime("%Y-%m-%dT%H:%M")
     )
+
+
+@app.route("/login-history")
+@login_required
+@manager_required
+def login_history():
+    """Admin/Manager: view all login attempts."""
+    from datetime import datetime, timedelta
+
+    conn = db()
+    c = conn.cursor()
+
+    # Filters
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    status_filter = (request.args.get("status_filter") or "").strip()
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    query = """
+        SELECT 
+            lh.*,
+            u.username AS user_username,
+            u.full_name AS user_full_name,
+            u.role AS user_role
+        FROM login_history lh
+        LEFT JOIN users u ON u.id = lh.user_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(lh.created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(lh.created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (lh.username_attempted LIKE ? OR u.username LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if status_filter == "success":
+        query += " AND lh.success = 1"
+    elif status_filter == "failed":
+        query += " AND lh.success = 0"
+
+    # Get total count for pagination
+    count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
+    total_count = get_single_value(c, count_query, params)
+
+    query += " ORDER BY lh.created_at DESC LIMIT ? OFFSET ?"
+    params.extend([per_page, offset])
+
+    entries = execute_query(c, query, params).fetchall()
+
+    # Convert UTC → Namibia local time for display
+    for e in entries:
+        if e.get("created_at"):
+            e["created_at_display"] = to_namibia_time(e["created_at"])
+        else:
+            e["created_at_display"] = "—"
+
+        # IP masking — admin sees full, manager sees masked
+        if session.get("role") == "admin":
+            e["ip_display"] = e.get("ip_address") or "—"
+        else:
+            e["ip_display"] = mask_ip(e.get("ip_address"))
+
+    # Stats
+    total_attempts = get_single_value(c, "SELECT COUNT(*) FROM login_history")
+    total_success = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 1")
+    total_failed = get_single_value(c, "SELECT COUNT(*) FROM login_history WHERE success = 0")
+
+    # Failed in last hour
+    if os.environ.get("DATABASE_URL"):
+        failed_last_hour = get_single_value(c, """
+            SELECT COUNT(*) FROM login_history
+            WHERE success = 0 AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
+        """)
+    else:
+        failed_last_hour = get_single_value(c, """
+            SELECT COUNT(*) FROM login_history
+            WHERE success = 0 AND created_at >= datetime('now', '-1 hour')
+        """)
+
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+
+
+    active_users_today = get_single_value(c, """
+        SELECT COUNT(DISTINCT user_id) FROM login_history
+        WHERE success = 1 AND date(created_at) = date('now')
+    """ if not os.environ.get("DATABASE_URL") else """
+        SELECT COUNT(DISTINCT user_id) FROM login_history
+        WHERE success = 1 AND DATE(created_at) = CURRENT_DATE
+    """)    
+
+    conn.close()
+
+    return render_template(
+        "login_history.html",
+        title="Login History",
+        entries=entries,
+        total_attempts=total_attempts,
+        total_success=total_success,
+        total_failed=total_failed,
+        failed_last_hour=failed_last_hour,
+        date_from=date_from,
+        date_to=date_to,
+        user_filter=user_filter,
+        status_filter=status_filter,
+        page=page,
+        total_pages=total_pages,
+        active_users_today=active_users_today
+    )
+
+
+@app.route("/audit-log")
+@login_required
+@admin_required
+def audit_log_page():
+    """Admin only: view general audit log."""
+    conn = db()
+    c = conn.cursor()
+
+    # Filters
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    action_filter = (request.args.get("action_filter") or "").strip()
+    entity_filter = (request.args.get("entity_filter") or "").strip()
+    page = int(request.args.get("page", 1))
+    per_page = 100
+    offset = (page - 1) * per_page
+
+    query = "SELECT * FROM audit_log WHERE 1=1"
+    params = []
+
+    if date_from:
+        query += " AND date(created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (username LIKE ? OR user_role LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if action_filter:
+        query += " AND action = ?"
+        params.append(action_filter)
+    if entity_filter:
+        query += " AND entity_type = ?"
+        params.append(entity_filter)
+
+    # Count for pagination
+    count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
+    total_count = get_single_value(c, count_query, params)
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([per_page, offset])
+
+    entries = execute_query(c, query, params).fetchall()
+
+    # Convert UTC → Namibia local time
+    for e in entries:
+        if e.get("created_at"):
+            e["created_at_display"] = to_namibia_time(e["created_at"])
+        else:
+            e["created_at_display"] = "—"
+        if session.get("role") == "admin":
+            e["ip_display"] = e.get("ip_address") or "—"
+        else:
+            e["ip_display"] = mask_ip(e.get("ip_address"))
+
+    # Get the list of distinct actions for the filter dropdown
+    actions = execute_query(c, """
+        SELECT DISTINCT action FROM audit_log ORDER BY action
+    """).fetchall()
+    action_list = [a["action"] if isinstance(a, dict) else a[0] for a in actions]
+
+    # Distinct entity types
+    entities = execute_query(c, """
+        SELECT DISTINCT entity_type FROM audit_log 
+        WHERE entity_type IS NOT NULL ORDER BY entity_type
+    """).fetchall()
+    entity_list = [a["entity_type"] if isinstance(a, dict) else a[0] for a in entities]
+
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+    conn.close()
+
+    return render_template(
+        "audit_log.html",
+        title="Audit Log",
+        entries=entries,
+        action_list=action_list,
+        entity_list=entity_list,
+        date_from=date_from,
+        date_to=date_to,
+        user_filter=user_filter,
+        action_filter=action_filter,
+        entity_filter=entity_filter,
+        page=page,
+        total_pages=total_pages,
+    )
+
+@app.route("/admin/run-cleanup", methods=["POST"])
+@login_required
+@admin_required
+def admin_run_cleanup():
+    """Manually trigger the retention cleanup."""
+    cleanup_old_logs()
+    log_audit(
+        action="run_cleanup",
+        entity_type="system",
+        details="Manual retention cleanup executed",
+    )
+    flash("Retention cleanup completed. Old logs purged.", "success")
+    return redirect(url_for("audit_log_page"))
+
+
+
+
 
 
 @app.route("/customers", methods=["GET", "POST"])
@@ -2272,14 +4272,28 @@ def customers():
         
         session["customer_id"] = customer_id
         
+
+        log_audit(
+            action="customer_create",
+            entity_type="customer",
+            entity_id=customer_id,
+            details=f"Registered customer '{full_name}' (phone: {phone})"
+        )
+
+
         # ✅ Save documents
         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
-        # Handle ID Photo
+
+        # ✅ Handle ID Photo
         if id_photo and id_photo.filename:
+            ok, err, ext = validate_upload(id_photo)
+            if not ok:
+                flash(f"ID document rejected: {err}", "danger")
+                return redirect(url_for("customers"))
+
             uploaded = False
-            
+
             # Try Cloudinary first
             if use_cloudinary:
                 try:
@@ -2289,35 +4303,36 @@ def customers():
                         INSERT INTO customer_documents (customer_id, document_type, file_path)
                         VALUES (?, 'id_copy', ?)
                     """, (customer_id, file_url))
-                    print(f"✅ ID uploaded to Cloudinary: {file_url}")
                     flash("ID document uploaded successfully!", "success")
                     uploaded = True
                 except Exception as e:
                     print(f"❌ Cloudinary upload failed: {e}")
-                    flash("Cloudinary upload failed, saving locally.", "warning")
-            
-            # Fallback to local storage
+
+            # Fallback to private local storage
             if not uploaded:
                 try:
                     filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-                    filepath = os.path.join(UPLOAD_FOLDER, filename)
+                    filepath = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
                     id_photo.save(filepath)
                     execute_query(c, """
                         INSERT INTO customer_documents (customer_id, document_type, file_path)
                         VALUES (?, 'id_copy', ?)
-                    """, (customer_id, f"uploads/{filename}"))
-                    print(f"✅ ID saved locally: {filename}")
-                    flash("ID document saved locally!", "success")
+                    """, (customer_id, f"private_uploads/{filename}"))
+                    flash("ID document saved securely!", "success")
                 except Exception as e:
                     print(f"❌ Local save failed: {e}")
                     flash("Error uploading ID document.", "danger")
                     return redirect(url_for("customers"))
-        
-        # Handle Customer Photo
+
+        # ✅ Handle Customer Photo
         if customer_photo and customer_photo.filename:
+            ok, err, ext = validate_upload(customer_photo)
+            if not ok:
+                flash(f"Customer photo rejected: {err}", "danger")
+                return redirect(url_for("customers"))
+
             uploaded = False
-            
-            # Try Cloudinary first
+
             if use_cloudinary:
                 try:
                     upload_result = cloudinary.uploader.upload(customer_photo)
@@ -2326,29 +4341,108 @@ def customers():
                         INSERT INTO customer_documents (customer_id, document_type, file_path)
                         VALUES (?, 'customer_photo', ?)
                     """, (customer_id, file_url))
-                    print(f"✅ Photo uploaded to Cloudinary: {file_url}")
                     flash("Customer photo uploaded successfully!", "success")
+
+                    log_audit(
+                        action="document_upload",
+                        entity_type="customer",
+                        entity_id=customer_id,
+                        details=f"Uploaded {doc_type} for customer #{customer_id}"
+                    )
+
                     uploaded = True
                 except Exception as e:
                     print(f"❌ Cloudinary upload failed: {e}")
-                    flash("Cloudinary upload failed, saving locally.", "warning")
-            
-            # Fallback to local storage
+
             if not uploaded:
                 try:
                     filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-                    filepath = os.path.join(UPLOAD_FOLDER, filename)
+                    filepath = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
                     customer_photo.save(filepath)
                     execute_query(c, """
                         INSERT INTO customer_documents (customer_id, document_type, file_path)
                         VALUES (?, 'customer_photo', ?)
-                    """, (customer_id, f"uploads/{filename}"))
-                    print(f"✅ Photo saved locally: {filename}")
-                    flash("Customer photo saved locally!", "success")
+                    """, (customer_id, f"private_uploads/{filename}"))
+                    flash("Customer photo saved securely!", "success")
                 except Exception as e:
                     print(f"❌ Local save failed: {e}")
                     flash("Error uploading customer photo.", "danger")
                     return redirect(url_for("customers"))
+
+
+        # # Handle ID Photo
+        # if id_photo and id_photo.filename:
+        #     uploaded = False
+            
+        #     # Try Cloudinary first
+        #     if use_cloudinary:
+        #         try:
+        #             upload_result = cloudinary.uploader.upload(id_photo)
+        #             file_url = upload_result['secure_url']
+        #             execute_query(c, """
+        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+        #                 VALUES (?, 'id_copy', ?)
+        #             """, (customer_id, file_url))
+        #             print(f"✅ ID uploaded to Cloudinary: {file_url}")
+        #             flash("ID document uploaded successfully!", "success")
+        #             uploaded = True
+        #         except Exception as e:
+        #             print(f"❌ Cloudinary upload failed: {e}")
+        #             flash("Cloudinary upload failed, saving locally.", "warning")
+            
+        #     # Fallback to local storage
+        #     if not uploaded:
+        #         try:
+        #             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
+        #             filepath = os.path.join(UPLOAD_FOLDER, filename)
+        #             id_photo.save(filepath)
+        #             execute_query(c, """
+        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+        #                 VALUES (?, 'id_copy', ?)
+        #             """, (customer_id, f"uploads/{filename}"))
+        #             print(f"✅ ID saved locally: {filename}")
+        #             flash("ID document saved locally!", "success")
+        #         except Exception as e:
+        #             print(f"❌ Local save failed: {e}")
+        #             flash("Error uploading ID document.", "danger")
+        #             return redirect(url_for("customers"))
+        
+        # # Handle Customer Photo
+        # if customer_photo and customer_photo.filename:
+        #     uploaded = False
+            
+        #     # Try Cloudinary first
+        #     if use_cloudinary:
+        #         try:
+        #             upload_result = cloudinary.uploader.upload(customer_photo)
+        #             file_url = upload_result['secure_url']
+        #             execute_query(c, """
+        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+        #                 VALUES (?, 'customer_photo', ?)
+        #             """, (customer_id, file_url))
+        #             print(f"✅ Photo uploaded to Cloudinary: {file_url}")
+        #             flash("Customer photo uploaded successfully!", "success")
+        #             uploaded = True
+        #         except Exception as e:
+        #             print(f"❌ Cloudinary upload failed: {e}")
+        #             flash("Cloudinary upload failed, saving locally.", "warning")
+            
+        #     # Fallback to local storage
+        #     if not uploaded:
+        #         try:
+        #             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
+        #             filepath = os.path.join(UPLOAD_FOLDER, filename)
+        #             customer_photo.save(filepath)
+        #             execute_query(c, """
+        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
+        #                 VALUES (?, 'customer_photo', ?)
+        #             """, (customer_id, f"uploads/{filename}"))
+        #             print(f"✅ Photo saved locally: {filename}")
+        #             flash("Customer photo saved locally!", "success")
+        #         except Exception as e:
+        #             print(f"❌ Local save failed: {e}")
+        #             flash("Error uploading customer photo.", "danger")
+        #             return redirect(url_for("customers"))
         
         conn.commit()
         conn.close()
@@ -2407,6 +4501,333 @@ def verify_customer_page(customer_id):
     return render_template("verify_customer.html", title="Verify Customer", customer=customer)
 
 
+@app.route("/damages")
+@login_required
+@manager_required
+def damages_list():
+    """List all damage claims."""
+    conn = db()
+    c = conn.cursor()
+
+    status = (request.args.get("status") or "").strip()
+
+    query = """
+        SELECT d.*, 
+               cu.full_name AS customer_name, cu.phone AS customer_phone,
+               b.bike_code,
+               i.name AS item_name,
+               u.username AS charged_by
+        FROM damage_claims d
+        LEFT JOIN customers cu ON cu.id = d.customer_id
+        LEFT JOIN bicycles b ON b.id = d.bicycle_id
+        LEFT JOIN items i ON i.id = d.item_id
+        LEFT JOIN users u ON u.id = d.charged_by_user_id
+        WHERE 1=1
+    """
+    params = []
+    if status:
+        query += " AND d.status = ?"
+        params.append(status)
+    query += " ORDER BY d.created_at DESC LIMIT 500"
+
+    claims = execute_query(c, query, params).fetchall()
+
+    # Format timestamps
+    for claim in claims:
+        for key in ("created_at", "charged_at", "paid_at"):
+            if claim.get(key):
+                claim[key] = to_namibia_time(claim[key])
+
+    # Totals
+    total_outstanding = get_single_value(c, """
+        SELECT COALESCE(SUM(amount), 0) FROM damage_claims
+        WHERE status NOT IN ('Paid', 'Waived')
+    """)
+    total_paid = get_single_value(c, """
+        SELECT COALESCE(SUM(amount), 0) FROM damage_claims
+        WHERE status = 'Paid'
+    """)
+
+    conn.close()
+    return render_template(
+        "damages_list.html",
+        title="Damage Claims",
+        claims=claims,
+        status=status,
+        total_outstanding=total_outstanding,
+        total_paid=total_paid
+    )
+
+
+@app.route("/damages/new", methods=["GET", "POST"])
+@login_required
+@manager_required
+def new_damage():
+    """Create a damage claim manually (outside of end_rental)."""
+    conn = db()
+    c = conn.cursor()
+
+    # GET: load customers + bikes + items for dropdowns
+    customers = execute_query(c, """
+        SELECT id, full_name, phone FROM customers ORDER BY full_name
+    """).fetchall()
+    bicycles = execute_query(c, """
+        SELECT id, bike_code FROM bicycles ORDER BY bike_code
+    """).fetchall()
+    items_list = execute_query(c, """
+        SELECT id, name FROM items WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
+    if request.method == "POST":
+        customer_id = request.form.get("customer_id")
+        bicycle_id = request.form.get("bicycle_id") or None
+        item_id = request.form.get("item_id") or None
+        description = (request.form.get("description") or "").strip()
+        amount = float(request.form.get("amount", 0) or 0)
+        notes = (request.form.get("notes") or "").strip()
+
+        if not customer_id or not description or amount <= 0:
+            flash("Customer, description, and a positive amount are required.", "danger")
+            conn.close()
+            return redirect(url_for("new_damage"))
+
+        execute_query(c, """
+            INSERT INTO damage_claims
+            (customer_id, bicycle_id, item_id, description, amount, notes,
+             status, charged_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'Charged', ?)
+        """, (int(customer_id),
+              int(bicycle_id) if bicycle_id else None,
+              int(item_id) if item_id else None,
+              description, amount, notes, session["user_id"]))
+
+        conn.commit()
+
+        log_audit(
+            action="damage_create",
+            entity_type="damage_claim",
+            details=f"Created damage claim N${amount:.2f} for customer_id={customer_id} — {description[:80]}"
+        )
+
+        conn.close()
+        flash(f"Damage claim of N$ {amount:.2f} created.", "success")
+        return redirect(url_for("damages_list"))
+
+    conn.close()
+    return render_template(
+        "new_damage.html",
+        title="New Damage Claim",
+        customers=customers,
+        bicycles=bicycles,
+        items=items_list
+    )
+
+
+@app.route("/damages/<int:claim_id>/pay", methods=["GET", "POST"])
+@login_required
+@manager_required
+def pay_damage(claim_id):
+    conn = db()
+    c = conn.cursor()
+
+    claim = execute_query(c, """
+        SELECT d.*, cu.full_name AS customer_name
+        FROM damage_claims d
+        JOIN customers cu ON cu.id = d.customer_id
+        WHERE d.id = ?
+    """, (claim_id,)).fetchone()
+
+    if not claim:
+        conn.close()
+        flash("Claim not found.", "danger")
+        return redirect(url_for("damages_list"))
+
+    if request.method == "POST":
+        method = request.form.get("payment_method", "Cash")
+        execute_query(c, """
+            UPDATE damage_claims
+            SET status = 'Paid', paid_at = CURRENT_TIMESTAMP, payment_method = ?
+            WHERE id = ?
+        """, (method, claim_id))
+        conn.commit()
+
+        log_audit(
+            action="damage_paid",
+            entity_type="damage_claim",
+            entity_id=claim_id,
+            details=f"Damage claim #{claim_id} marked paid (N${claim['amount']:.2f}, {method})"
+        )
+
+        conn.close()
+        flash(f"Damage claim marked as Paid (N$ {claim['amount']:.2f}).", "success")
+        return redirect(url_for("damages_list"))
+
+    conn.close()
+    return render_template("pay_damage.html", title="Pay Damage Claim", claim=claim)
+
+
+@app.route("/damages/<int:claim_id>/waive", methods=["POST"])
+@login_required
+@admin_required
+def waive_damage(claim_id):
+    conn = db()
+    c = conn.cursor()
+    execute_query(c, """
+        UPDATE damage_claims SET status = 'Waived' WHERE id = ?
+    """, (claim_id,))
+    conn.commit()
+
+    log_audit(
+        action="damage_waived",
+        entity_type="damage_claim",
+        entity_id=claim_id,
+        details=f"Damage claim #{claim_id} waived"
+    )
+
+    conn.close()
+    flash("Damage claim waived.", "success")
+    return redirect(url_for("damages_list"))
+
+
+@app.route("/customers/<int:customer_id>/damages")
+@login_required
+def customer_damages(customer_id):
+    """Show all damage claims for a specific customer."""
+    conn = db()
+    c = conn.cursor()
+
+    customer = execute_query(c, "SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        conn.close()
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+
+    claims = execute_query(c, """
+        SELECT d.*, b.bike_code, i.name AS item_name
+        FROM damage_claims d
+        LEFT JOIN bicycles b ON b.id = d.bicycle_id
+        LEFT JOIN items i ON i.id = d.item_id
+        WHERE d.customer_id = ?
+        ORDER BY d.created_at DESC
+    """, (customer_id,)).fetchall()
+
+    for claim in claims:
+        for key in ("created_at", "charged_at", "paid_at"):
+            if claim.get(key):
+                claim[key] = to_namibia_time(claim[key])
+
+    outstanding = get_customer_unpaid_damages(c, customer_id)
+
+    conn.close()
+    return render_template(
+        "customer_damages.html",
+        title=f"Damages — {customer['full_name']}",
+        customer=customer,
+        claims=claims,
+        outstanding=outstanding
+    )
+
+@app.route("/damages/<int:claim_id>/agreement.pdf")
+@login_required
+@manager_required
+def damage_agreement_pdf(claim_id):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+    from io import BytesIO
+
+    conn = db()
+    c = conn.cursor()
+
+    claim = execute_query(c, """
+        SELECT d.*, 
+               cu.full_name, cu.id_number, cu.phone, cu.address,
+               b.bike_code, b.brand, b.model,
+               i.name AS item_name,
+               u.username AS charged_by_username, u.full_name AS charged_by_name
+        FROM damage_claims d
+        JOIN customers cu ON cu.id = d.customer_id
+        LEFT JOIN bicycles b ON b.id = d.bicycle_id
+        LEFT JOIN items i ON i.id = d.item_id
+        LEFT JOIN users u ON u.id = d.charged_by_user_id
+        WHERE d.id = ?
+    """, (claim_id,)).fetchone()
+    conn.close()
+
+    if not claim:
+        flash("Claim not found.", "danger")
+        return redirect(url_for("damages_list"))
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    x, y = 22*mm, height - 25*mm
+
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(x, y, "RAB - DAMAGE AGREEMENT")
+    y -= 10*mm
+
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x, y, f"Claim ID: #{claim['id']}")
+    pdf.drawString(x + 120*mm, y, f"Date: {to_namibia_time(claim['created_at'])}")
+    y -= 8*mm
+    pdf.line(x, y, width-x, y)
+    y -= 10*mm
+
+    # Customer
+    pdf.setFont("Helvetica-Bold", 12); pdf.drawString(x, y, "CUSTOMER"); y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x + 5*mm, y, f"Name: {claim['full_name']}"); y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"ID / Passport: {claim['id_number'] or 'Not provided'}"); y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Phone: {claim['phone']}"); y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Address: {claim['address'] or 'Not provided'}"); y -= 10*mm
+
+    # Item / bike
+    pdf.setFont("Helvetica-Bold", 12); pdf.drawString(x, y, "ITEM / BICYCLE"); y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    if claim['bike_code']:
+        pdf.drawString(x + 5*mm, y, f"Bicycle: {claim['bike_code']} - {claim['brand'] or ''} {claim['model'] or ''}"); y -= 6*mm
+    if claim['item_name']:
+        pdf.drawString(x + 5*mm, y, f"Item: {claim['item_name']}"); y -= 6*mm
+    y -= 4*mm
+
+    # Damage details
+    pdf.setFont("Helvetica-Bold", 12); pdf.drawString(x, y, "DAMAGE DETAILS"); y -= 7*mm
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(x + 5*mm, y, f"Description: {claim['description']}"); y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Amount Agreed: N$ {claim['amount']:.2f}"); y -= 6*mm
+    pdf.drawString(x + 5*mm, y, f"Reported by: {claim['charged_by_name'] or claim['charged_by_username'] or 'N/A'}"); y -= 12*mm
+
+    # Terms
+    pdf.setFont("Helvetica-Bold", 12); pdf.drawString(x, y, "CUSTOMER AGREEMENT"); y -= 7*mm
+    pdf.setFont("Helvetica", 9)
+    terms = [
+        "1. I acknowledge the damage described above occurred during my rental period.",
+        "2. I agree to pay the amount stated above for repair or replacement.",
+        "3. I understand that unpaid damage claims may block future rentals.",
+        "4. I have been given the opportunity to review this document before signing.",
+    ]
+    for t in terms:
+        pdf.drawString(x + 5*mm, y, t); y -= 5.5*mm
+
+    y -= 10*mm
+    pdf.line(x, y, x + 70*mm, y)
+    pdf.line(x + 95*mm, y, width - x, y)
+    y -= 5*mm
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(x, y, "Customer Signature")
+    pdf.drawString(x + 95*mm, y, "RAB Representative")
+    y -= 15*mm
+    pdf.line(x, y, x + 70*mm, y)
+    pdf.line(x + 95*mm, y, width - x, y)
+    y -= 5*mm
+    pdf.drawString(x, y, "Date")
+    pdf.drawString(x + 95*mm, y, "Date")
+
+    pdf.save()
+    buf.seek(0)
+    filename = f"RAB_Damage_{claim['id']}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
 
@@ -2448,6 +4869,13 @@ def verify_customer(customer_id):
             flash("Warning: User not found for verification record.", "warning")
         
         conn.commit()
+        log_audit(
+            action="customer_verify",
+            entity_type="customer",
+            entity_id=customer_id,
+            details=f"Customer verification set to '{status}'"
+        )
+
         flash(f"Customer verification updated to {status}.", "success")
         
     except sqlite3.IntegrityError as e:
@@ -2461,6 +4889,19 @@ def verify_customer(customer_id):
     
     return redirect(url_for("customers"))
 
+
+
+@app.route("/privacy")
+def privacy_policy():
+    """Public privacy policy page — no login required."""
+    return render_template(
+        "privacy.html",
+        title="Privacy Policy",
+        retention=RETENTION,
+        privacy_email=PRIVACY_EMAIL,
+        company_name="RAB — Rent A Bike",
+        last_updated="2026-10-11",
+    )
 
 @app.route("/customers/<int:customer_id>/documents")
 @login_required
@@ -2552,6 +4993,464 @@ def view_document_file(customer_id, doc_id):
         file_not_found=True
     )
 
+@app.route("/login-history/export.csv")
+@login_required
+@manager_required
+def login_history_export_csv():
+    """Export login history as CSV. Respects the current filters if any are set."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    status_filter = (request.args.get("status_filter") or "").strip()
+
+    query = """
+        SELECT 
+            lh.id, lh.username_attempted, lh.success, lh.ip_address,
+            lh.user_agent, lh.device_summary, lh.failure_reason,
+            lh.created_at,
+            u.username AS user_username, u.full_name AS user_full_name, u.role AS user_role
+        FROM login_history lh
+        LEFT JOIN users u ON u.id = lh.user_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(lh.created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(lh.created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (lh.username_attempted LIKE ? OR u.username LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if status_filter == "success":
+        query += " AND lh.success = 1"
+    elif status_filter == "failed":
+        query += " AND lh.success = 0"
+
+    query += " ORDER BY lh.created_at DESC"
+
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    # Convert to display-friendly values
+    is_admin = session.get("role") == "admin"
+    for r in rows:
+        r["created_at_display"] = to_namibia_time(r.get("created_at"))
+        r["status_label"] = "Success" if r.get("success") else "Failed"
+        r["ip_display"] = (r.get("ip_address") or "—") if is_admin else mask_ip(r.get("ip_address"))
+        r["user_display"] = r.get("user_username") or r.get("username_attempted") or "—"
+
+    columns = [
+        ("id", "ID"),
+        ("created_at_display", "Date/Time (Namibia)"),
+        ("user_display", "User"),
+        ("user_full_name", "Full Name"),
+        ("user_role", "Role"),
+        ("status_label", "Status"),
+        ("device_summary", "Device"),
+        ("ip_display", "IP Address"),
+        ("failure_reason", "Failure Reason"),
+    ]
+
+    filtered = bool(date_from or date_to or user_filter or status_filter)
+    filename = _export_filename("login_history", filtered=filtered)
+    return build_csv_response(rows, columns, filename)
+
+def build_audit_pdf(rows, columns, title, filters_meta, generated_by):
+    """
+    Build a Flask response with a PDF export.
+    - rows: list of dicts
+    - columns: list of (key, header, width_pct) tuples
+    - title: page title string
+    - filters_meta: dict of applied filters
+    - generated_by: username of the admin who exported
+    """
+    from datetime import datetime
+
+    buf = BytesIO()
+    # Landscape for wide tables
+    pdf = canvas.Canvas(buf, pagesize=landscape(A4))
+    width, height = landscape(A4)
+
+    margin_x = 15 * mm
+    y = height - 20 * mm
+
+    # ============= HEADER =============
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(margin_x, y, f"RAB — {title}")
+
+    y -= 8 * mm
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(margin_x, y, f"Generated by: {generated_by}")
+    pdf.drawString(margin_x + 100 * mm, y, 
+                   f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    pdf.drawString(margin_x + 200 * mm, y, 
+                   f"Total rows: {len(rows)}")
+
+    y -= 5 * mm
+
+    # ============= FILTERS APPLIED =============
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.drawString(margin_x, y, "Filters applied:")
+    y -= 4 * mm
+
+    pdf.setFont("Helvetica", 8)
+    pdf.setFillColor(colors.HexColor("#111111"))
+    filter_line = " | ".join(
+        f"{k.replace('_', ' ').title()}: {v}" 
+        for k, v in filters_meta.items() if v and v != "—"
+    )
+    if not filter_line:
+        filter_line = "None (all-time export)"
+    pdf.drawString(margin_x, y, filter_line)
+
+    y -= 8 * mm
+
+    # ============= TABLE HEADER =============
+    pdf.setFillColor(colors.HexColor("#0d1f46"))
+    pdf.rect(margin_x, y - 1 * mm, width - 2 * margin_x, 7 * mm, fill=1, stroke=0)
+
+    pdf.setFillColor(colors.white)
+    pdf.setFont("Helvetica-Bold", 8)
+    x = margin_x + 2 * mm
+    for key, header, pct in columns:
+        col_width = (width - 2 * margin_x - 4 * mm) * pct
+        pdf.drawString(x, y + 1 * mm, header[:30])
+        x += col_width
+
+    y -= 8 * mm
+
+    # ============= ROWS =============
+    pdf.setFont("Helvetica", 7)
+    pdf.setFillColor(colors.HexColor("#111111"))
+
+    row_height = 5 * mm
+    rows_per_page = int((y - 40 * mm) / row_height)
+
+    for idx, row in enumerate(rows):
+        # Page break
+        if idx > 0 and idx % rows_per_page == 0:
+            pdf.showPage()
+            y = height - 20 * mm
+            # Redraw table header on new page
+            pdf.setFillColor(colors.HexColor("#0d1f46"))
+            pdf.rect(margin_x, y - 1 * mm, width - 2 * margin_x, 7 * mm, fill=1, stroke=0)
+            pdf.setFillColor(colors.white)
+            pdf.setFont("Helvetica-Bold", 8)
+            x = margin_x + 2 * mm
+            for key, header, pct in columns:
+                col_width = (width - 2 * margin_x - 4 * mm) * pct
+                pdf.drawString(x, y + 1 * mm, header[:30])
+                x += col_width
+            y -= 8 * mm
+            pdf.setFont("Helvetica", 7)
+            pdf.setFillColor(colors.HexColor("#111111"))
+
+        # Alternate row shading
+        if idx % 2 == 0:
+            pdf.setFillColor(colors.HexColor("#f8f9fa"))
+            pdf.rect(margin_x, y - 1.5 * mm, width - 2 * margin_x, row_height, fill=1, stroke=0)
+            pdf.setFillColor(colors.HexColor("#111111"))
+
+        x = margin_x + 2 * mm
+        for key, header, pct in columns:
+            col_width = (width - 2 * margin_x - 4 * mm) * pct
+            val = row.get(key) if isinstance(row, dict) else None
+            text = str(val) if val is not None else ""
+            # Truncate long text
+            max_chars = int(col_width / 1.8)
+            if len(text) > max_chars:
+                text = text[:max_chars - 3] + "..."
+            pdf.drawString(x, y, text)
+            x += col_width
+
+        y -= row_height
+
+    # ============= SIGNATURE BLOCK =============
+    y -= 15 * mm
+    if y < 30 * mm:
+        pdf.showPage()
+        y = height - 30 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColor(colors.HexColor("#111111"))
+    pdf.drawString(margin_x, y, "Exported by (name & signature):")
+    pdf.drawString(margin_x + 150 * mm, y, "Date:")
+    y -= 15 * mm
+    pdf.line(margin_x, y, margin_x + 100 * mm, y)
+    pdf.line(margin_x + 150 * mm, y, margin_x + 220 * mm, y)
+
+    y -= 10 * mm
+    pdf.setFont("Helvetica", 7)
+    pdf.setFillColor(colors.HexColor("#667085"))
+    pdf.drawString(margin_x, y, 
+                   "This document is a system-generated record. Any modification after signing invalidates it.")
+
+    pdf.save()
+    buf.seek(0)
+
+    from datetime import datetime
+    filename = f"{title.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+@app.route("/audit-log/export.csv")
+@login_required
+@admin_required
+def audit_log_export_csv():
+    """Export audit log as CSV. Respects filters if any are set."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    action_filter = (request.args.get("action_filter") or "").strip()
+    entity_filter = (request.args.get("entity_filter") or "").strip()
+
+    query = "SELECT * FROM audit_log WHERE 1=1"
+    params = []
+
+    if date_from:
+        query += " AND date(created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (username LIKE ? OR user_role LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if action_filter:
+        query += " AND action = ?"
+        params.append(action_filter)
+    if entity_filter:
+        query += " AND entity_type = ?"
+        params.append(entity_filter)
+
+    query += " ORDER BY created_at DESC"
+
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    for r in rows:
+        r["created_at_display"] = to_namibia_time(r.get("created_at"))
+        r["ip_display"] = (r.get("ip_address") or "—") if session.get("role") == "admin" else mask_ip(r.get("ip_address"))
+        r["entity_display"] = f"{r.get('entity_type') or ''}#{r.get('entity_id') or ''}".strip("#") or "—"
+
+    columns = [
+        ("id", "ID"),
+        ("created_at_display", "Date/Time (Namibia)"),
+        ("username", "Username"),
+        ("user_role", "Role"),
+        ("action", "Action"),
+        ("entity_type", "Entity Type"),
+        ("entity_id", "Entity ID"),
+        ("details", "Details"),
+        ("ip_display", "IP Address"),
+    ]
+
+    filtered = bool(date_from or date_to or user_filter or action_filter or entity_filter)
+    filename = _export_filename("audit_log", filtered=filtered)
+    return build_csv_response(rows, columns, filename)
+
+
+@app.route("/login-history/export.pdf")
+@login_required
+@manager_required
+def login_history_export_pdf():
+    """Export login history as PDF. Respects the current filters if any are set."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    status_filter = (request.args.get("status_filter") or "").strip()
+
+    query = """
+        SELECT 
+            lh.id, lh.username_attempted, lh.success, lh.ip_address,
+            lh.user_agent, lh.device_summary, lh.failure_reason,
+            lh.created_at,
+            u.username AS user_username, u.full_name AS user_full_name, u.role AS user_role
+        FROM login_history lh
+        LEFT JOIN users u ON u.id = lh.user_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(lh.created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(lh.created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (lh.username_attempted LIKE ? OR u.username LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if status_filter == "success":
+        query += " AND lh.success = 1"
+    elif status_filter == "failed":
+        query += " AND lh.success = 0"
+
+    query += " ORDER BY lh.created_at DESC"
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    is_admin = session.get("role") == "admin"
+    for r in rows:
+        r["created_at_display"] = to_namibia_time(r.get("created_at")) or "—"
+        r["status_label"] = "Success" if r.get("success") else "Failed"
+        r["ip_display"] = (r.get("ip_address") or "—") if is_admin else mask_ip(r.get("ip_address"))
+        r["user_display"] = r.get("user_username") or r.get("username_attempted") or "—"
+
+    # (key, header, width_pct) — must sum to ~1.0
+    columns = [
+        ("created_at_display", "Date/Time", 0.13),
+        ("user_display", "User", 0.10),
+        ("user_role", "Role", 0.07),
+        ("status_label", "Status", 0.07),
+        ("device_summary", "Device", 0.15),
+        ("ip_display", "IP", 0.12),
+        ("failure_reason", "Reason", 0.16),
+    ]
+
+    filters_meta = {
+        "date_from": date_from or "—",
+        "date_to": date_to or "—",
+        "user": user_filter or "—",
+        "status": status_filter or "—",
+    }
+
+    return build_audit_pdf(
+        rows=rows,
+        columns=columns,
+        title="Login History",
+        filters_meta=filters_meta,
+        generated_by=session.get("username", "admin"),
+    )
+
+
+@app.route("/audit-log/export.pdf")
+@login_required
+@admin_required
+def audit_log_export_pdf():
+    """Export audit log as PDF. Respects filters if any are set."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    action_filter = (request.args.get("action_filter") or "").strip()
+    entity_filter = (request.args.get("entity_filter") or "").strip()
+
+    query = "SELECT * FROM audit_log WHERE 1=1"
+    params = []
+
+    if date_from:
+        query += " AND date(created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (username LIKE ? OR user_role LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if action_filter:
+        query += " AND action = ?"
+        params.append(action_filter)
+    if entity_filter:
+        query += " AND entity_type = ?"
+        params.append(entity_filter)
+
+    query += " ORDER BY created_at DESC"
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    for r in rows:
+        r["created_at_display"] = to_namibia_time(r.get("created_at")) or "—"
+        r["ip_display"] = (r.get("ip_address") or "—") if session.get("role") == "admin" else mask_ip(r.get("ip_address"))
+
+    columns = [
+        ("created_at_display", "Date/Time", 0.12),
+        ("username", "User", 0.09),
+        ("user_role", "Role", 0.06),
+        ("action", "Action", 0.14),
+        ("entity_type", "Entity", 0.11),
+        ("details", "Details", 0.35),
+        ("ip_display", "IP", 0.13),
+    ]
+
+    filters_meta = {
+        "date_from": date_from or "—",
+        "date_to": date_to or "—",
+        "user": user_filter or "—",
+        "action": action_filter or "—",
+        "entity": entity_filter or "—",
+    }
+
+    return build_audit_pdf(
+        rows=rows,
+        columns=columns,
+        title="Audit Log",
+        filters_meta=filters_meta,
+        generated_by=session.get("username", "admin"),
+    )
+
+
+@app.route("/document-views/export.csv")
+@login_required
+@admin_required
+def document_views_export_csv():
+    """Export the document-view log as CSV."""
+    conn = db()
+    c = conn.cursor()
+
+    rows = execute_query(c, """
+        SELECT 
+            dv.id, dv.viewed_at, dv.ip_address,
+            cd.document_type, cd.customer_id,
+            u.username, u.full_name AS user_full_name, u.role AS user_role,
+            cu.full_name AS customer_full_name
+        FROM document_views dv
+        LEFT JOIN customer_documents cd ON cd.id = dv.document_id
+        LEFT JOIN users u ON u.id = dv.user_id
+        LEFT JOIN customers cu ON cu.id = cd.customer_id
+        ORDER BY dv.viewed_at DESC
+    """).fetchall()
+    conn.close()
+
+    for r in rows:
+        r["viewed_at_display"] = to_namibia_time(r.get("viewed_at"))
+        r["ip_display"] = (r.get("ip_address") or "—") if session.get("role") == "admin" else mask_ip(r.get("ip_address"))
+
+    columns = [
+        ("id", "ID"),
+        ("viewed_at_display", "Viewed At (Namibia)"),
+        ("username", "Staff Username"),
+        ("user_full_name", "Staff Name"),
+        ("user_role", "Role"),
+        ("customer_full_name", "Customer"),
+        ("document_type", "Document Type"),
+        ("ip_display", "IP Address"),
+    ]
+
+    filename = _export_filename("document_views")
+    return build_csv_response(rows, columns, filename)
+
+
 
 
 
@@ -2572,7 +5471,14 @@ def delete_document(customer_id, doc_id):
     if not doc:
         flash("Document not found.", "danger")
         return redirect(url_for("view_documents", customer_id=customer_id))
-    
+
+
+    log_audit(
+        action="document_delete",
+        entity_type="customer_document",
+        entity_id=doc_id,
+        details=f"Deleted document type '{doc['document_type']}' for customer #{customer_id}"
+    )
     # Delete the document record from database
     execute_query(c, "DELETE FROM customer_documents WHERE id = ?", (doc_id,))
     
@@ -2604,6 +5510,157 @@ def delete_document(customer_id, doc_id):
     
     flash("Document deleted successfully!", "success")
     return redirect(url_for("view_documents", customer_id=customer_id))
+
+
+# @app.route("/documents/<int:doc_id>/file")
+# @login_required
+# def serve_document(doc_id):
+#     """
+#     Serve a customer document. Enforces access control + logs the view.
+#     - Staff/manager/admin: can view any document
+#     - Customers: can only view their OWN documents
+#     """
+#     conn = db()
+#     c = conn.cursor()
+
+#     doc = execute_query(c, """
+#         SELECT cd.*, cu.id AS customer_id, cu.user_id AS customer_user_id
+#         FROM customer_documents cd
+#         JOIN customers cu ON cu.id = cd.customer_id
+#         WHERE cd.id = ?
+#     """, (doc_id,)).fetchone()
+
+#     if not doc:
+#         conn.close()
+#         flash("Document not found.", "danger")
+#         return redirect(url_for("dashboard"))
+
+#     role = session.get("role")
+#     user_id = session.get("user_id")
+
+#     # ✅ Access control
+#     if role == "customer":
+#         # Customer can only view their own documents
+#         if doc["customer_user_id"] != user_id:
+#             conn.close()
+#             flash("You do not have permission to view that document.", "danger")
+#             return redirect(url_for("customer_portal"))
+#     else:
+#         # Staff/manager/admin — allow
+#         pass
+
+#     # ✅ Log the view
+#     try:
+#         execute_query(c, """
+#             INSERT INTO document_views (document_id, user_id, ip_address)
+#             VALUES (?, ?, ?)
+#         """, (doc_id, user_id, request.remote_addr or "unknown"))
+#         conn.commit()
+#     except Exception as e:
+#         print(f"⚠️ document_views insert failed: {e}")
+
+#     conn.close()
+
+#     file_path = doc["file_path"]
+
+#     # ✅ Cloudinary URL → redirect
+#     if file_path.startswith("http"):
+#         return redirect(file_path)
+
+#     # ✅ Local private file → stream
+#     filename = os.path.basename(file_path)
+#     full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+
+#     if not os.path.exists(full_path):
+#         flash(f"Document file not found: {filename}", "danger")
+#         return redirect(url_for("view_documents", customer_id=doc["customer_id"]))
+
+#     return send_file(
+#         full_path,
+#         as_attachment=False,
+#         download_name=filename,
+#         mimetype="application/pdf" if filename.lower().endswith(".pdf") else None
+#     )
+
+
+@app.route("/documents/<int:doc_id>/file")
+@login_required
+def serve_document(doc_id):
+    """
+    Serve a customer document. Enforces access control + logs the view.
+    - Staff/manager/admin: can view any document
+    - Customers: can only view their OWN documents
+    """
+    conn = db()
+    c = conn.cursor()
+
+    doc = execute_query(c, """
+        SELECT cd.*, cu.id AS customer_id, cu.user_id AS customer_user_id
+        FROM customer_documents cd
+        JOIN customers cu ON cu.id = cd.customer_id
+        WHERE cd.id = ?
+    """, (doc_id,)).fetchone()
+
+
+
+    if not doc:
+        conn.close()
+        flash("Document not found.", "danger")
+        return redirect(url_for("dashboard"))
+
+    role = session.get("role")
+    user_id = session.get("user_id")
+
+    # ✅ Access control
+    if role == "customer":
+        # Customer can only view their own documents
+        if doc["customer_user_id"] != user_id:
+            conn.close()
+            flash("You do not have permission to view that document.", "danger")
+            return redirect(url_for("customer_portal"))
+    else:
+        # Staff/manager/admin — allow
+        pass
+
+    # ✅ Log the view
+    try:
+        execute_query(c, """
+            INSERT INTO document_views (document_id, user_id, ip_address)
+            VALUES (?, ?, ?)
+        """, (doc_id, user_id, request.remote_addr or "unknown"))
+        conn.commit()
+    except Exception as e:
+        print(f"⚠️ document_views insert failed: {e}")
+
+    conn.close()
+
+    file_path = doc["file_path"]
+
+    log_audit(
+        action="document_view",
+        entity_type="customer_document",
+        entity_id=doc_id,
+        details=f"Viewed document type '{doc['document_type']}' (customer #{doc['customer_id']})"
+    )
+
+    # ✅ Cloudinary URL → redirect
+    if file_path.startswith("http"):
+        return redirect(file_path)
+
+    # ✅ Local private file → stream
+    filename = os.path.basename(file_path)
+    full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+
+    if not os.path.exists(full_path):
+        flash(f"Document file not found: {filename}", "danger")
+        return redirect(url_for("view_documents", customer_id=doc["customer_id"]))
+
+    return send_file(
+        full_path,
+        as_attachment=False,
+        download_name=filename,
+        mimetype="application/pdf" if filename.lower().endswith(".pdf") else None
+    )
 
 
 @app.route("/rentals/<int:rental_id>/refund", methods=["GET", "POST"])
@@ -2656,6 +5713,14 @@ def refund_rental(rental_id):
         """, (refund_method, rental_id))
 
         conn.commit()
+
+        log_audit(
+            action="refund",
+            entity_type="daily_rental",
+            entity_id=rental_id,
+            details=f"Refunded N${refund_amount:.2f} ({refund_method}) for rental #{rental_id}"
+        )
+
         conn.close()
 
         flash(f"Refund of N$ {refund_amount:.2f} recorded. Rental settled.", "success")
@@ -2734,6 +5799,14 @@ def record_payment(rental_id):
         """, (payment_method, rental_id))
         
         conn.commit()
+
+        log_audit(
+            action="payment_record",
+            entity_type="daily_rental",
+            entity_id=rental_id,
+            details=f"Recorded payment N${amount:.2f} ({payment_method}) for rental #{rental_id}"
+        )
+
         conn.close()
         
         flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
@@ -2757,6 +5830,333 @@ def record_payment(rental_id):
         net_due=net_due
     )
 
+
+
+@app.route("/privacy/request-deletion", methods=["POST"])
+@login_required
+@customer_required
+def request_account_deletion():
+    """Customer submits a deletion request."""
+    conn = db()
+    c = conn.cursor()
+
+    # Find the customer record
+    customer = execute_query(c,
+        "SELECT id, full_name FROM customers WHERE user_id = ?",
+        (session["user_id"],)
+    ).fetchone()
+
+    if not customer:
+        conn.close()
+        flash("No customer profile found.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    # Check for unpaid damages
+    unpaid = get_customer_unpaid_damages(c, customer["id"])
+    if unpaid > 0:
+        conn.close()
+        flash(
+            f"Cannot request deletion while you have an unpaid damage balance of "
+            f"N$ {unpaid:.2f}. Please settle it first.",
+            "danger"
+        )
+        return redirect(url_for("customer_damages", customer_id=customer["id"]))
+
+    # Check for active rentals
+    active = get_single_value(c, """
+        SELECT COUNT(*) FROM daily_rentals
+        WHERE customer_id = ? AND status = 'Active'
+    """, (customer["id"],))
+    if active and int(active) > 0:
+        conn.close()
+        flash("Cannot request deletion while you have an active rental. Please return it first.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    # Check for existing pending request
+    existing = execute_query(c, """
+        SELECT id FROM privacy_requests
+        WHERE customer_id = ? AND request_type = 'delete' AND status = 'Pending'
+    """, (customer["id"],)).fetchone()
+    if existing:
+        conn.close()
+        flash("You already have a pending deletion request. Please wait for admin review.", "info")
+        return redirect(url_for("customer_portal"))
+
+    reason = (request.form.get("reason") or "").strip()
+
+    execute_query(c, """
+        INSERT INTO privacy_requests (customer_id, request_type, reason)
+        VALUES (?, 'delete', ?)
+    """, (customer["id"], reason))
+
+    conn.commit()
+    conn.close()
+
+    log_audit(
+        action="privacy_delete_request",
+        entity_type="customer",
+        entity_id=customer["id"],
+        details=f"Customer '{customer['full_name']}' requested account deletion"
+    )
+
+    flash(
+        "Your deletion request has been submitted. An administrator will review it within 30 days.",
+        "success"
+    )
+    return redirect(url_for("customer_portal"))
+
+
+@app.route("/privacy-requests")
+@login_required
+@admin_required
+def privacy_requests_dashboard():
+    """Admin: view and review privacy/deletion requests."""
+    conn = db()
+    c = conn.cursor()
+
+    status_filter = (request.args.get("status") or "").strip()
+
+    query = """
+        SELECT pr.*, 
+               cu.full_name AS customer_name, 
+               cu.phone AS customer_phone,
+               cu.email AS customer_email,
+               u.username AS reviewed_by_username
+        FROM privacy_requests pr
+        LEFT JOIN customers cu ON cu.id = pr.customer_id
+        LEFT JOIN users u ON u.id = pr.reviewed_by_user_id
+        WHERE 1=1
+    """
+    params = []
+
+    if status_filter:
+        query += " AND pr.status = ?"
+        params.append(status_filter)
+
+    query += " ORDER BY pr.requested_at DESC LIMIT 500"
+
+    requests_list = execute_query(c, query, params).fetchall()
+
+    # Format dates
+    for r in requests_list:
+        for k in ("requested_at", "reviewed_at", "completed_at"):
+            if r.get(k):
+                r[k] = to_namibia_time(r[k])
+
+    # Summary counts
+    pending_count = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Pending'
+    """)
+    approved_count = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Approved'
+    """)
+    rejected_count = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Rejected'
+    """)
+    completed_count = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Completed'
+    """)
+
+    conn.close()
+
+    return render_template(
+        "privacy_requests.html",
+        title="Privacy Requests",
+        requests_list=requests_list,
+        status_filter=status_filter,
+        pending_count=pending_count,
+        approved_count=approved_count,
+        rejected_count=rejected_count,
+        completed_count=completed_count,
+    )
+
+@app.route("/privacy-requests/<int:request_id>/review", methods=["POST"])
+@login_required
+@admin_required
+def review_privacy_request(request_id):
+    """Admin approves or rejects a privacy request."""
+    action = request.form.get("action", "").strip()  # 'approve' or 'reject'
+    notes = (request.form.get("notes") or "").strip()
+
+    if action not in ("approve", "reject"):
+        flash("Invalid action.", "danger")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+    conn = db()
+    c = conn.cursor()
+
+    pr = execute_query(c, """
+        SELECT pr.*, cu.full_name AS customer_name
+        FROM privacy_requests pr
+        JOIN customers cu ON cu.id = pr.customer_id
+        WHERE pr.id = ?
+    """, (request_id,)).fetchone()
+
+    if not pr:
+        conn.close()
+        flash("Request not found.", "danger")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+    if pr["status"] != "Pending":
+        conn.close()
+        flash(f"This request has already been {pr['status'].lower()}.", "info")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+    new_status = "Approved" if action == "approve" else "Rejected"
+
+    execute_query(c, """
+        UPDATE privacy_requests
+        SET status = ?, reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP,
+            review_notes = ?
+        WHERE id = ?
+    """, (new_status, session["user_id"], notes, request_id))
+
+    conn.commit()
+    conn.close()
+
+    log_audit(
+        action=f"privacy_request_{action}",
+        entity_type="privacy_request",
+        entity_id=request_id,
+        details=f"{new_status} deletion request for customer '{pr['customer_name']}'. Notes: {notes or 'none'}"
+    )
+
+    if action == "approve":
+        flash(f"Request approved. Now execute the anonymization to finalize.", "success")
+        return redirect(url_for("execute_deletion", request_id=request_id))
+    else:
+        flash(f"Request rejected.", "success")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+
+@app.route("/privacy-requests/<int:request_id>/execute", methods=["GET", "POST"])
+@login_required
+@admin_required
+def execute_deletion(request_id):
+    """Admin: run the actual anonymization for an approved request."""
+    conn = db()
+    c = conn.cursor()
+
+    pr = execute_query(c, """
+        SELECT pr.*, cu.full_name AS customer_name, cu.user_id AS customer_user_id
+        FROM privacy_requests pr
+        JOIN customers cu ON cu.id = pr.customer_id
+        WHERE pr.id = ?
+    """, (request_id,)).fetchone()
+
+    if not pr:
+        conn.close()
+        flash("Request not found.", "danger")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+    if pr["status"] != "Approved":
+        conn.close()
+        flash(f"This request must be Approved before execution. Current status: {pr['status']}.", "danger")
+        return redirect(url_for("privacy_requests_dashboard"))
+
+    customer_id = pr["customer_id"]
+    customer_name = pr["customer_name"]
+    user_id = pr["customer_user_id"]
+
+    if request.method == "POST":
+        # Confirm admin typed DELETE
+        confirm = (request.form.get("confirm") or "").strip()
+        if confirm != "DELETE":
+            flash("You must type DELETE to confirm.", "danger")
+            conn.close()
+            return redirect(url_for("execute_deletion", request_id=request_id))
+
+        try:
+            # 1. Delete uploaded documents (physical files + DB rows)
+            docs = execute_query(c, """
+                SELECT file_path FROM customer_documents WHERE customer_id = ?
+            """, (customer_id,)).fetchall()
+
+            for d in docs:
+                file_path = d.get("file_path") or ""
+                if not file_path.startswith("http"):
+                    local_name = os.path.basename(file_path)
+                    full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, local_name)
+                    try:
+                        if os.path.exists(full_path):
+                            os.remove(full_path)
+                    except Exception as e:
+                        print(f"⚠️ Could not delete file {full_path}: {e}")
+
+            execute_query(c, "DELETE FROM customer_documents WHERE customer_id = ?", (customer_id,))
+
+            # 2. Anonymize customer record
+            execute_query(c, """
+                UPDATE customers
+                SET full_name = ?,
+                    id_number = NULL,
+                    phone = ?,
+                    email = NULL,
+                    address = NULL,
+                    signature_data = NULL,
+                    verification_notes = 'Account deleted on ' || CURRENT_TIMESTAMP,
+                    verification_status = 'Deleted'
+                WHERE id = ?
+            """, (f"Deleted User #{customer_id}", f"deleted_{customer_id}", customer_id))
+
+            # 3. Anonymize comments made by the customer
+            if user_id:
+                execute_query(c, """
+                    UPDATE announcement_comments
+                    SET user_name = 'Deleted User'
+                    WHERE user_id = ?
+                """, (user_id,))
+
+                # 4. Disable login by scrambling username and password
+                import secrets
+                scrambled = f"deleted_{user_id}_{secrets.token_hex(6)}"
+                execute_query(c, """
+                    UPDATE users
+                    SET username = ?,
+                        password_hash = ?,
+                        email = NULL,
+                        full_name = 'Deleted User',
+                        role = 'customer'
+                    WHERE id = ?
+                """, (scrambled, generate_password_hash(secrets.token_hex(16)), user_id))
+
+            # 5. Mark request completed
+            execute_query(c, """
+                UPDATE privacy_requests
+                SET status = 'Completed', completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (request_id,))
+
+            conn.commit()
+            conn.close()
+
+            log_audit(
+                action="privacy_deletion_executed",
+                entity_type="customer",
+                entity_id=customer_id,
+                details=f"Anonymized customer #{customer_id} ('{customer_name}') and purged documents"
+            )
+
+            flash(
+                f"Customer '{customer_name}' has been anonymized. "
+                f"Documents purged, login disabled.",
+                "success"
+            )
+            return redirect(url_for("privacy_requests_dashboard"))
+
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            flash(f"Error during anonymization: {e}", "danger")
+            return redirect(url_for("privacy_requests_dashboard"))
+
+    # GET: show the confirmation page
+    conn.close()
+    return render_template(
+        "execute_deletion.html",
+        title="Execute Deletion",
+        request_row=pr,
+    )
 
 
 
@@ -3435,10 +6835,19 @@ def edit_customer(customer_id):
                     return redirect(url_for("edit_customer", customer_id=customer_id))
         
         conn.commit()
+
         conn.close()
         
         flash(f"Customer '{full_name}' updated successfully!", "success")
+
+        log_audit(
+            action="customer_edit",
+            entity_type="customer",
+            entity_id=customer_id,
+            details=f"Edited customer '{full_name}'"
+        )        
         return redirect(url_for("customers"))
+    
     
     documents = execute_query(c, """
         SELECT * FROM customer_documents 
@@ -3610,6 +7019,15 @@ def delete_customer(customer_id):
         
         # ✅ STEP 3: Delete rental payments (child of rentals)
         for rental in rentals:
+
+            # Log before deleting (need the name before it's gone)
+            log_audit(
+                action="customer_delete",
+                entity_type="customer",
+                entity_id=customer_id,
+                details=f"Deleted customer '{customer['full_name']}' (user_id: {customer.get('user_id')})"
+            )        
+
             execute_query(c,"DELETE FROM rental_payments WHERE daily_rental_id = ?", (rental["id"],))
         
         # ✅ STEP 4: Delete reminder logs (child of rentals)
@@ -4172,6 +7590,14 @@ def delete_bicycle(bicycle_id):
         return redirect(url_for("bicycles"))
     
     try:
+        
+        log_audit(
+            action="bicycle_delete",
+            entity_type="bicycle",
+            entity_id=bicycle_id,
+            details=f"Deleted bicycle '{bike['bike_code']}'"
+        )
+
         # Delete bicycle
         execute_query(c,"DELETE FROM bicycles WHERE id = ?", (bicycle_id,))
         conn.commit()
@@ -4345,6 +7771,13 @@ def create_announcement():
         ))
         
         conn.commit()
+
+        log_audit(
+            action="announcement_create",
+            entity_type="announcement",
+            details=f"Created announcement '{title}'"
+        )
+
         conn.close()
         
         flash("Announcement created successfully!", "success")
@@ -4396,6 +7829,14 @@ def delete_announcement(announcement_id):
     # Soft delete - just mark as inactive
     execute_query(c,"UPDATE announcements SET is_active = 0 WHERE id = ?", (announcement_id,))
     conn.commit()
+
+    log_audit(
+        action="announcement_delete",
+        entity_type="announcement",
+        entity_id=announcement_id,
+        details=f"Deactivated announcement #{announcement_id}"
+    )
+
     conn.close()
     
     flash("Announcement deleted successfully.", "success")
@@ -4850,16 +8291,38 @@ def edit_bicycle(bicycle_id):
             return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
 
         try:
+
+            condition_notes = (request.form.get("condition_notes") or "").strip()
+
             execute_query(c, """
                 UPDATE bicycles
                 SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
                     hourly_rate = ?, daily_cap = ?, deposit_amount = ?,
-                    notes = ?, current_station_id = ?
+                    notes = ?, condition_notes = ?, current_station_id = ?
                 WHERE id = ?
             """, (bike_code, brand, model, bike_type,
                   hourly_rate, daily_cap, deposit_amount,
-                  notes, current_station_id, bicycle_id))
+                  notes, condition_notes, current_station_id, bicycle_id))
+
+
+            # execute_query(c, """
+            #     UPDATE bicycles
+            #     SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
+            #         hourly_rate = ?, daily_cap = ?, deposit_amount = ?,
+            #         notes = ?, current_station_id = ?
+            #     WHERE id = ?
+            # """, (bike_code, brand, model, bike_type,
+            #       hourly_rate, daily_cap, deposit_amount,
+            #       notes, current_station_id, bicycle_id))
             conn.commit()
+
+            log_audit(
+                action="bicycle_edit",
+                entity_type="bicycle",
+                entity_id=bicycle_id,
+                details=f"Edited bicycle '{bike_code}'"
+            )
+
             flash(f"Bicycle '{bike_code}' updated successfully!", "success")
         except sqlite3.IntegrityError:
             flash("Bicycle code already exists.", "danger")
@@ -4919,6 +8382,13 @@ def bicycles():
                   hourly_rate, daily_cap, deposit_amount, notes,
                   current_station_id))
             conn.commit()
+
+            log_audit(
+                action="bicycle_create",
+                entity_type="bicycle",
+                details=f"Added bicycle '{bike_code}'"
+            )
+
             flash(f"Bicycle {bike_code} added successfully.", "success")
         except sqlite3.IntegrityError:
             flash("Bicycle code already exists.", "danger")
@@ -5370,6 +8840,13 @@ def add_discount():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (code, description, discount_type, discount_value, min_rental_amount, max_uses, start_date, end_date))
             conn.commit()
+
+            log_audit(
+                action="discount_create",
+                entity_type="discount_code",
+                details=f"Created discount code '{code}'"
+            )
+
             flash(f"Discount code '{code}' created successfully!", "success")
         except sqlite3.IntegrityError:
             flash(f"Discount code '{code}' already exists.", "danger")
@@ -5409,6 +8886,14 @@ def delete_discount(discount_id):
     """Delete a discount code."""
     conn = db()
     c = conn.cursor()
+
+    log_audit(
+        action="discount_delete",
+        entity_type="discount_code",
+        entity_id=discount_id,
+        details=f"Deleted discount code #{discount_id}"
+    )
+
     execute_query(c,"DELETE FROM discount_codes WHERE id = ?", (discount_id,))
     conn.commit()
     conn.close()
@@ -6295,6 +9780,27 @@ def customer_portal():
         ORDER BY r.start_time DESC
         LIMIT 10
     """, (customer["id"],)).fetchall()
+
+    # ✅ Privacy request status
+    privacy_request = execute_query(c, """
+        SELECT * FROM privacy_requests
+        WHERE customer_id = ?
+        ORDER BY requested_at DESC
+        LIMIT 1
+    """, (customer["id"],)).fetchone()
+
+    # Convert UTC → Namibia time for display
+    if privacy_request:
+        for k in ("requested_at", "reviewed_at", "completed_at"):
+            if privacy_request.get(k):
+                privacy_request[k] = to_namibia_time(privacy_request[k])
+    # # ✅ Privacy request status
+    # privacy_request = execute_query(c, """
+    #     SELECT * FROM privacy_requests
+    #     WHERE customer_id = ?
+    #     ORDER BY requested_at DESC
+    #     LIMIT 1
+    # """, (customer["id"],)).fetchone()    
     
     # ✅ FIX: Format datetime for each rental
     for rental in rentals:
@@ -6309,7 +9815,7 @@ def customer_portal():
     points = execute_query(c, """
         SELECT * FROM loyalty_points WHERE customer_id = ?
     """, (customer["id"],)).fetchone()
-    
+    damage_balance = get_customer_unpaid_damages(c, customer["id"])
     conn.close()
     
     return render_template(
@@ -6317,7 +9823,9 @@ def customer_portal():
         title="My Account",
         customer=customer,
         rentals=rentals,
-        points=points
+        points=points,
+        damage_balance=damage_balance,
+        privacy_request=privacy_request
     )
 
 # @app.route("/pickup-points")
@@ -6462,7 +9970,7 @@ def end_rental(rental_id):
         start_time_utc = datetime.fromisoformat(rental["start_time"])
     
     # ✅ Get current UTC time (offset-naive)
-    utc_now = datetime.utcnow()
+    utc_now = utc_now()
     
     # ✅ Get current local time for display (Namibia time - UTC+2)
     namibia_tz = pytz.timezone('Africa/Windhoek')
@@ -6489,7 +9997,10 @@ def end_rental(rental_id):
         total_cost += late_fee
         
         # ✅ Change calculation (Option A)
-        change_due = round(deposit_paid - total_cost, 2)
+        # change_due = round(deposit_paid - total_cost, 2)
+        damage_amount_val = float(request.form.get("damage_amount", 0) or 0)
+        change_due = round(deposit_paid - total_cost - damage_amount_val, 2)
+
         
         # Get condition values
         condition_before = request.form.get("condition_before", "Good")
@@ -6511,6 +10022,75 @@ def end_rental(rental_id):
               condition_before, condition_after,
               session["user_id"], end_station_id,
               rental_id))
+            #customer_unpaid = get_customer_unpaid_damages(c, rental["customer_id"])
+
+        # ✅ Mark items as returned
+        items_on_rental = execute_query(c, """
+            SELECT ri.item_id FROM rental_items ri
+            WHERE ri.rental_id = ?
+        """, (rental_id,)).fetchall()
+
+        for ri in items_on_rental:
+            item_id = ri["item_id"]
+            cond = request.form.get(f"item_condition_{item_id}", "Good")
+            execute_query(c, """
+                UPDATE rental_items
+                SET returned_by_user_id = ?, returned_at = CURRENT_TIMESTAMP,
+                    condition_on_return = ?
+                WHERE rental_id = ? AND item_id = ?
+            """, (session["user_id"], cond, rental_id, item_id))
+
+        # ✅ Q6/Q12 — Create a damage claim if the returner reported one
+        damage_description = (request.form.get("damage_description") or "").strip()
+        if damage_amount_val > 0 or damage_description:
+            execute_query(c, """
+                INSERT INTO damage_claims
+                (rental_id, customer_id, bicycle_id, description, amount,
+                 status, charged_by_user_id)
+                VALUES (?, ?, ?, ?, ?, 'Charged', ?)
+            """, (
+                rental_id,
+                rental["customer_id"],
+                rental["bicycle_id"],
+                damage_description or "Damage reported at return",
+                damage_amount_val,
+                session["user_id"]
+            ))
+
+            log_audit(
+                action="damage_create",
+                entity_type="daily_rental",
+                entity_id=rental_id,
+                details=f"Damage reported at return — N${damage_amount_val:.2f}: {damage_description or 'no description'}"
+            )
+
+
+        # # ✅ Mark items as returned
+        # for ri in rental_items_post_fetch:  # you'll need to re-query since we closed conn? No — we're still inside POST
+        #     item_id = ri["item_id"]
+        #     condition = request.form.get(f"item_condition_{item_id}", "Good")
+        #     execute_query(c, """
+        #         UPDATE rental_items
+        #         SET returned_by_user_id = ?, returned_at = CURRENT_TIMESTAMP,
+        #             condition_on_return = ?
+        #         WHERE rental_id = ? AND item_id = ?
+        #     """, (session["user_id"], condition, rental_id, item_id))
+
+        # # ✅ Optional: damage claim at return
+        # damage_amount = float(request.form.get("damage_amount", 0) or 0)
+        # damage_description = (request.form.get("damage_description") or "").strip()
+        # #customer_unpaid = get_customer_unpaid_damages(c, rental["customer_id"])
+
+        # if damage_amount > 0 or damage_description:
+        #     execute_query(c, """
+        #         INSERT INTO damage_claims
+        #         (rental_id, customer_id, bicycle_id, description, amount,
+        #          status, charged_by_user_id)
+        #         VALUES (?, ?, ?, ?, ?, 'Charged', ?)
+        #     """, (rental_id, rental["customer_id"], rental["bicycle_id"],
+        #           damage_description or "Damage reported at return",
+        #           damage_amount, session["user_id"]))
+
 
         # Bicycle becomes available AND moves to the return station
         if end_station_id:
@@ -6527,7 +10107,13 @@ def end_rental(rental_id):
 
         
         # execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
-        
+        log_audit(
+            action="rental_end",
+            entity_type="daily_rental",
+            entity_id=rental_id,
+            details=f"Ended rental #{rental_id} — {total_hours:.1f}h, N${total_cost:.2f}, "
+                    f"deposit=N${deposit_paid:.2f}, station_id={end_station_id}"
+        )        
         conn.commit()
         conn.close()
         
@@ -6579,7 +10165,13 @@ def end_rental(rental_id):
     if not default_return_station_id and stations:
         default_return_station_id = stations[0]["id"]
 
-
+    rental_items = execute_query(c, """
+        SELECT ri.*, i.name AS item_name
+        FROM rental_items ri
+        JOIN items i ON i.id = ri.item_id
+        WHERE ri.rental_id = ?
+        ORDER BY i.name
+    """, (rental_id,)).fetchall()
 
     conn.close()
     
@@ -6589,6 +10181,7 @@ def end_rental(rental_id):
         rental=rental,
         start_time_str=start_time_str,
         end_time_str=end_time_str,
+        rental_items=rental_items,
         preview_hours=preview_hours,
         hourly_rate=hourly_rate,
         daily_cap=daily_cap,
@@ -6599,7 +10192,8 @@ def end_rental(rental_id):
         deposit_paid=deposit_paid,
         preview_change=preview_change,
         stations=stations,
-        default_return_station_id=default_return_station_id        
+        default_return_station_id=default_return_station_id,
+                
     )
 
 
@@ -6681,6 +10275,14 @@ def cancel_rental(rental_id):
     """, (rental["bicycle_id"],))
 
     conn.commit()
+
+    log_audit(
+        action="rental_cancel",
+        entity_type="daily_rental",
+        entity_id=rental_id,
+        details=f"Cancelled rental #{rental_id} — reason: {reason}"
+    )
+
     conn.close()
 
     flash(
@@ -6690,38 +10292,56 @@ def cancel_rental(rental_id):
     )
     return redirect(request.referrer or url_for("dashboard"))
 
+# @app.route("/logout")
+# def logout():
+#     session.clear()
+#     return redirect(url_for("login"))
+
 @app.route("/logout")
 def logout():
+    # Log before clearing session
+    user_id = session.get("user_id")
+    username = session.get("username")
+    user_role = session.get("role")
+    if user_id:
+        log_audit(
+            action="logout",
+            entity_type="user",
+            entity_id=user_id,
+            details=f"User {username} logged out",
+            user_id=user_id,
+            username=username,
+            user_role=user_role,
+        )
     session.clear()
+    flash("You have been logged out.", "success")
     return redirect(url_for("login"))
 
 
 
-
-
-with app.app_context():
-    try:
-        conn = db()
-        c = conn.cursor()
-        # This works for both SQLite and PostgreSQL
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        table_exists = c.fetchone()
-        conn.close()
+# with app.app_context():
+#     try:
+#         conn = db()
+#         c = conn.cursor()
+#         # This works for both SQLite and PostgreSQL
+#         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+#         table_exists = c.fetchone()
+#         conn.close()
         
-        if not table_exists:
-            print("Database tables not found. Initializing...")
-            init_db()
-            print("Database initialized successfully!")
-        else:
-            print("Database already initialized.")
-    except Exception as e:
-        print(f"Error checking database: {e}")
-        print("Attempting to initialize database...")
-        try:
-            init_db()
-            print("Database initialized successfully!")
-        except Exception as e2:
-            print(f"Failed to initialize database: {e2}")
+#         if not table_exists:
+#             print("Database tables not found. Initializing...")
+#             init_db()
+#             print("Database initialized successfully!")
+#         else:
+#             print("Database already initialized.")
+#     except Exception as e:
+#         print(f"Error checking database: {e}")
+#         print("Attempting to initialize database...")
+#         try:
+#             init_db()
+#             print("Database initialized successfully!")
+#         except Exception as e2:
+#             print(f"Failed to initialize database: {e2}")
 
 @app.route("/debug-cloudinary")
 @login_required

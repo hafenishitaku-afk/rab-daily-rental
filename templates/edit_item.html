@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit Item</h1>
+<p class="sub">{{ item.name }}</p>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Item Name *
+                <input type="text" name="name" value="{{ item.name }}" required>
+            </label>
+            <label>
+                Description
+                <input type="text" name="description" value="{{ item.description or '' }}">
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;padding-top:10px;">
+                <input type="checkbox" name="is_active" {% if item.is_active %}checked{% endif %}>
+                Item is active
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Save Changes</button>
+            <a href="{{ url_for('items') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

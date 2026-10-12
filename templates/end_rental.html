@@ -121,6 +121,57 @@
                 📍 Where is the bicycle being dropped off?
             </small>
         </label>
+
+
+        
+        {# ✅ Show pre-rental condition note #}
+        {% if rental.start_condition_note %}
+        <div style="background:#fff8e1;padding:12px;border-radius:8px;border-left:4px solid #ffd700;margin-bottom:16px;">
+            <b>📝 Started with this note:</b>
+            <p style="margin:6px 0 0 0;color:#667085;">{{ rental.start_condition_note }}</p>
+        </div>
+        {% endif %}
+
+        {# ✅ Items to return #}
+        {% if rental_items %}
+        <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:16px;">
+            <b>🎁 Items to Return</b>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:8px;">
+                {% for ri in rental_items %}
+                <label style="background:#fff;padding:8px;border-radius:6px;border:1px solid #e4e7ec;">
+                    <div style="margin-bottom:6px;"><b>{{ ri.item_name }}</b></div>
+                    <select name="item_condition_{{ ri.item_id }}" style="width:100%;padding:4px 8px;font-size:13px;border-radius:4px;">
+                        <option value="Good" selected>✅ Good</option>
+                        <option value="Damaged">⚠️ Damaged</option>
+                        <option value="Missing">❌ Missing</option>
+                    </select>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {# ✅ Damage reported at return #}
+        <div style="background:#fdeceb;padding:12px;border-radius:8px;margin-bottom:16px;">
+            <b>⚠️ Damage Reported at Return (optional)</b>
+            <p style="color:#667085;font-size:12px;margin:4px 0 8px 0;">
+                Only fill if there is damage to charge the customer.
+            </p>
+            <div class="formgrid">
+                <label>
+                    Damage Description
+                    <input type="text" name="damage_description" placeholder="e.g. Bent front wheel">
+                </label>
+                <label>
+                    Damage Amount (N$)
+                    <input type="number" step="0.01" name="damage_amount" value="0" min="0">
+                </label>
+            </div>
+        </div>
+
+
+
+
         <div class="formgrid">
             <label>
                 Condition Before

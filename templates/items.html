@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>🎁 Items</h1>
+<p class="sub">Items that can be provided with rentals (helmets, locks, pumps, etc.).</p>
+
+<div class="card">
+    <h2>Add Item</h2>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Item Name *
+                <input type="text" name="name" placeholder="e.g. Helmet, Lock, Pump" required>
+            </label>
+            <label>
+                Description
+                <input type="text" name="description" placeholder="Optional details">
+            </label>
+        </div>
+        <button class="btn yellow" style="margin-top:16px" type="submit">+ Add Item</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Item List</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            {% if items %}
+                {% for i in items %}
+                <tr>
+                    <td><b>{{ i.name }}</b></td>
+                    <td>{{ i.description or '—' }}</td>
+                    <td>
+                        <span class="badge {% if i.is_active %}green{% else %}orange{% endif %}">
+                            {{ 'Active' if i.is_active else 'Inactive' }}
+                        </span>
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                            <a class="btn small" href="{{ url_for('edit_item', item_id=i.id) }}">✏️ Edit</a>
+                            <form method="post" 
+                                  action="{{ url_for('delete_item', item_id=i.id) }}" 
+                                  style="display:inline;"
+                                  onsubmit="return confirm('Delete item {{ i.name }}?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="4" style="text-align:center;color:#667085;padding:20px;">
+                        No items yet. Add your first item above.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}

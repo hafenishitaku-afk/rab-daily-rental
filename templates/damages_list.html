@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>⚠️ Damage Claims</h1>
+<p class="sub">Track damage charges and outstanding balances.</p>
+
+<!-- Summary -->
+<div class="grid">
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">Outstanding</div>
+        <div class="value">N$ {{ "%.2f"|format(total_outstanding) }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Total Paid</div>
+        <div class="value">N$ {{ "%.2f"|format(total_paid) }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #0d1f46;">
+        <div class="label">Total Claims</div>
+        <div class="value">{{ claims|length }}</div>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('new_damage') }}" class="btn yellow">+ New Damage Claim</a>
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <h2 style="margin:0;">All Claims</h2>
+        <form method="get" style="display:flex;gap:8px;align-items:center;">
+            <select name="status" onchange="this.form.submit()" style="padding:8px 12px;border-radius:8px;border:1px solid #ddd;">
+                <option value="">All statuses</option>
+                <option value="Charged" {% if status == 'Charged' %}selected{% endif %}>Charged</option>
+                <option value="Paid" {% if status == 'Paid' %}selected{% endif %}>Paid</option>
+                <option value="Waived" {% if status == 'Waived' %}selected{% endif %}>Waived</option>
+            </select>
+        </form>
+    </div>
+
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Bike / Item</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Reported By</th>
+                <th>Date</th>
+                <th>Actions</th>
+            </tr>
+            {% if claims %}
+                {% for d in claims %}
+                <tr>
+                    <td><b>#{{ d.id }}</b></td>
+                    <td>
+                        <b>{{ d.customer_name or '—' }}</b>
+                        {% if d.customer_phone %}
+                        <br><small style="color:#667085;">{{ d.customer_phone }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if d.bike_code %}{{ d.bike_code }}{% endif %}
+                        {% if d.item_name %}
+                            {% if d.bike_code %}<br>{% endif %}
+                            <small>{{ d.item_name }}</small>
+                        {% endif %}
+                        {% if not d.bike_code and not d.item_name %}—{% endif %}
+                    </td>
+                    <td>{{ d.description or '—' }}</td>
+                    <td><b>N$ {{ "%.2f"|format(d.amount) }}</b></td>
+                    <td>
+                        <span class="badge 
+                            {% if d.status == 'Paid' %}green
+                            {% elif d.status == 'Waived' %}orange
+                            {% else %}red{% endif %}">
+                            {{ d.status }}
+                        </span>
+                    </td>
+                    <td>{{ d.charged_by or '—' }}</td>
+                    <td>{{ d.charged_at or d.created_at or '—' }}</td>
+                    <td>
+                        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                            <a class="btn small" href="{{ url_for('damage_agreement_pdf', claim_id=d.id) }}">📄 PDF</a>
+                            {% if d.status != 'Paid' and d.status != 'Waived' %}
+                                <a class="btn small yellow" href="{{ url_for('pay_damage', claim_id=d.id) }}">💰 Pay</a>
+                                {% if session.role == 'admin' %}
+                                <form method="post" 
+                                      action="{{ url_for('waive_damage', claim_id=d.id) }}" 
+                                      style="display:inline;"
+                                      onsubmit="return confirm('Waive this damage claim?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="btn small" style="background:#667085;">✖ Waive</button>
+                                </form>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="9" style="text-align:center;color:#667085;padding:20px;">
+                        No damage claims yet.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+{% endblock %}

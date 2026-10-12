@@ -44,6 +44,8 @@
                 <a href="{{ url_for('maintenance_dashboard') }}" style="color:#ffe500;">🔧 Maintenance</a>
                 <a href="{{ url_for('exports_page') }}" style="color:#ffe500;">📄 Exports</a>
                 <a href="{{ url_for('staff_activity') }}" style="color:#ffe500;">🧾 Staff Activity</a>
+                <a href="{{ url_for('damages_list') }}" style="color:#ffe500;">⚠️ Damages</a>
+                <a href="{{ url_for('login_history') }}" style="color:#ffe500;">🔐 Login History</a>
                 {% endif %}
                 
                 <!-- Admin Only -->
@@ -52,6 +54,10 @@
                 <a href="{{ url_for('loyalty_dashboard') }}" style="color:#00ff80;">⭐ Loyalty</a>
                 <a href="{{ url_for('users') }}" style="color:#00ff80;">👥 Users</a>
                 <a href="{{ url_for('stations') }}" style="color:#00ff80;">🏢 Stations</a>
+                <a href="{{ url_for('items') }}" style="color:#00ff80;">🎁 Items</a>
+                <a href="{{ url_for('audit_log_page') }}" style="color:#00ff80;">📋 Audit Log</a> 
+                <a href="{{ url_for('privacy_requests_dashboard') }}" style="color:#00ff80;">🔒 Privacy Requests</a>
+
                 {% endif %}
             {% endif %}
             
@@ -85,7 +91,12 @@
         {% endwith %}
         {% block content %}{% endblock %}
     </main>
-    
-    <footer>RAB - Daily Rental System</footer>
+    <footer>
+        RAB - Daily Rental System
+        <span style="margin:0 10px;">·</span>
+        <a href="{{ url_for('privacy_policy') }}" style="color:#ffe500;text-decoration:none;">
+            Privacy Policy
+        </a>
+    </footer>
 </body>
 </html>

@@ -99,7 +99,15 @@
             </tr>
             {% for b in bicycles %}
             <tr>
-                <td><b>{{ b.bike_code }}</b></td>
+                <!-- <td><b>{{ b.bike_code }}</b></td> -->
+
+                <td>
+                    <b>{{ b.bike_code }}</b>
+                    {% if b.condition_notes %}
+                    <span title="{{ b.condition_notes }}" style="color:#ffd700;cursor:help;">⚠️</span>
+                    {% endif %}
+                </td>
+
                 <td>{{ b.bike_type }}</td>
                 <td>{{ b.brand or '' }} {{ b.model or '' }}</td>
                 <td>N$ {{ "%.2f"|format(b.hourly_rate) }}</td>

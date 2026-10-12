@@ -25,9 +25,14 @@
                 <div style="color:#667085;font-size:12px;">{{ doc.uploaded_at }}</div>
                 <br>
                 <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
-                    <a href="{{ url_for('view_document_file', customer_id=customer.id, doc_id=doc.id) }}" class="btn small">
+                    <!-- <a href="{{ url_for('view_document_file', customer_id=customer.id, doc_id=doc.id) }}" class="btn small">
                         📄 View
-                    </a>
+                    </a> -->
+
+                    <a href="{{ url_for('serve_document', doc_id=doc.id) }}" target="_blank" class="btn small">
+                        📄 View
+                    </a>                    
+
                     
                     {% if session.role == 'admin' %}
                     <form method="post" action="{{ url_for('delete_document', customer_id=customer.id, doc_id=doc.id) }}" 

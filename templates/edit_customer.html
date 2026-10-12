@@ -71,17 +71,10 @@
             <br>
 
             <!-- ✅ Works for both local and Cloudinary -->
-            <a href="
-            {% if doc.file_path.startswith('http') %}
-                {{ doc.file_path }}
-            {% else %}
-                {{ url_for('static', filename=doc.file_path) }}
-            {% endif %}
-            " target="_blank" class="btn small">View Document</a>
 
-            <!-- <a href="{{ doc.file_path }}" target="_blank" class="btn small">View Document</a> -->
-             
-            <!-- <a href="{{ url_for('static', filename='uploads/' + doc.file_path.split('/')[-1]) }}" target="_blank" class="btn small">View Document</a> -->
+
+            <a href="{{ url_for('serve_document', doc_id=doc.id) }}" target="_blank" class="btn small">View Document</a>
+
         </div>
         {% endfor %}
     </div>

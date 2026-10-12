@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>💰 Record Damage Payment</h1>
+<p class="sub">Mark claim #{{ claim.id }} as paid.</p>
+
+<div class="card">
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Customer</div>
+            <div class="value" style="font-size:20px;">{{ claim.customer_name }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Amount</div>
+            <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(claim.amount) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Description</div>
+            <div class="value" style="font-size:14px;">{{ claim.description }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+            Payment Method
+            <select name="payment_method">
+                <option value="Cash">💵 Cash</option>
+                <option value="Card">💳 Card</option>
+                <option value="Mobile Money">📱 Mobile Money</option>
+                <option value="Bank Transfer">🏦 Bank Transfer</option>
+            </select>
+        </label>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">✅ Confirm Payment Received</button>
+            <a href="{{ url_for('damages_list') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

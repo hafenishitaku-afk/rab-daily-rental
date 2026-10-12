@@ -46,6 +46,17 @@
                 <input type="text" name="notes" value="{{ bicycle.notes or '' }}">
             </label>
 
+            <label style="grid-column: span 2;">
+                Permanent Condition Notes
+                <textarea name="condition_notes" rows="3" 
+                          placeholder="e.g. Left brake is loose. Rear reflector missing.">{{ bicycle.condition_notes or '' }}</textarea>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    📝 These notes stay on the bicycle and are shown on every rental.
+                </small>
+            </label>
+
+
+            
             <label>
                 Current Station
                 <select name="current_station_id">

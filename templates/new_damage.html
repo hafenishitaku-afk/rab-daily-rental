@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>⚠️ New Damage Claim</h1>
+<p class="sub">Record a damage charge for a customer.</p>
+
+<div class="card">
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Customer *
+                <select name="customer_id" required>
+                    <option value="">Select customer...</option>
+                    {% for c in customers %}
+                    <option value="{{ c.id }}">{{ c.full_name }} — {{ c.phone }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Bicycle (optional)
+                <select name="bicycle_id">
+                    <option value="">— Not bike-related —</option>
+                    {% for b in bicycles %}
+                    <option value="{{ b.id }}">{{ b.bike_code }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Item (optional)
+                <select name="item_id">
+                    <option value="">— Not item-related —</option>
+                    {% for i in items %}
+                    <option value="{{ i.id }}">{{ i.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Amount (N$) *
+                <input type="number" step="0.01" name="amount" min="0.01" required>
+            </label>
+            <label style="grid-column: span 2;">
+                Damage Description *
+                <textarea name="description" rows="3" 
+                          placeholder="What was damaged and how?" 
+                          required></textarea>
+            </label>
+            <label style="grid-column: span 2;">
+                Notes
+                <textarea name="notes" rows="2" 
+                          placeholder="Any additional context..."></textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button class="btn yellow" type="submit">💾 Create Claim</button>
+            <a href="{{ url_for('damages_list') }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

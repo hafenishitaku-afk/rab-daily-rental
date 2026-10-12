@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>⚠️ Damage Claims</h1>
+<p class="sub">{{ customer.full_name }} — {{ customer.phone }}</p>
+
+{% if outstanding > 0 %}
+<div class="card" style="background:#fdeceb;border-left:5px solid #dc3545;">
+    <h3 style="margin:0;color:#dc3545;">Outstanding Balance</h3>
+    <div style="font-size:36px;font-weight:800;color:#dc3545;margin-top:5px;">
+        N$ {{ "%.2f"|format(outstanding) }}
+    </div>
+    <p style="color:#667085;margin:5px 0 0 0;font-size:13px;">
+        This customer cannot start a new rental until the balance is paid.
+    </p>
+</div>
+{% else %}
+<div class="card" style="background:#e8f7ef;border-left:5px solid #16834b;">
+    <h3 style="margin:0;color:#16834b;">✅ No Outstanding Balance</h3>
+    <p style="color:#667085;margin:5px 0 0 0;font-size:13px;">
+        All damage claims have been paid or waived.
+    </p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Claim History</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>ID</th>
+                <th>Bike / Item</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+            </tr>
+            {% if claims %}
+                {% for d in claims %}
+                <tr>
+                    <td><b>#{{ d.id }}</b></td>
+                    <td>
+                        {% if d.bike_code %}{{ d.bike_code }}{% endif %}
+                        {% if d.item_name %}
+                            {% if d.bike_code %}<br>{% endif %}
+                            <small>{{ d.item_name }}</small>
+                        {% endif %}
+                        {% if not d.bike_code and not d.item_name %}—{% endif %}
+                    </td>
+                    <td>{{ d.description or '—' }}</td>
+                    <td><b>N$ {{ "%.2f"|format(d.amount) }}</b></td>
+                    <td>
+                        <span class="badge 
+                            {% if d.status == 'Paid' %}green
+                            {% elif d.status == 'Waived' %}orange
+                            {% else %}red{% endif %}">
+                            {{ d.status }}
+                        </span>
+                        {% if d.paid_at %}
+                        <br><small style="color:#667085;">{{ d.paid_at }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ d.charged_at or d.created_at or '—' }}</td>
+                    <td>
+                        <a class="btn small" href="{{ url_for('damage_agreement_pdf', claim_id=d.id) }}">📄 PDF</a>
+                        {% if d.status != 'Paid' and d.status != 'Waived' %}
+                            <a class="btn small yellow" href="{{ url_for('pay_damage', claim_id=d.id) }}">💰 Pay</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7" style="text-align:center;color:#667085;padding:20px;">
+                        No damage claims recorded.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('customers') }}" class="btn">← Back to Customers</a>
+    <a href="{{ url_for('customer_damages', customer_id=customer.id) }}" class="btn">⟳ Refresh</a>
+</div>
+
+{% endblock %}

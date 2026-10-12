@@ -62,10 +62,18 @@
                 <p><strong>6. Data Protection</strong><br>
                 Customer information will be stored securely and used only for rental purposes.</p>
             </div>
-            <label style="display:flex;align-items:center;gap:8px;">
+            <!-- <label style="display:flex;align-items:center;gap:8px;">
                 <input type="checkbox" name="terms_accepted" required>
                 I agree to the Terms & Conditions
+                <input type="hidden" name="privacy_seen" value="1">
+            </label> -->
+
+            <label style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" name="terms_accepted" required>
+                I agree to the Terms & Conditions and have read the 
+                <a href="{{ url_for('privacy_policy') }}" target="_blank" style="color:#0d1f46;">Privacy Policy</a>
             </label>
+
         </div>
         
         <!-- Signature Pad -->

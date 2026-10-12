@@ -22,7 +22,46 @@
         <div class="label">Today's Revenue</div>
         <div class="value">N$ {{ "%.2f"|format(today_revenue) }}</div>
     </div>
+
+    <div class="metric">
+        <div class="label">Pending Verifications</div>
+        <div class="value">{{ pending_verification }}</div>
+    </div>
+
 </div>
+
+{% if session.role == 'admin' and pending_privacy and pending_privacy > 0 %}
+<div class="card" style="background:#fff8e1;border-left:5px solid #ffd700;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div>
+            <b style="color:#a66300;">⏳ {{ pending_privacy }} pending privacy request(s)</b>
+            <p style="color:#667085;font-size:13px;margin:4px 0 0 0;">
+                Customers have requested account deletion. Please review.
+            </p>
+        </div>
+        <a href="{{ url_for('privacy_requests_dashboard') }}" class="btn small yellow">
+            Review Now →
+        </a>
+    </div>
+</div>
+{% endif %}
+
+
+<div class="card" style="background:#f8f9fa;">
+    <h3 style="margin-top:0;">🗑️ Data Retention Policy</h3>
+    <ul style="color:#667085;font-size:13px;line-height:1.8;margin:0;">
+        <li>Rental records: {{ retention.rental_records_years }} years</li>
+        <li>Payment records: {{ retention.payment_records_years }} years</li>
+        <li>ID documents: {{ retention.customer_documents_years }} years after last rental</li>
+        <li>Login history: {{ retention.login_history_days }} days</li>
+        <li>Audit log: {{ retention.audit_log_days }} days</li>
+        <li>Document view log: {{ retention.document_views_days }} days</li>
+    </ul>
+    <p style="color:#667085;font-size:12px;margin-top:10px;">
+        Cleanup runs daily at 03:00 UTC. You can also run it manually from the Audit Log page.
+    </p>
+</div>
+
 
 <div class="card">
     <h2>Active Rentals</h2>

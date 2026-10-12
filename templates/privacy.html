@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width:900px;margin:0 auto;">
+
+<h1>🔒 Privacy Policy</h1>
+<p class="sub">
+    {{ company_name }} — Last updated: {{ last_updated }}
+</p>
+
+<div class="card">
+    <p>
+        This policy explains what personal information we collect, why we collect it, who can see it, 
+        how long we keep it, and what rights you have over it. We aim to comply with the 
+        <b>Namibian Data Protection Act, 2022 (Act 5 of 2022)</b>.
+    </p>
+    <p style="color:#667085;font-size:13px;">
+        Questions about this policy? Contact us at 
+        <a href="mailto:{{ privacy_email }}" style="color:#0d1f46;">{{ privacy_email }}</a>.
+    </p>
+</div>
+
+<div class="card">
+    <h2>1. What we collect</h2>
+    <ul style="line-height:1.9;">
+        <li><b>Identity data:</b> full name, ID or passport number, date of birth (if provided)</li>
+        <li><b>Contact data:</b> phone number, email address, physical address</li>
+        <li><b>Verification data:</b> scanned copy of your ID/passport, a photo of you taken at registration, updated every 2 weeks</li>
+        <li><b>Digital signature:</b> the signature you provide when accepting the rental terms</li>
+        <li><b>Rental activity:</b> which bicycles you rented, when, for how long, where you picked up and returned them</li>
+        <li><b>Payment data:</b> amount paid, payment method, damage charges</li>
+        <li><b>Technical data:</b> IP address and device information when staff access your file (kept for security auditing)</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>2. Why we collect it</h2>
+    <ul style="line-height:1.9;">
+        <li>To verify your identity before renting a bicycle</li>
+        <li>To provide the rental service, calculate charges, and apply deposits correctly</li>
+        <li>To recover damages or investigate disputes</li>
+        <li>To comply with tax and accounting laws</li>
+        <li>To improve security and detect suspicious activity</li>
+        <li>To contact you about your rentals (reminders, overdue notices)</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>3. Who can see your data</h2>
+    <ul style="line-height:1.9;">
+        <li><b>Staff</b> can see your name, contact details, verification status, and rental history — needed to serve you.</li>
+        <li><b>Managers</b> can see the above plus payment and damage records.</li>
+        <li><b>Administrators</b> can see everything, including full IP addresses in security logs.</li>
+        <li><b>Nobody else</b> can access your personal information. We do not sell or share your data with third parties.</li>
+    </ul>
+    <p style="color:#667085;font-size:13px;">
+        Every access to your documents is logged. Full audit trail available on request.
+    </p>
+</div>
+
+<div class="card">
+    <h2>4. How long we keep your data</h2>
+    <ul style="line-height:1.9;">
+        <li><b>Rental records:</b> kept for {{ retention.rental_records_years }} years (accounting requirement)</li>
+        <li><b>Payment records:</b> kept for {{ retention.payment_records_years }} years (accounting requirement)</li>
+        <li><b>ID documents & photos:</b> kept for {{ retention.customer_documents_years }} years after your last rental, then permanently deleted</li>
+        <li><b>Damage claims:</b> kept for {{ retention.damage_claims_years }} years</li>
+        <li><b>Login history:</b> kept for {{ retention.login_history_days }} days</li>
+        <li><b>Audit log:</b> kept for {{ retention.audit_log_days }} days</li>
+        <li><b>Document view log:</b> kept for {{ retention.document_views_days }} days</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>5. Your rights</h2>
+    <p>Under the Namibian Data Protection Act, you have the right to:</p>
+    <ul style="line-height:1.9;">
+        <li><b>Access</b> — request a copy of all personal data we hold about you</li>
+        <li><b>Portability</b> — receive your data in a structured, machine-readable format (JSON) plus a human-readable PDF</li>
+        <li><b>Correction</b> — ask us to fix incorrect information</li>
+        <li><b>Deletion</b> — request that we delete your account and personal data</li>
+        <li><b>Objection</b> — object to how we process your data</li>
+        <li><b>Withdraw consent</b> — at any time</li>
+    </ul>
+    <p style="color:#667085;font-size:13px;">
+        To exercise any of these rights, log in to your account and use the <b>Privacy</b> section, 
+        or email us at <a href="mailto:{{ privacy_email }}" style="color:#0d1f46;">{{ privacy_email }}</a>.
+    </p>
+</div>
+
+<div class="card">
+    <h2>6. What happens when you ask us to delete your account</h2>
+    <ol style="line-height:1.9;">
+        <li>You submit a deletion request through your account.</li>
+        <li>An administrator reviews the request to make sure no outstanding balances or disputes exist.</li>
+        <li>Once approved, we <b>anonymize</b> your record: your name becomes "Deleted User", contact details are erased, and your ID documents and photo are permanently deleted.</li>
+        <li>Your rental and payment history is retained in anonymized form (as required by accounting law) so it can no longer be linked to you.</li>
+        <li>You cannot log in to the system after deletion.</li>
+    </ol>
+    <p style="color:#667085;font-size:13px;">
+        Note: we cannot delete records we are legally required to keep (e.g., tax/accounting records). 
+        These are anonymized but not deleted.
+    </p>
+</div>
+
+<div class="card">
+    <h2>7. Security</h2>
+    <ul style="line-height:1.9;">
+        <li>All data is transmitted over HTTPS with strict transport security.</li>
+        <li>Uploaded documents are stored privately and never publicly accessible.</li>
+        <li>Only authenticated staff can access customer records, and every access is logged.</li>
+        <li>Login attempts are rate-limited and suspicious logins trigger admin alerts.</li>
+        <li>Passwords are stored using industry-standard one-way hashing (never plaintext).</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>8. Changes to this policy</h2>
+    <p>
+        We may update this policy from time to time. The "Last updated" date at the top will 
+        change when we do. Significant changes will be announced to registered customers.
+    </p>
+</div>
+
+<div class="card" style="background:#f8f9fa;text-align:center;">
+    <h3>Questions?</h3>
+    <p style="color:#667085;">
+        Email us at <a href="mailto:{{ privacy_email }}" style="color:#0d1f46;"><b>{{ privacy_email }}</b></a>
+    </p>
+</div>
+
+
+<div class="actions" style="margin-top:20px;">
+    {% if session.get('user_id') %}
+        {% if session.get('role') == 'customer' %}
+            <a href="{{ url_for('customer_portal') }}" class="btn">← Back to My Account</a>
+        {% else %}
+            <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+        {% endif %}
+    {% else %}
+        <a href="{{ url_for('login') }}" class="btn">← Back to Login</a>
+        <a href="{{ url_for('customer_login') }}" class="btn">Customer Login</a>
+    {% endif %}
+</div>
+
+
+{% endblock %}
