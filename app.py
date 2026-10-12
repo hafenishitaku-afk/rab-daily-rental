@@ -1506,55 +1506,55 @@ def init_db():
     conn.close()
 
 
-    def _database_is_initialized():
-        """Check if the 'users' table exists — works on both SQLite and PostgreSQL."""
-        try:
-            conn = db()
-            c = conn.cursor()
-            if os.environ.get("DATABASE_URL"):
-                # PostgreSQL
-                execute_query(c, """
-                    SELECT EXISTS (
-                        SELECT 1 FROM information_schema.tables
-                        WHERE table_name = 'users'
-                    ) AS exists_flag
-                """)
-                row = c.fetchone()
-                if isinstance(row, dict):
-                    return bool(list(row.values())[0])
-                return bool(row[0]) if row else False
-            else:
-                # SQLite
-                rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
-                return len(rows) > 0
-        except Exception as e:
-            print(f"⚠️ Database init check failed: {e}")
-            return False
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    # def _database_is_initialized():
+    #     """Check if the 'users' table exists — works on both SQLite and PostgreSQL."""
+    #     try:
+    #         conn = db()
+    #         c = conn.cursor()
+    #         if os.environ.get("DATABASE_URL"):
+    #             # PostgreSQL
+    #             execute_query(c, """
+    #                 SELECT EXISTS (
+    #                     SELECT 1 FROM information_schema.tables
+    #                     WHERE table_name = 'users'
+    #                 ) AS exists_flag
+    #             """)
+    #             row = c.fetchone()
+    #             if isinstance(row, dict):
+    #                 return bool(list(row.values())[0])
+    #             return bool(row[0]) if row else False
+    #         else:
+    #             # SQLite
+    #             rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
+    #             return len(rows) > 0
+    #     except Exception as e:
+    #         print(f"⚠️ Database init check failed: {e}")
+    #         return False
+    #     finally:
+    #         try:
+    #             conn.close()
+    #         except Exception:
+    #             pass
 
 
 
-    with app.app_context():
-        if not _database_is_initialized():
-            print("Database tables not found. Initializing...")
-           # init_db()
-            print("Database initialized successfully!")
-        else:
-            print("Database already initialized.")
+    # with app.app_context():
+    #     if not _database_is_initialized():
+    #         print("Database tables not found. Initializing...")
+    #        # init_db()
+    #         print("Database initialized successfully!")
+    #     else:
+    #         print("Database already initialized.")
 
-        try:
-            ensure_schema_columns()
-            ensure_rental_extras_schema()
-            ensure_audit_schema()
-            ensure_privacy_schema()                     # ← NEW
-            migrate_public_uploads_to_private()
-            print("✅ Schema is up to date.")
-        except Exception as e:
-            print(f"⚠️ Schema bootstrap error: {e}")    
+    #     try:
+    #         ensure_schema_columns()
+    #         ensure_rental_extras_schema()
+    #         ensure_audit_schema()
+    #         ensure_privacy_schema()                     # ← NEW
+    #         migrate_public_uploads_to_private()
+    #         print("✅ Schema is up to date.")
+    #     except Exception as e:
+    #         print(f"⚠️ Schema bootstrap error: {e}")    
 
 
     # with app.app_context():
@@ -10389,7 +10389,93 @@ def backup_uploads():
     )
 
 
+def _database_is_initialized():
+    """Check if the 'users' table exists — works on both SQLite and PostgreSQL."""
+    try:
+        conn = db()
+        c = conn.cursor()
+        if os.environ.get("DATABASE_URL"):
+            # PostgreSQL
+            execute_query(c, """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'users'
+                ) AS exists_flag
+            """)
+            row = c.fetchone()
+            if isinstance(row, dict):
+                return bool(list(row.values())[0])
+            return bool(row[0]) if row else False
+        else:
+            # SQLite
+            rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
+            return len(rows) > 0
+    except Exception as e:
+        print(f"⚠️ Database init check failed: {e}")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+
+    # with app.app_context():
+    #     if not _database_is_initialized():
+    #         print("Database tables not found. Initializing...")
+    #        # init_db()
+    #         print("Database initialized successfully!")
+    #     else:
+    #         print("Database already initialized.")
+
+    #     try:
+    #         ensure_schema_columns()
+    #         ensure_rental_extras_schema()
+    #         ensure_audit_schema()
+    #         ensure_privacy_schema()                     # ← NEW
+    #         migrate_public_uploads_to_private()
+    #         print("✅ Schema is up to date.")
+    #     except Exception as e:
+    #         print(f"⚠️ Schema bootstrap error: {e}")    
+
+
+
+
+
+
+# =============================================
+# BOOTSTRAP — runs on import (both gunicorn and python app.py)
+# =============================================
+with app.app_context():
+    if not _database_is_initialized():
+        print("Database tables not found. Initializing...")
+        # init_db()
+        print("Database initialized successfully!")
+    else:
+        print("Database already initialized.")
+
+    try:
+        ensure_schema_columns()
+        ensure_rental_extras_schema()
+        ensure_audit_schema()
+        ensure_privacy_schema()
+        migrate_public_uploads_to_private()
+        print("✅ Schema is up to date.")
+    except Exception as e:
+        print(f"⚠️ Schema bootstrap error: {e}")
+
+
+# =============================================
+# LOCAL DEV ENTRY POINT — only used by `python app.py`
+# =============================================
 if __name__ == "__main__":
-    init_db()
-    # Local development: debug on. On Render, gunicorn never reaches this block.
-    app.run(debug=True, port=int(os.environ.get("PORT", 5001)))
+    _debug = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(debug=_debug, port=int(os.environ.get("PORT", 5001)))
+
+
+
+# if __name__ == "__main__":
+#     init_db()
+#     # Local development: debug on. On Render, gunicorn never reaches this block.
+#     app.run(debug=True, port=int(os.environ.get("PORT", 5001)))
