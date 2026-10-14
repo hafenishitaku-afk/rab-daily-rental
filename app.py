@@ -697,8 +697,6 @@ def execute_query(cursor, query, params=None):
     # ✅ Return the cursor so you can use .fetchone() or .fetchall()
     return cursor
 
-
-
 def insert_and_get_id(cursor, query, params=None):
     """
     Insert a row and return the new row's ID.
@@ -707,8 +705,9 @@ def insert_and_get_id(cursor, query, params=None):
     is_postgres = os.environ.get("DATABASE_URL") is not None
 
     if is_postgres:
-        # psycopg2 uses %s placeholders
-        pg_query = query.rstrip().rstrip(";")
+        # ✅ Convert ? placeholders to %s for Postgres
+        pg_query = query.replace("?", "%s").rstrip().rstrip(";")
+
         # Strip any existing RETURNING clause so we can add our own
         if "RETURNING" in pg_query.upper():
             pg_query = pg_query[:pg_query.upper().index("RETURNING")].rstrip()
@@ -723,17 +722,52 @@ def insert_and_get_id(cursor, query, params=None):
         row = cursor.fetchone()
         if not row:
             return None
-        # RealDictCursor returns dict; plain cursor returns tuple
         if isinstance(row, dict):
             return list(row.values())[0]
         return row[0]
     else:
-        # SQLite — use lastrowid
+        # SQLite
         if params:
             cursor.execute(query, params)
         else:
             cursor.execute(query)
         return cursor.lastrowid
+
+# def insert_and_get_id(cursor, query, params=None):
+#     """
+#     Insert a row and return the new row's ID.
+#     Works on both SQLite (via lastrowid) and PostgreSQL (via RETURNING id).
+#     """
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+
+#     if is_postgres:
+#         # psycopg2 uses %s placeholders
+#         pg_query = query.rstrip().rstrip(";")
+#         # Strip any existing RETURNING clause so we can add our own
+#         if "RETURNING" in pg_query.upper():
+#             pg_query = pg_query[:pg_query.upper().index("RETURNING")].rstrip()
+
+#         pg_query = pg_query + " RETURNING id"
+
+#         if params:
+#             cursor.execute(pg_query, params)
+#         else:
+#             cursor.execute(pg_query)
+
+#         row = cursor.fetchone()
+#         if not row:
+#             return None
+#         # RealDictCursor returns dict; plain cursor returns tuple
+#         if isinstance(row, dict):
+#             return list(row.values())[0]
+#         return row[0]
+#     else:
+#         # SQLite — use lastrowid
+#         if params:
+#             cursor.execute(query, params)
+#         else:
+#             cursor.execute(query)
+#         return cursor.lastrowid
 
 
 def get_single_value(cursor, query, params=None):
