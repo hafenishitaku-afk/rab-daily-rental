@@ -233,13 +233,58 @@ def _enforce_idle_timeout():
 
 
 
+# def backfill_2fa_required():
+#     """Mark admin/manager as 2FA-required — but ONLY in production."""
+#     # Skip locally — don't force 2FA during development
+#     if not os.environ.get("DATABASE_URL"):
+#         print("ℹ️ Skipping 2FA backfill (local dev).")
+#         return
+
+#     try:
+#         conn = db()
+#         c = conn.cursor()
+#         execute_query(c, """
+#             UPDATE users
+#             SET twofa_required = 1
+#             WHERE role IN ('admin', 'manager')
+#               AND (twofa_required IS NULL OR twofa_required = 0)
+#         """)
+#         conn.commit()
+#         conn.close()
+#         print("✅ Backfilled 2FA requirement for admin/manager users.")
+#     except Exception as e:
+#         print(f"⚠️ backfill_2fa_required failed: {e}")
+
+def backfill_2fa_required():
+    """Mark admin/manager as 2FA-required — but ONLY in production."""
+    # Skip locally — don't force 2FA during development
+    if not os.environ.get("DATABASE_URL"):
+        print("ℹ️ Skipping 2FA backfill (local dev).")
+        return
+
+    try:
+        conn = db()
+        c = conn.cursor()
+        execute_query(c, """
+            UPDATE users
+            SET twofa_required = 1
+            WHERE role IN ('admin', 'manager')
+              AND (twofa_required IS NULL OR twofa_required = 0)
+        """)
+        conn.commit()
+        conn.close()
+        print("✅ Backfilled 2FA requirement for admin/manager users.")
+    except Exception as e:
+        print(f"⚠️ backfill_2fa_required failed: {e}")
+
 
 @app.before_request
 def _enforce_2fa_setup():
-    """
-    If the logged-in user requires 2FA but hasn't set it up, force them to /2fa/setup.
-    Skips: static, login, logout, 2fa routes, 2fa verify, and profile (so they can still log out).
-    """
+    """..."""
+    # ✅ Skip entirely in local development
+    if not os.environ.get("DATABASE_URL"):
+        return
+
     path = request.path or ""
     if path.startswith("/static/") or path.startswith("/2fa/"):
         return
@@ -250,11 +295,9 @@ def _enforce_2fa_setup():
     if not user_id:
         return
 
-    # Already passed the 2FA gate this session?
     if session.get("twofa_verified"):
         return
 
-    # Fetch user's 2FA status (lightweight check)
     try:
         conn = db()
         c = conn.cursor()
@@ -268,14 +311,56 @@ def _enforce_2fa_setup():
     if not user:
         return
 
-    # If 2FA required but not enabled → force setup
     if user_needs_2fa_setup(user):
         flash("You must enable two-factor authentication before continuing.", "warning")
         return redirect(url_for("twofa_setup"))
 
-    # If 2FA enabled but not yet verified this session → require verification
     if user.get("twofa_enabled") and not session.get("twofa_verified"):
         return redirect(url_for("twofa_verify"))
+
+
+# @app.before_request
+# def _enforce_2fa_setup():
+#     """
+#     If the logged-in user requires 2FA but hasn't set it up, force them to /2fa/setup.
+#     Skips: static, login, logout, 2fa routes, 2fa verify, and profile (so they can still log out).
+#     """
+#     path = request.path or ""
+#     if path.startswith("/static/") or path.startswith("/2fa/"):
+#         return
+#     if path in ("/login", "/customer-login", "/logout"):
+#         return
+
+#     user_id = session.get("user_id")
+#     if not user_id:
+#         return
+
+#     # Already passed the 2FA gate this session?
+#     if session.get("twofa_verified"):
+#         return
+
+#     # Fetch user's 2FA status (lightweight check)
+#     try:
+#         conn = db()
+#         c = conn.cursor()
+#         user = execute_query(c, """
+#             SELECT id, role, twofa_required, twofa_enabled FROM users WHERE id = ?
+#         """, (user_id,)).fetchone()
+#         conn.close()
+#     except Exception:
+#         return
+
+#     if not user:
+#         return
+
+#     # If 2FA required but not enabled → force setup
+#     if user_needs_2fa_setup(user):
+#         flash("You must enable two-factor authentication before continuing.", "warning")
+#         return redirect(url_for("twofa_setup"))
+
+#     # If 2FA enabled but not yet verified this session → require verification
+#     if user.get("twofa_enabled") and not session.get("twofa_verified"):
+#         return redirect(url_for("twofa_verify"))
 
 # =============================================
 # BACKGROUND SCHEDULER (retention cleanup)
@@ -2889,22 +2974,7 @@ def ensure_2fa_schema():
     conn.commit()
     conn.close()
 
-def backfill_2fa_required():
-    """Set twofa_required=1 for all admin and manager users."""
-    try:
-        conn = db()
-        c = conn.cursor()
-        execute_query(c, """
-            UPDATE users
-            SET twofa_required = 1
-            WHERE role IN ('admin', 'manager')
-              AND (twofa_required IS NULL OR twofa_required = 0)
-        """)
-        conn.commit()
-        conn.close()
-        print("✅ Backfilled 2FA requirement for admin/manager users.")
-    except Exception as e:
-        print(f"⚠️ backfill_2fa_required failed: {e}")
+
 
 
 import pyotp
@@ -3170,7 +3240,7 @@ def add_user():
         return redirect(url_for("users"))
 
     # GET branch
-    stations = insert_and_get_id(c, """
+    stations = execute_query(c, """
         SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
     """).fetchall()
 
@@ -4333,19 +4403,18 @@ def start_rental():
         if start_station_id:
             start_station_id = int(start_station_id)
 
-        execute_query(c, """
+
+        rental_id = insert_and_get_id(c, """
             INSERT INTO daily_rentals (
                 customer_id, bicycle_id, start_time,
                 hourly_rate, daily_cap, deposit_paid, status,
-                agreement_signed,
-                started_by_user_id, start_station_id
+                agreement_signed, started_by_user_id, start_station_id
             ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, ?, ?)
         """, (customer_id, bicycle_id, start_time_utc,
               bike["hourly_rate"], bike["daily_cap"], deposit_paid,
               session["user_id"], start_station_id))
 
-
-        rental_id = c.lastrowid
+        # rental_id = c.lastrowid
         
         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
         # ✅ Save start condition note
@@ -4711,7 +4780,7 @@ def customers():
         
         # Create username
         username = phone
-        existing_user = insert_and_get_id(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing_user:
             if email:
                 username = email
@@ -4756,15 +4825,24 @@ def customers():
             return redirect(url_for("customers"))
         
         # Insert customer
-        execute_query(c, """
+        # execute_query(c, """
+        #     INSERT INTO customers (
+        #         full_name, id_number, phone, email, address, user_id,
+        #         terms_accepted, terms_accepted_date, signature_data, verification_status
+        #     ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
+        # """, (full_name, id_number, phone, email, address, user_id, 
+        #       terms_accepted, signature_data))
+        
+        # customer_id = c.lastrowid
+
+        customer_id = insert_and_get_id(c, """
             INSERT INTO customers (
                 full_name, id_number, phone, email, address, user_id,
                 terms_accepted, terms_accepted_date, signature_data, verification_status
             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
-        """, (full_name, id_number, phone, email, address, user_id, 
+        """, (full_name, id_number, phone, email, address, user_id,
               terms_accepted, signature_data))
-        
-        customer_id = c.lastrowid
+
         # if is_postgres:
         #     customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
         #     if customer_result:
@@ -4996,7 +5074,7 @@ def new_damage():
     c = conn.cursor()
 
     # GET: load customers + bikes + items for dropdowns
-    customers = insert_and_get_id(c, """
+    customers = execute_query(c, """
         SELECT id, full_name, phone FROM customers ORDER BY full_name
     """).fetchall()
     bicycles = execute_query(c, """
