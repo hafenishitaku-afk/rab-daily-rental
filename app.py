@@ -384,14 +384,7 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 # =============================================
 import re as _re
 
-# Common weak passwords to reject (lowercase)
-# _COMMON_PASSWORDS = {
-#     "password", "password1", "password123", "123456", "12345678", "123456789",
-#     "qwerty", "qwerty123", "abc123", "letmein", "welcome", "admin", "admin123",
-#     "administrator", "root", "toor", "pass", "pass123", "changeme", "iloveyou",
-#     "monkey", "dragon", "sunshine", "princess", "football", "baseball",
-#     "rab123", "rab12345", "rabrate123", "rent123", "bike123",
-# }
+
 
 _COMMON_PASSWORDS = {
     # Top 50 leaked passwords (compiled from HaveIBeenPwned / NCSC)
@@ -453,50 +446,6 @@ def validate_password_strength(password):
     return True, None
 
 
-
-# def validate_password_strength(password):
-#     """
-#     Check a password against the policy (Q1 — Strong).
-#     Returns (ok: bool, error_message: str or None)
-#     Rules:
-#       - at least 10 characters
-#       - at least one letter
-#       - at least one digit
-#       - at least one special character (! @ # $ % ^ & * etc.)
-#       - not in the common-password list
-#       - no leading/trailing whitespace
-#     """
-#     if not password:
-#         return False, "Password is required."
-
-#     if password != password.strip():
-#         return False, "Password cannot start or end with a space."
-
-#     if len(password) < 10:
-#         return False, "Password must be at least 10 characters long."
-
-#     if not _re.search(r"[A-Za-z]", password):
-#         return False, "Password must contain at least one letter."
-
-#     if not _re.search(r"\d", password):
-#         return False, "Password must contain at least one number."
-
-#     if not _re.search(r"[^A-Za-z0-9]", password):
-#         return False, "Password must contain at least one special character (e.g. ! @ # $ %)."
-
-#     # if password.lower() in _COMMON_PASSWORDS:
-#     #     return False, "This password is too common. Please choose something less predictable."
-
-#     lower = password.lower()
-#     # Strip common special-character substitutions used to bypass filters
-#     normalized = lower.replace("@", "a").replace("0", "o").replace("1", "i").replace("3", "e").replace("$", "s")
-
-#     for common in _COMMON_PASSWORDS:
-#         if common in normalized:
-#             return False, "This password contains a common word. Please choose something less predictable."
-
-
-#     return True, None
 
 
 ALLOWED_MIME_TYPES = {
@@ -644,6 +593,8 @@ def migrate_public_uploads_to_private():
         print(f"✅ Migrated {moved} file(s) from static/uploads to private_uploads.")
 
 
+
+
 def execute_query(cursor, query, params=None):
     """Execute a query with proper parameter handling for both SQLite and PostgreSQL."""
     import os
@@ -660,6 +611,45 @@ def execute_query(cursor, query, params=None):
     
     # ✅ Return the cursor so you can use .fetchone() or .fetchall()
     return cursor
+
+
+
+def insert_and_get_id(cursor, query, params=None):
+    """
+    Insert a row and return the new row's ID.
+    Works on both SQLite (via lastrowid) and PostgreSQL (via RETURNING id).
+    """
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+
+    if is_postgres:
+        # psycopg2 uses %s placeholders
+        pg_query = query.rstrip().rstrip(";")
+        # Strip any existing RETURNING clause so we can add our own
+        if "RETURNING" in pg_query.upper():
+            pg_query = pg_query[:pg_query.upper().index("RETURNING")].rstrip()
+
+        pg_query = pg_query + " RETURNING id"
+
+        if params:
+            cursor.execute(pg_query, params)
+        else:
+            cursor.execute(pg_query)
+
+        row = cursor.fetchone()
+        if not row:
+            return None
+        # RealDictCursor returns dict; plain cursor returns tuple
+        if isinstance(row, dict):
+            return list(row.values())[0]
+        return row[0]
+    else:
+        # SQLite — use lastrowid
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        return cursor.lastrowid
+
 
 def get_single_value(cursor, query, params=None):
     """Get a single value from a query (handles both SQLite and PostgreSQL)."""
@@ -1093,23 +1083,7 @@ if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
     SMS_ENABLED = False  # Disable SMS if credentials missing
 
 
-# import sqlite3
 
-# conn = sqlite3.connect("rab.db")
-# c = conn.cursor()
-
-# print("=== All users ===")
-# c.execute("SELECT id, username, role, twofa_enabled, twofa_required FROM users ORDER BY id")
-# for row in c.fetchall():
-#     print(row)
-
-# print()
-# print("=== Gabriel's ID ===")
-# c.execute("SELECT id FROM users WHERE username = 'Gabriel'")
-# row = c.fetchone()
-# print(row if row else "Gabriel not found")
-
-# conn.close()
 
 
 
@@ -1137,45 +1111,7 @@ def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-# def cleanup_old_logs():
-#     """Delete logs older than retention window. Run once a day."""
-#     try:
-#         conn = db()
-#         c = conn.cursor()
-#         is_postgres = os.environ.get("DATABASE_URL") is not None
 
-#         if is_postgres:
-#             execute_query(c, """
-#                 DELETE FROM login_history 
-#                 WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'
-#             """)
-#             execute_query(c, """
-#                 DELETE FROM audit_log 
-#                 WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '180 days'
-#             """)
-#             execute_query(c, """
-#                 DELETE FROM document_views 
-#                 WHERE viewed_at < CURRENT_TIMESTAMP - INTERVAL '90 days'
-#             """)
-#         else:
-#             execute_query(c, """
-#                 DELETE FROM login_history 
-#                 WHERE created_at < datetime('now', '-90 days')
-#             """)
-#             execute_query(c, """
-#                 DELETE FROM audit_log 
-#                 WHERE created_at < datetime('now', '-180 days')
-#             """)
-#             execute_query(c, """
-#                 DELETE FROM document_views 
-#                 WHERE viewed_at < datetime('now', '-90 days')
-#             """)
-
-#         conn.commit()
-#         conn.close()
-#         print("✅ Log cleanup complete.")
-#     except Exception as e:
-#         print(f"⚠️ cleanup_old_logs failed: {e}")
 
 def cleanup_old_logs():
     """Delete logs older than retention window. Run once a day."""
@@ -1937,77 +1873,7 @@ def init_db():
     conn.close()
 
 
-    # def _database_is_initialized():
-    #     """Check if the 'users' table exists — works on both SQLite and PostgreSQL."""
-    #     try:
-    #         conn = db()
-    #         c = conn.cursor()
-    #         if os.environ.get("DATABASE_URL"):
-    #             # PostgreSQL
-    #             execute_query(c, """
-    #                 SELECT EXISTS (
-    #                     SELECT 1 FROM information_schema.tables
-    #                     WHERE table_name = 'users'
-    #                 ) AS exists_flag
-    #             """)
-    #             row = c.fetchone()
-    #             if isinstance(row, dict):
-    #                 return bool(list(row.values())[0])
-    #             return bool(row[0]) if row else False
-    #         else:
-    #             # SQLite
-    #             rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
-    #             return len(rows) > 0
-    #     except Exception as e:
-    #         print(f"⚠️ Database init check failed: {e}")
-    #         return False
-    #     finally:
-    #         try:
-    #             conn.close()
-    #         except Exception:
-    #             pass
-
-
-
-    # with app.app_context():
-    #     if not _database_is_initialized():
-    #         print("Database tables not found. Initializing...")
-    #        # init_db()
-    #         print("Database initialized successfully!")
-    #     else:
-    #         print("Database already initialized.")
-
-    #     try:
-    #         ensure_schema_columns()
-    #         ensure_rental_extras_schema()
-    #         ensure_audit_schema()
-    #         ensure_privacy_schema()                     # ← NEW
-    #         migrate_public_uploads_to_private()
-    #         print("✅ Schema is up to date.")
-    #     except Exception as e:
-    #         print(f"⚠️ Schema bootstrap error: {e}")    
-
-
-    # with app.app_context():
-    #     try:
-    #         #init_db()
-    #         ensure_schema_columns()
-    #         ensure_rental_extras_schema()
-    #         migrate_public_uploads_to_private()
-    #         print("✅ Schema is up to date.")
-    #     except Exception as e:
-    #         print(f"⚠️ Schema bootstrap error: {e}")
-
-
-
-    # with app.app_context():
-    #     try:
-    #         init_db()
-    #         ensure_schema_columns()
-    #         ensure_rental_extras_schema()
-    #         print("✅ Schema is up to date.")
-    #     except Exception as e:
-    #         print(f"⚠️ Schema bootstrap error: {e}")
+ 
 
 
 
@@ -2367,22 +2233,7 @@ def ensure_audit_schema():
     conn.close()
 
 
-    # with app.app_context():
-    #     if not _database_is_initialized():
-    #         print("Database tables not found. Initializing...")
-    #         init_db()
-    #         print("Database initialized successfully!")
-    #     else:
-    #         print("Database already initialized.")
-
-    #     try:
-    #         ensure_schema_columns()
-    #         ensure_rental_extras_schema()
-    #         ensure_audit_schema()                     # ← NEW
-    #         migrate_public_uploads_to_private()
-    #         print("✅ Schema is up to date.")
-    #     except Exception as e:
-    #         print(f"⚠️ Schema bootstrap error: {e}")    
+  
 
 
 def ensure_lockout_schema():
@@ -3215,14 +3066,7 @@ def users():
     conn = db()
     c = conn.cursor()
     
-    # users_list = execute_query(c, """
-    #     SELECT u.id, u.username, u.role, u.full_name, u.email, u.created_at,
-    #            s.name AS station_name
-    #     FROM users u
-    #     LEFT JOIN branches s ON s.id = u.branch_id
-    #     WHERE u.role != 'customer'
-    #     ORDER BY u.role, u.username
-    # """).fetchall()
+
     users_list = execute_query(c, """
         SELECT u.id, u.username, u.role, u.full_name, u.email, u.created_at,
                s.name AS station_name,
@@ -3326,7 +3170,7 @@ def add_user():
         return redirect(url_for("users"))
 
     # GET branch
-    stations = execute_query(c, """
+    stations = insert_and_get_id(c, """
         SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
     """).fetchall()
 
@@ -4867,18 +4711,14 @@ def customers():
         
         # Create username
         username = phone
-        existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        existing_user = insert_and_get_id(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing_user:
             if email:
                 username = email
             else:
                 username = f"cust_{phone}"
         
-        # Generate random password
-        # import secrets
-        # import string
-        # temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-        # password_hash = generate_password_hash(temp_password)
+
         
         import secrets
         import string
@@ -4925,10 +4765,10 @@ def customers():
               terms_accepted, signature_data))
         
         customer_id = c.lastrowid
-        if is_postgres:
-            customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
-            if customer_result:
-                customer_id = customer_result['id'] if isinstance(customer_result, dict) else customer_result[0]
+        # if is_postgres:
+        #     customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+        #     if customer_result:
+        #         customer_id = customer_result['id'] if isinstance(customer_result, dict) else customer_result[0]
         
         session["customer_id"] = customer_id
         
@@ -5030,79 +4870,7 @@ def customers():
                     return redirect(url_for("customers"))
 
 
-        # # Handle ID Photo
-        # if id_photo and id_photo.filename:
-        #     uploaded = False
-            
-        #     # Try Cloudinary first
-        #     if use_cloudinary:
-        #         try:
-        #             upload_result = cloudinary.uploader.upload(id_photo)
-        #             file_url = upload_result['secure_url']
-        #             execute_query(c, """
-        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-        #                 VALUES (?, 'id_copy', ?)
-        #             """, (customer_id, file_url))
-        #             print(f"✅ ID uploaded to Cloudinary: {file_url}")
-        #             flash("ID document uploaded successfully!", "success")
-        #             uploaded = True
-        #         except Exception as e:
-        #             print(f"❌ Cloudinary upload failed: {e}")
-        #             flash("Cloudinary upload failed, saving locally.", "warning")
-            
-        #     # Fallback to local storage
-        #     if not uploaded:
-        #         try:
-        #             filename = f"id_{customer_id}_{secure_filename(id_photo.filename)}"
-        #             filepath = os.path.join(UPLOAD_FOLDER, filename)
-        #             id_photo.save(filepath)
-        #             execute_query(c, """
-        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-        #                 VALUES (?, 'id_copy', ?)
-        #             """, (customer_id, f"uploads/{filename}"))
-        #             print(f"✅ ID saved locally: {filename}")
-        #             flash("ID document saved locally!", "success")
-        #         except Exception as e:
-        #             print(f"❌ Local save failed: {e}")
-        #             flash("Error uploading ID document.", "danger")
-        #             return redirect(url_for("customers"))
-        
-        # # Handle Customer Photo
-        # if customer_photo and customer_photo.filename:
-        #     uploaded = False
-            
-        #     # Try Cloudinary first
-        #     if use_cloudinary:
-        #         try:
-        #             upload_result = cloudinary.uploader.upload(customer_photo)
-        #             file_url = upload_result['secure_url']
-        #             execute_query(c, """
-        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-        #                 VALUES (?, 'customer_photo', ?)
-        #             """, (customer_id, file_url))
-        #             print(f"✅ Photo uploaded to Cloudinary: {file_url}")
-        #             flash("Customer photo uploaded successfully!", "success")
-        #             uploaded = True
-        #         except Exception as e:
-        #             print(f"❌ Cloudinary upload failed: {e}")
-        #             flash("Cloudinary upload failed, saving locally.", "warning")
-            
-        #     # Fallback to local storage
-        #     if not uploaded:
-        #         try:
-        #             filename = f"photo_{customer_id}_{secure_filename(customer_photo.filename)}"
-        #             filepath = os.path.join(UPLOAD_FOLDER, filename)
-        #             customer_photo.save(filepath)
-        #             execute_query(c, """
-        #                 INSERT INTO customer_documents (customer_id, document_type, file_path)
-        #                 VALUES (?, 'customer_photo', ?)
-        #             """, (customer_id, f"uploads/{filename}"))
-        #             print(f"✅ Photo saved locally: {filename}")
-        #             flash("Customer photo saved locally!", "success")
-        #         except Exception as e:
-        #             print(f"❌ Local save failed: {e}")
-        #             flash("Error uploading customer photo.", "danger")
-        #             return redirect(url_for("customers"))
+
         
         conn.commit()
         conn.close()
@@ -5228,7 +4996,7 @@ def new_damage():
     c = conn.cursor()
 
     # GET: load customers + bikes + items for dropdowns
-    customers = execute_query(c, """
+    customers = insert_and_get_id(c, """
         SELECT id, full_name, phone FROM customers ORDER BY full_name
     """).fetchall()
     bicycles = execute_query(c, """
@@ -6172,75 +5940,7 @@ def delete_document(customer_id, doc_id):
     return redirect(url_for("view_documents", customer_id=customer_id))
 
 
-# @app.route("/documents/<int:doc_id>/file")
-# @login_required
-# def serve_document(doc_id):
-#     """
-#     Serve a customer document. Enforces access control + logs the view.
-#     - Staff/manager/admin: can view any document
-#     - Customers: can only view their OWN documents
-#     """
-#     conn = db()
-#     c = conn.cursor()
 
-#     doc = execute_query(c, """
-#         SELECT cd.*, cu.id AS customer_id, cu.user_id AS customer_user_id
-#         FROM customer_documents cd
-#         JOIN customers cu ON cu.id = cd.customer_id
-#         WHERE cd.id = ?
-#     """, (doc_id,)).fetchone()
-
-#     if not doc:
-#         conn.close()
-#         flash("Document not found.", "danger")
-#         return redirect(url_for("dashboard"))
-
-#     role = session.get("role")
-#     user_id = session.get("user_id")
-
-#     # ✅ Access control
-#     if role == "customer":
-#         # Customer can only view their own documents
-#         if doc["customer_user_id"] != user_id:
-#             conn.close()
-#             flash("You do not have permission to view that document.", "danger")
-#             return redirect(url_for("customer_portal"))
-#     else:
-#         # Staff/manager/admin — allow
-#         pass
-
-#     # ✅ Log the view
-#     try:
-#         execute_query(c, """
-#             INSERT INTO document_views (document_id, user_id, ip_address)
-#             VALUES (?, ?, ?)
-#         """, (doc_id, user_id, request.remote_addr or "unknown"))
-#         conn.commit()
-#     except Exception as e:
-#         print(f"⚠️ document_views insert failed: {e}")
-
-#     conn.close()
-
-#     file_path = doc["file_path"]
-
-#     # ✅ Cloudinary URL → redirect
-#     if file_path.startswith("http"):
-#         return redirect(file_path)
-
-#     # ✅ Local private file → stream
-#     filename = os.path.basename(file_path)
-#     full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
-
-#     if not os.path.exists(full_path):
-#         flash(f"Document file not found: {filename}", "danger")
-#         return redirect(url_for("view_documents", customer_id=doc["customer_id"]))
-
-#     return send_file(
-#         full_path,
-#         as_attachment=False,
-#         download_name=filename,
-#         mimetype="application/pdf" if filename.lower().endswith(".pdf") else None
-#     )
 
 
 @app.route("/documents/<int:doc_id>/file")
@@ -9060,52 +8760,6 @@ def analytics_dashboard():
 
 
 
-
-# @app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
-# @login_required
-# @manager_required
-# def edit_bicycle(bicycle_id):
-#     """Edit a bicycle's details."""
-#     conn = db()
-#     c = conn.cursor()
-    
-#     bicycle = execute_query(c,"SELECT * FROM bicycles WHERE id = ?", (bicycle_id,)).fetchone()
-#     if not bicycle:
-#         flash("Bicycle not found.", "danger")
-#         return redirect(url_for("bicycles"))
-    
-#     if request.method == "POST":
-#         bike_code = request.form.get("bike_code", "").strip().upper()
-#         brand = request.form.get("brand", "").strip()
-#         model = request.form.get("model", "").strip()
-#         bike_type = request.form.get("bike_type", "Standard")
-#         hourly_rate = float(request.form.get("hourly_rate", 20))
-#         daily_cap = float(request.form.get("daily_cap", 120))
-#         deposit_amount = float(request.form.get("deposit_amount", 50))
-#         notes = request.form.get("notes", "").strip()
-        
-#         if not bike_code:
-#             flash("Bicycle code is required.", "danger")
-#             return redirect(url_for("edit_bicycle", bicycle_id=bicycle_id))
-        
-#         try:
-#             execute_query(c,"""
-#                 UPDATE bicycles 
-#                 SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
-#                     hourly_rate = ?, daily_cap = ?, deposit_amount = ?, notes = ?
-#                 WHERE id = ?
-#             """, (bike_code, brand, model, bike_type, hourly_rate, daily_cap, deposit_amount, notes, bicycle_id))
-#             conn.commit()
-#             flash(f"Bicycle '{bike_code}' updated successfully!", "success")
-#         except sqlite3.IntegrityError:
-#             flash("Bicycle code already exists.", "danger")
-#         finally:
-#             conn.close()
-        
-#         return redirect(url_for("bicycles"))
-    
-#     conn.close()
-#     return render_template("edit_bicycle.html", title="Edit Bicycle", bicycle=bicycle)
 @app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
 @login_required
 @manager_required
@@ -9158,15 +8812,7 @@ def edit_bicycle(bicycle_id):
                   notes, condition_notes, current_station_id, bicycle_id))
 
 
-            # execute_query(c, """
-            #     UPDATE bicycles
-            #     SET bike_code = ?, brand = ?, model = ?, bike_type = ?,
-            #         hourly_rate = ?, daily_cap = ?, deposit_amount = ?,
-            #         notes = ?, current_station_id = ?
-            #     WHERE id = ?
-            # """, (bike_code, brand, model, bike_type,
-            #       hourly_rate, daily_cap, deposit_amount,
-            #       notes, current_station_id, bicycle_id))
+
             conn.commit()
 
             log_audit(
@@ -10650,13 +10296,7 @@ def customer_portal():
         for k in ("requested_at", "reviewed_at", "completed_at"):
             if privacy_request.get(k):
                 privacy_request[k] = to_namibia_time(privacy_request[k])
-    # # ✅ Privacy request status
-    # privacy_request = execute_query(c, """
-    #     SELECT * FROM privacy_requests
-    #     WHERE customer_id = ?
-    #     ORDER BY requested_at DESC
-    #     LIMIT 1
-    # """, (customer["id"],)).fetchone()    
+ 
     
     # ✅ FIX: Format datetime for each rental
     for rental in rentals:
@@ -10684,36 +10324,6 @@ def customer_portal():
         privacy_request=privacy_request
     )
 
-# @app.route("/pickup-points")
-# @login_required
-# @customer_required
-# def customer_stations():
-#     """Customer view: list of active pickup points with available bike counts."""
-#     conn = db()
-#     c = conn.cursor()
-
-#     stations = execute_query(c, """
-#         SELECT 
-#             s.id,
-#             s.name,
-#             s.location,
-#             s.address,
-#             s.phone,
-#             (SELECT COUNT(*) FROM bicycles b 
-#              WHERE b.current_station_id = s.id 
-#                AND b.status = 'Available') AS bikes_available
-#         FROM branches s
-#         WHERE s.is_active = 1
-#         ORDER BY s.name
-#     """).fetchall()
-
-#     conn.close()
-
-#     return render_template(
-#         "customer_stations.html",
-#         title="Pickup Points",
-#         stations=stations
-#     )
 
 
 @app.route("/pickup-points")
@@ -10795,17 +10405,20 @@ def staff_required(f):
 
 
 
+
+
+
 @app.route("/rentals/end/<int:rental_id>", methods=["GET", "POST"])
 @login_required
 @staff_required
 def end_rental(rental_id):
     """End a rental and calculate the total cost."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     import pytz
-    
+
     conn = db()
     c = conn.cursor()
-    
+
     rental = execute_query(c, """
         SELECT r.*, b.bike_code, c.full_name
         FROM daily_rentals r
@@ -10813,57 +10426,56 @@ def end_rental(rental_id):
         JOIN customers c ON c.id = r.customer_id
         WHERE r.id = ?
     """, (rental_id,)).fetchone()
-    
+
     if not rental:
         conn.close()
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
-    
-    # ✅ Handle start_time as datetime or string (stored in UTC - offset-naive)
+
+    # ✅ Handle start_time as datetime or string (stored in UTC — offset-naive)
     if isinstance(rental["start_time"], datetime):
         start_time_utc = rental["start_time"]
     else:
         start_time_utc = datetime.fromisoformat(rental["start_time"])
-    
-    # ✅ Get current UTC time (offset-naive)
-    utc_now = utc_now()
-    
-    # ✅ Get current local time for display (Namibia time - UTC+2)
+    # Ensure it's offset-naive so arithmetic works
+    if start_time_utc.tzinfo is not None:
+        start_time_utc = start_time_utc.astimezone(timezone.utc).replace(tzinfo=None)
+
+    # ✅ Current UTC time (offset-naive for consistency with stored data)
+    utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # ✅ Current local time (Namibia — UTC+2) for display and late-fee
     namibia_tz = pytz.timezone('Africa/Windhoek')
     local_now = datetime.now(namibia_tz)
-    
+
     if request.method == "POST":
-        # Use UTC time for calculation
         end_time_utc = utc_now
         total_hours = (end_time_utc - start_time_utc).total_seconds() / 3600
         total_hours = round(total_hours, 2)
-        
+
         hourly_rate = rental["hourly_rate"]
         daily_cap = rental["daily_cap"]
         deposit_paid = float(rental["deposit_paid"] or 0)
-        
+
         # Calculate cost
         raw_cost = total_hours * hourly_rate
         total_cost = min(raw_cost, daily_cap)
-        
+
         # Late fee (after 6pm local time)
         late_fee = 0
         if local_now.hour >= 18:
             late_fee = 10 * (local_now.hour - 18)
         total_cost += late_fee
-        
+
         # ✅ Change calculation (Option A)
-        # change_due = round(deposit_paid - total_cost, 2)
         damage_amount_val = float(request.form.get("damage_amount", 0) or 0)
         change_due = round(deposit_paid - total_cost - damage_amount_val, 2)
 
-        
-        # Get condition values
+        # Condition values
         condition_before = request.form.get("condition_before", "Good")
         condition_after = request.form.get("condition_after", "Good")
-        
 
-        # ✅ Save who ended the rental, where, and move the bicycle
+        # ✅ Return station
         end_station_id = request.form.get("end_station_id") or None
         if end_station_id:
             end_station_id = int(end_station_id)
@@ -10878,7 +10490,6 @@ def end_rental(rental_id):
               condition_before, condition_after,
               session["user_id"], end_station_id,
               rental_id))
-            #customer_unpaid = get_customer_unpaid_damages(c, rental["customer_id"])
 
         # ✅ Mark items as returned
         items_on_rental = execute_query(c, """
@@ -10920,35 +10531,7 @@ def end_rental(rental_id):
                 details=f"Damage reported at return — N${damage_amount_val:.2f}: {damage_description or 'no description'}"
             )
 
-
-        # # ✅ Mark items as returned
-        # for ri in rental_items_post_fetch:  # you'll need to re-query since we closed conn? No — we're still inside POST
-        #     item_id = ri["item_id"]
-        #     condition = request.form.get(f"item_condition_{item_id}", "Good")
-        #     execute_query(c, """
-        #         UPDATE rental_items
-        #         SET returned_by_user_id = ?, returned_at = CURRENT_TIMESTAMP,
-        #             condition_on_return = ?
-        #         WHERE rental_id = ? AND item_id = ?
-        #     """, (session["user_id"], condition, rental_id, item_id))
-
-        # # ✅ Optional: damage claim at return
-        # damage_amount = float(request.form.get("damage_amount", 0) or 0)
-        # damage_description = (request.form.get("damage_description") or "").strip()
-        # #customer_unpaid = get_customer_unpaid_damages(c, rental["customer_id"])
-
-        # if damage_amount > 0 or damage_description:
-        #     execute_query(c, """
-        #         INSERT INTO damage_claims
-        #         (rental_id, customer_id, bicycle_id, description, amount,
-        #          status, charged_by_user_id)
-        #         VALUES (?, ?, ?, ?, ?, 'Charged', ?)
-        #     """, (rental_id, rental["customer_id"], rental["bicycle_id"],
-        #           damage_description or "Damage reported at return",
-        #           damage_amount, session["user_id"]))
-
-
-        # Bicycle becomes available AND moves to the return station
+        # ✅ Move bicycle to return station and mark Available
         if end_station_id:
             execute_query(c, """
                 UPDATE bicycles
@@ -10961,20 +10544,19 @@ def end_rental(rental_id):
                 UPDATE bicycles SET status = 'Available' WHERE id = ?
             """, (rental["bicycle_id"],))
 
-        
-        # execute_query(c, "UPDATE bicycles SET status = 'Available' WHERE id = ?", (rental["bicycle_id"],))
         log_audit(
             action="rental_end",
             entity_type="daily_rental",
             entity_id=rental_id,
             details=f"Ended rental #{rental_id} — {total_hours:.1f}h, N${total_cost:.2f}, "
                     f"deposit=N${deposit_paid:.2f}, station_id={end_station_id}"
-        )        
+        )
+
         conn.commit()
         conn.close()
-        
+
         flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
-        
+
         # ✅ Route based on the change
         if change_due == 0:
             # Deposit exactly covers the cost → mark Paid and go home
@@ -10985,14 +10567,14 @@ def end_rental(rental_id):
             conn.close()
             flash("Deposit fully covered the rental. Nothing left to pay.", "success")
             return redirect(url_for("dashboard"))
-        
-        # change_due > 0  → refund_rental()  (negative net in record_payment)
-        # change_due < 0  → record_payment() (positive net)
+
         return redirect(url_for("record_payment", rental_id=rental_id))
-    
-    # ✅ GET branch: preview calculation
+
+    # =============================================
+    # GET branch — preview calculation
+    # =============================================
     preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
-    
+
     hourly_rate = rental["hourly_rate"]
     daily_cap = rental["daily_cap"]
     deposit_paid = float(rental["deposit_paid"] or 0)
@@ -11001,13 +10583,14 @@ def end_rental(rental_id):
     preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
     preview_total = preview_capped + preview_late
     preview_change = round(deposit_paid - preview_total, 2)
-    
-    # ✅ Format dates for display (convert UTC to local)
+
+    # Format dates for display (convert UTC to local +2)
     start_time_local = start_time_utc + timedelta(hours=2)
     start_time_str = start_time_local.strftime("%Y-%m-%d %H:%M")
     end_time_local = local_now
     end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
-    
+
+    # Stations for the return dropdown
     stations = execute_query(c, """
         SELECT id, name, location FROM branches
         WHERE is_active = 1
@@ -11021,6 +10604,7 @@ def end_rental(rental_id):
     if not default_return_station_id and stations:
         default_return_station_id = stations[0]["id"]
 
+    # Items on this rental
     rental_items = execute_query(c, """
         SELECT ri.*, i.name AS item_name
         FROM rental_items ri
@@ -11030,7 +10614,7 @@ def end_rental(rental_id):
     """, (rental_id,)).fetchall()
 
     conn.close()
-    
+
     return render_template(
         "end_rental.html",
         title="End Rental",
@@ -11049,8 +10633,9 @@ def end_rental(rental_id):
         preview_change=preview_change,
         stations=stations,
         default_return_station_id=default_return_station_id,
-                
     )
+
+
 
 
 @app.route("/rentals/<int:rental_id>/cancel", methods=["POST"])
@@ -11109,13 +10694,7 @@ def cancel_rental(rental_id):
     else:
         combined_notes = cancel_note
 
-    # execute_query(c, """
-    #     UPDATE daily_rentals
-    #     SET status = 'Cancelled',
-    #         notes = ?,
-    #         actual_return_time = CURRENT_TIMESTAMP
-    #     WHERE id = ?
-    # """, (combined_notes, rental_id))
+
     execute_query(c, """
         UPDATE daily_rentals
         SET status = 'Cancelled',
@@ -11174,30 +10753,6 @@ def logout():
     return redirect(url_for("login"))
 
 
-
-# with app.app_context():
-#     try:
-#         conn = db()
-#         c = conn.cursor()
-#         # This works for both SQLite and PostgreSQL
-#         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-#         table_exists = c.fetchone()
-#         conn.close()
-        
-#         if not table_exists:
-#             print("Database tables not found. Initializing...")
-#             init_db()
-#             print("Database initialized successfully!")
-#         else:
-#             print("Database already initialized.")
-#     except Exception as e:
-#         print(f"Error checking database: {e}")
-#         print("Attempting to initialize database...")
-#         try:
-#             init_db()
-#             print("Database initialized successfully!")
-#         except Exception as e2:
-#             print(f"Failed to initialize database: {e2}")
 
 @app.route("/debug-cloudinary")
 @login_required
@@ -11277,23 +10832,7 @@ def _database_is_initialized():
 
 
 
-    # with app.app_context():
-    #     if not _database_is_initialized():
-    #         print("Database tables not found. Initializing...")
-    #        # init_db()
-    #         print("Database initialized successfully!")
-    #     else:
-    #         print("Database already initialized.")
 
-    #     try:
-    #         ensure_schema_columns()
-    #         ensure_rental_extras_schema()
-    #         ensure_audit_schema()
-    #         ensure_privacy_schema()                     # ← NEW
-    #         migrate_public_uploads_to_private()
-    #         print("✅ Schema is up to date.")
-    #     except Exception as e:
-    #         print(f"⚠️ Schema bootstrap error: {e}")    
 
 
 
@@ -11327,17 +10866,7 @@ with app.app_context():
 
 
 
-
-# =============================================
-# LOCAL DEV ENTRY POINT — only used by `python app.py`
-# =============================================
 if __name__ == "__main__":
-    _debug = os.environ.get("FLASK_DEBUG") == "1"
-    app.run(debug=_debug, port=int(os.environ.get("PORT", 5001)))
+    init_db()
+    app.run(debug=True, port=int(os.environ.get("PORT", 5001)))
 
-
-
-# if __name__ == "__main__":
-#     init_db()
-#     # Local development: debug on. On Render, gunicorn never reaches this block.
-#     app.run(debug=True, port=int(os.environ.get("PORT", 5001)))
