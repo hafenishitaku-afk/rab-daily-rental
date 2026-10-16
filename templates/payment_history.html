@@ -5,44 +5,71 @@
 <h1>💳 Payment History</h1>
 <p class="sub">Record of all payments received.</p>
 
+
+
 <div class="card" style="background:#f8f9fa;">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;">
-        <div>
-            <span style="color:#667085;">Total Revenue</span>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;">
+
+        <div style="flex:1;min-width:220px;">
+            <span style="color:#667085;">💰 Total Rental Cost (Gross Revenue)</span>
             <div style="font-size:32px;font-weight:800;color:#0d1f46;">
-                N$ {{ "%.2f"|format(total_revenue) }}
+                N$ {{ "%.2f"|format(total_rental_cost) }}
             </div>
+            <div style="font-size:12px;color:#667085;">All rentals ever completed</div>
         </div>
-        <div>
+
+        <div style="flex:1;min-width:220px;">
+            <span style="color:#667085;">💵 Total Net Settled (Cash Flow)</span>
+            <div style="font-size:32px;font-weight:800;color:#16834b;">
+                N$ {{ "%.2f"|format(total_settled) }}
+            </div>
+            <div style="font-size:12px;color:#667085;">Payments minus refunds</div>
+        </div>
+
+        <div style="flex:1;min-width:180px;">
             <span style="color:#667085;">Total Transactions</span>
             <div style="font-size:32px;font-weight:800;color:#0d1f46;">
                 {{ payments|length }}
             </div>
         </div>
+
     </div>
 </div>
+
 
 <div class="card">
     <div class="scroll">
         <table>
+
             <tr>
                 <th>Date</th>
                 <th>Customer</th>
                 <th>Bicycle</th>
                 <th>Method</th>
-                <th>Amount</th>
+                <th>Total Settled</th>
+                <th>Total Rental Cost</th>
                 <th>Status</th>
-                <th>Receipt</th>  <!-- 👈 ADD THIS COLUMN -->
+                <th>Receipt</th>
             </tr>
+
+
             {% for p in payments %}
+
             <tr>
                 <td>{{ p.payment_date }}</td>
                 <td><b>{{ p.full_name }}</b></td>
                 <td>{{ p.bike_code }}</td>
                 <td>{{ p.payment_method or 'Cash' }}</td>
-                <td><b>N$ {{ "%.2f"|format(p.amount) }}</b></td>
                 <td>
-                    <span class="badge green">{{ p.status }}</span>
+                    <b style="color:{% if p.amount < 0 %}#dc3545{% else %}#16834b{% endif %};">
+                        N$ {{ "%.2f"|format(p.amount) }}
+                    </b>
+                </td>
+                <td><b>N$ {{ "%.2f"|format(p.rental_cost or 0) }}</b></td>
+                <td>
+                    <span class="badge {% if p.status == 'Refunded' %}orange{% else %}green{% endif %}">
+                        {{ p.status }}
+                    </span>
                 </td>
                 <td>
                     <a class="btn small" href="{{ url_for('generate_receipt', payment_id=p.id) }}" target="_blank">
@@ -50,9 +77,10 @@
                     </a>
                 </td>
             </tr>
+
             {% else %}
             <tr>
-                <td colspan="7">No payments recorded yet.</td>
+                <td colspan="8">No payments recorded yet.</td>
             </tr>
             {% endfor %}
         </table>
