@@ -180,6 +180,17 @@ if not _secret_key:
 app.secret_key = _secret_key
 
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,        # trust 1 proxy for X-Forwarded-For
+    x_proto=1,      # trust X-Forwarded-Proto (https)
+    x_host=1,       # trust X-Forwarded-Host
+    x_port=1,       # trust X-Forwarded-Port
+)
+
+
 @app.before_request
 def _enforce_idle_timeout():
     """
