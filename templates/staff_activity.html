@@ -67,6 +67,22 @@
         <span class="sub" style="margin:0;">{{ rentals|length }} record(s) shown (max 500)</span>
     </div>
 
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e4e7ec;display:flex;gap:8px;flex-wrap:wrap;">
+        <a class="btn small" href="{{ url_for('staff_activity_export_csv', date_from=date_from, date_to=date_to, staff_id=staff_id, station_id=station_id, action=action) }}">
+            📥 Export CSV (current filter)
+        </a>
+        <a class="btn small" href="{{ url_for('staff_activity_export_csv') }}">
+            📥 Export CSV (all time)
+        </a>
+        <a class="btn small" href="{{ url_for('staff_activity_export_pdf', date_from=date_from, date_to=date_to, staff_id=staff_id, station_id=station_id, action=action) }}">
+            📄 Export PDF (current filter)
+        </a>
+        <a class="btn small" href="{{ url_for('staff_activity_export_pdf') }}">
+            📄 Export PDF (all time)
+        </a>
+    </div>
+
+
     <div class="scroll">
         <table>
             <tr>

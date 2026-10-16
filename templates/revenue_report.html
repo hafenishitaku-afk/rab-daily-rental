@@ -2,8 +2,53 @@
 
 {% block content %}
 
+
+
+
 <h1>📊 Revenue Report</h1>
 <p class="sub">View and analyze revenue by day, week, or month.</p>
+
+<!-- LIFETIME TOTALS (never filtered) -->
+<div class="card" style="background:#0d1f46;color:#fff;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;">
+        <div>
+            <div style="font-size:12px;letter-spacing:2px;color:#ffd700;text-transform:uppercase;">
+                💰 Total Revenue — All Time
+            </div>
+            <div style="font-size:42px;font-weight:800;margin-top:5px;">
+                N$ {{ "%.2f"|format(lifetime_combined) }}
+            </div>
+            <div style="font-size:13px;color:#a8b6d4;margin-top:5px;">
+                {{ lifetime_total_txn }} transaction(s) since launch
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <div>
+                <div style="font-size:11px;color:#a8b6d4;text-transform:uppercase;letter-spacing:1px;">From Rentals</div>
+                <div style="font-size:20px;font-weight:700;color:#ffe500;">
+                    N$ {{ "%.2f"|format(lifetime_rental_total) }}
+                </div>
+                <div style="font-size:11px;color:#a8b6d4;">{{ lifetime_rental_txn }} txn</div>
+            </div>
+            <div>
+                <div style="font-size:11px;color:#a8b6d4;text-transform:uppercase;letter-spacing:1px;">From Damages</div>
+                <div style="font-size:20px;font-weight:700;color:#ff8080;">
+                    N$ {{ "%.2f"|format(lifetime_damage_total) }}
+                </div>
+                <div style="font-size:11px;color:#a8b6d4;">{{ lifetime_damage_txn }} txn</div>
+            </div>
+        </div>
+    </div>
+
+    {% if outstanding_damages > 0 %}
+    <div style="margin-top:15px;padding-top:15px;border-top:1px solid #2a3f6e;font-size:13px;color:#ffb3b3;">
+        ⚠️ <b>Outstanding damages not yet paid:</b>
+        N$ {{ "%.2f"|format(outstanding_damages) }} across {{ outstanding_count }} claim(s).
+    </div>
+    {% endif %}
+</div>
+
 
 <!-- Filter Controls -->
 <div class="card">
@@ -17,26 +62,34 @@
                 <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>Monthly</option>
             </select>
         </label>
+
         <label>
             Date
             <select name="date" onchange="this.form.submit()">
                 {% if period == 'daily' %}
                     {% for d in available_dates %}
-                        <option value="{{ d.date }}" {% if date_filter == d.date %}selected{% endif %}>
+                        {% if d.date %}
+                        <option value="{{ d.date }}" {% if date_filter == d.date|string %}selected{% endif %}>
                             {{ d.date }}
                         </option>
+                        {% endif %}
                     {% endfor %}
                 {% elif period == 'weekly' %}
                     {% for d in available_dates %}
-                        <option value="{{ d.date }}" {% if date_filter == d.date %}selected{% endif %}>
+                        {% if d.week %}
+                        <option value="{{ d.year }}-W{{ d.week }}"
+                                {% if date_filter|string == (d.year|string ~ '-W' ~ d.week|string) %}selected{% endif %}>
                             Week {{ d.week }}, {{ d.year }}
                         </option>
+                        {% endif %}
                     {% endfor %}
                 {% else %}
                     {% for d in available_dates %}
+                        {% if d.month %}
                         <option value="{{ d.month }}" {% if date_filter == d.month %}selected{% endif %}>
                             {{ d.month }}
                         </option>
+                        {% endif %}
                     {% endfor %}
                 {% endif %}
             </select>
@@ -44,21 +97,24 @@
     </form>
 </div>
 
+
+
 <!-- Summary Cards -->
 <div class="grid">
-    <div class="metric">
-        <div class="label">Total Revenue</div>
-        <div class="value">
-            N$ {{ "%.2f"|format(
-                daily_summary.total if daily_summary 
-                else weekly_summary.total if weekly_summary 
-                else monthly_summary.total if monthly_summary 
-                else 0
-            ) }}
-        </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Total Revenue (Rentals + Damages)</div>
+        <div class="value">N$ {{ "%.2f"|format(combined_total) }}</div>
     </div>
     <div class="metric">
-        <div class="label">Transactions</div>
+        <div class="label">From Rentals</div>
+        <div class="value">N$ {{ "%.2f"|format(rental_total) }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #dc3545;">
+        <div class="label">From Damages</div>
+        <div class="value">N$ {{ "%.2f"|format(damage_total) }}</div>
+    </div>
+    <div class="metric">
+        <div class="label">Rental Transactions</div>
         <div class="value">
             {{ daily_summary.transactions if daily_summary 
                else weekly_summary.transactions if weekly_summary 
@@ -66,27 +122,35 @@
                else 0 }}
         </div>
     </div>
-    <div class="metric">
-        <div class="label">Unique Customers</div>
-        <div class="value">
-            {{ daily_summary.unique_customers if daily_summary 
-               else weekly_summary.unique_customers if weekly_summary 
-               else monthly_summary.unique_customers if monthly_summary 
-               else 0 }}
-        </div>
-    </div>
-    <div class="metric">
-        <div class="label">Average per Transaction</div>
-        <div class="value">
-            N$ {{ "%.2f"|format(
-                (daily_summary.total / daily_summary.transactions) if daily_summary and daily_summary.transactions > 0
-                else (weekly_summary.total / weekly_summary.transactions) if weekly_summary and weekly_summary.transactions > 0
-                else (monthly_summary.total / monthly_summary.transactions) if monthly_summary and monthly_summary.transactions > 0
-                else 0
-            ) }}
-        </div>
+</div>
+
+<!-- Damages block (only shown if there are damages) -->
+{% if damage_total > 0 or damage_revenue %}
+<div class="card" style="background:#fdeceb;border-left:5px solid #dc3545;">
+    <h2>⚠️ Damage Revenue</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Transactions</th>
+                <th>Amount</th>
+            </tr>
+            {% for row in damage_revenue %}
+            <tr>
+                <td><b>{{ row.date or row.month or row.week }}</b></td>
+                <td>{{ row.transactions }}</td>
+                <td><b>N$ {{ "%.2f"|format(row.total) }}</b></td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align:center;color:#667085;">No damage revenue in this period.</td>
+            </tr>
+            {% endfor %}
+        </table>
     </div>
 </div>
+{% endif %}
+
 
 <!-- Revenue Table -->
 <div class="card">

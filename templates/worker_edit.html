@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>✏️ Edit Worker</h1>
+<p class="sub">{{ worker.full_name or worker.username }} (@{{ worker.username }})</p>
+
+<form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Personal Info -->
+    <div class="card">
+        <h2>👤 Personal Information</h2>
+        <div class="formgrid">
+            <label>
+                Full Name *
+                <input type="text" name="full_name" value="{{ worker.full_name or '' }}" required>
+            </label>
+
+            <label style="grid-column: span 2;">
+                Profile Photo (JPG/PNG, max 10 MB)
+                <input type="file" name="photo" accept="image/jpeg,image/png">
+                <small style="color:#667085;">Leave blank to keep current photo.</small>
+            </label>
+
+
+            <label>
+                Job Title
+                <input type="text" name="job_title" value="{{ worker.job_title or '' }}"
+                       placeholder="e.g. Bicycle Mechanic, Counter Staff">
+            </label>
+            <label>
+                Specialty
+                <select name="specialty">
+                    <option value="">— None —</option>
+                    {% for s in ['counter', 'maintenance', 'driver', 'supervisor', 'admin', 'other'] %}
+                    <option value="{{ s }}" {% if worker.specialty == s %}selected{% endif %}>{{ s|title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" value="{{ worker.email or '' }}">
+            </label>
+            <label>
+                Phone
+                <input type="text" name="phone" value="{{ worker.phone or '' }}">
+            </label>
+            <label>
+                ID / Passport Number
+                <input type="text" name="id_number" value="{{ worker.id_number or '' }}">
+            </label>
+            <label>
+                Date of Birth
+                <input type="date" name="date_of_birth" value="{{ worker.date_of_birth or '' }}">
+            </label>
+            <label>
+                Hire Date
+                <input type="date" name="hire_date" value="{{ worker.hire_date or '' }}">
+            </label>
+            <label style="grid-column: span 2;">
+                Address
+                <input type="text" name="address" value="{{ worker.address or '' }}">
+            </label>
+            <label style="grid-column: span 2;">
+                Emergency Contact
+                <input type="text" name="emergency_contact" value="{{ worker.emergency_contact or '' }}"
+                       placeholder="Name and phone number">
+            </label>
+            <label>
+                Tax Number
+                <input type="text" name="tax_number" value="{{ worker.tax_number or '' }}">
+            </label>
+        </div>
+    </div>
+
+    <!-- Role & Station -->
+    <div class="card">
+        <h2>🏢 Role & Station</h2>
+        <div class="formgrid">
+            <label>
+                Role
+                <select name="role">
+                    <option value="staff" {% if worker.role == 'staff' %}selected{% endif %}>Staff</option>
+                    <option value="manager" {% if worker.role == 'manager' %}selected{% endif %}>Manager</option>
+                    {% if viewer_role == 'admin' %}
+                    <option value="admin" {% if worker.role == 'admin' %}selected{% endif %}>Admin</option>
+                    {% endif %}
+                </select>
+                {% if viewer_role != 'admin' %}
+                <small style="color:#667085;">Only an admin can assign the admin role.</small>
+                {% endif %}
+            </label>
+            <label>
+                Assigned Station
+                <select name="branch_id">
+                    <option value="">— None —</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}" {% if worker.branch_id and worker.branch_id|string == s.id|string %}selected{% endif %}>
+                        {{ s.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+    </div>
+
+    <!-- Confidential (admin only) -->
+    {% if viewer_role == 'admin' %}
+    <div class="card" style="background:#fff8e1;border-left:5px solid #ffd700;">
+        <h2 style="margin-top:0;">💵 Confidential (Admin Only)</h2>
+        <div class="formgrid">
+            <label>
+                Salary (N$)
+                <input type="number" step="0.01" name="salary" 
+                       value="{{ worker.salary if worker.salary is not none else '' }}">
+            </label>
+            <label style="grid-column: span 2;">
+                Bank Details
+                <textarea name="bank_details" rows="3" 
+                          placeholder="Bank name, account number, branch code">{{ worker.bank_details or '' }}</textarea>
+            </label>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Notes -->
+    <div class="card">
+        <h2>📝 Notes</h2>
+        <label style="display:block;">
+            Internal notes (not visible to the worker)
+            <textarea name="worker_notes" rows="3">{{ worker.worker_notes or '' }}</textarea>
+        </label>
+    </div>
+
+    <!-- Password (optional) -->
+    <div class="card">
+        <h2>🔒 Password</h2>
+        <label style="display:block;">
+            New Password
+            <input type="password" name="new_password" minlength="10"
+                   placeholder="Leave blank to keep current"
+                   title="At least 10 characters, with a letter, a number, and a special character.">
+            <small style="color:#667085;display:block;margin-top:4px;">
+                Only fill to change the password. Policy: 10+ chars with a letter, number, and special character.
+            </small>
+        </label>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn yellow">💾 Save Worker</button>
+        <a href="{{ url_for('worker_profile', worker_id=worker.id) }}" class="btn">Cancel</a>
+    </div>
+</form>
+
+{% endblock %}

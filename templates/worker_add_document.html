@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📄 Add Document</h1>
+<p class="sub">
+    For worker: <b>{{ worker.full_name or worker.username }}</b>
+</p>
+
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Document Type *
+                <select name="document_type" required>
+                    <option value="">— Choose type —</option>
+                    <option value="id_copy">🪪 ID / Passport Copy</option>
+                    <option value="photo">📸 Photo</option>
+                    <option value="contract">📝 Contract / Agreement</option>
+                    <option value="certificate">🎓 Certificate / Qualification</option>
+                    <option value="other">📄 Other</option>
+                </select>
+            </label>
+            <label>
+                File * (JPG, PNG, or PDF, max 10 MB)
+                <input type="file" name="file" accept=".jpg,.jpeg,.png,.pdf" required>
+            </label>
+            <label style="grid-column: span 2;">
+                Notes (optional)
+                <textarea name="notes" rows="2" placeholder="Any additional context..."></textarea>
+            </label>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" class="btn yellow">📤 Upload Document</button>
+            <a href="{{ url_for('worker_profile', worker_id=worker.id) }}" class="btn">Cancel</a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

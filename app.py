@@ -8,7 +8,7 @@ from functools import wraps
 from datetime import datetime, date, timedelta
 from datetime import timezone
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -2010,6 +2010,89 @@ def ci_like(column, param):
         return f"{column} LIKE ?"
 
 
+def ensure_workers_schema():
+    """
+    Idempotent migration for the Workers / HR feature.
+    Adds HR-related columns to the users table.
+    """
+    conn = db()
+    c = conn.cursor()
+    is_postgres = os.environ.get("DATABASE_URL") is not None
+
+    if is_postgres:
+        # Use ADD COLUMN IF NOT EXISTS — safe to run every boot
+        for col, coltype in [
+            ("id_number", "TEXT"),
+            ("date_of_birth", "DATE"),
+            ("hire_date", "DATE"),
+            ("phone", "TEXT"),
+            ("address", "TEXT"),
+            ("emergency_contact", "TEXT"),
+            ("job_title", "TEXT"),
+            ("specialty", "TEXT"),
+            ("salary", "REAL"),
+            ("bank_details", "TEXT"),
+            ("tax_number", "TEXT"),
+            ("photo_path", "TEXT"),
+            ("worker_notes", "TEXT"),
+        ]:
+            execute_query(c, f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {coltype}")
+    else:
+        # SQLite — check PRAGMA first
+        rows = execute_query(c, "PRAGMA table_info(users)").fetchall()
+        existing = []
+        for row in rows:
+            existing.append(row.get("name") if isinstance(row, dict) else row[1])
+
+        for col, coltype in [
+            ("id_number", "TEXT"),
+            ("date_of_birth", "TEXT"),
+            ("hire_date", "TEXT"),
+            ("phone", "TEXT"),
+            ("address", "TEXT"),
+            ("emergency_contact", "TEXT"),
+            ("job_title", "TEXT"),
+            ("specialty", "TEXT"),
+            ("salary", "REAL"),
+            ("bank_details", "TEXT"),
+            ("tax_number", "TEXT"),
+            ("photo_path", "TEXT"),
+            ("worker_notes", "TEXT"),
+        ]:
+            if col not in existing:
+                execute_query(c, f"ALTER TABLE users ADD COLUMN {col} {coltype}")
+
+    if is_postgres:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS worker_documents(
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                document_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                uploaded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT
+            );
+        """)
+    else:
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS worker_documents(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                document_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                uploaded_by_user_id INTEGER,
+                uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (uploaded_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+        """)
+
+    conn.commit()
+    conn.close()
+
+
 def ensure_schema_columns():
     """
     Idempotently add audit + station columns to daily_rentals and bicycles.
@@ -2069,7 +2152,32 @@ def ensure_schema_columns():
 
 
 
-
+def worker_visible_fields(viewer_role, is_own_profile=False):
+    """
+    Returns a set of field names the viewer is allowed to see.
+    Staff/mechanic see only their own basic profile (no salary, no bank).
+    Manager sees everything except salary + bank_details.
+    Admin sees everything.
+    """
+    if viewer_role == "admin":
+        return {
+            "id_number", "date_of_birth", "hire_date", "phone", "address",
+            "emergency_contact", "job_title", "specialty", "salary",
+            "bank_details", "tax_number", "photo_path", "worker_notes",
+        }
+    if viewer_role == "manager":
+        return {
+            "id_number", "date_of_birth", "hire_date", "phone", "address",
+            "emergency_contact", "job_title", "specialty",
+            "tax_number", "photo_path", "worker_notes",
+            # No salary, no bank_details
+        }
+    # staff / own profile
+    return {
+        "id_number", "date_of_birth", "hire_date", "phone", "address",
+        "emergency_contact", "job_title", "specialty", "photo_path",
+        "worker_notes",
+    }
 
 def ensure_rental_extras_schema():
     """
@@ -3214,12 +3322,545 @@ def users():
     return render_template("users.html", title="User Management", users=users_list)
   
 
+# =============================================
+# WORKERS (HR)
+# =============================================
+
+@app.route("/workers")
+@login_required
+@manager_required
+def workers():
+    """List all non-customer workers with their job titles and station."""
+    conn = db()
+    c = conn.cursor()
+
+    search = (request.args.get("search") or "").strip()
+    role_filter = (request.args.get("role") or "").strip()
+    specialty_filter = (request.args.get("specialty") or "").strip()
+
+    query = """
+        SELECT 
+            u.id, u.username, u.full_name, u.role, u.email,
+            u.phone, u.job_title, u.specialty, u.hire_date,
+            u.photo_path, u.branch_id,
+            s.name AS station_name
+        FROM users u
+        LEFT JOIN branches s ON s.id = u.branch_id
+        WHERE u.role != 'customer'
+    """
+    params = []
+
+    if search:
+        like = f"%{search}%"
+        query += f""" AND (
+            {ci_like('u.full_name', '?')} OR
+            {ci_like('u.username', '?')} OR
+            {ci_like('u.job_title', '?')} OR
+            {ci_like('u.specialty', '?')}
+        )"""
+        params.extend([like, like, like, like])
+
+    if role_filter:
+        query += " AND u.role = ?"
+        params.append(role_filter)
+
+    if specialty_filter:
+        query += " AND u.specialty = ?"
+        params.append(specialty_filter)
+
+    query += " ORDER BY u.role, u.full_name"
+
+    workers_list = execute_query(c, query, params).fetchall()
+
+    # Distinct specialties for the filter dropdown
+    specialties = execute_query(c, """
+        SELECT DISTINCT specialty FROM users
+        WHERE role != 'customer' AND specialty IS NOT NULL AND specialty != ''
+        ORDER BY specialty
+    """).fetchall()
+    specialty_list = [s["specialty"] if isinstance(s, dict) else s[0] for s in specialties]
+
+    # Counts
+    total_workers = len(workers_list)
+    total_active = sum(1 for w in workers_list if w.get("role") != "customer")
+
+    conn.close()
+
+    return render_template(
+        "workers.html",
+        title="Workers",
+        workers=workers_list,
+        search=search,
+        role_filter=role_filter,
+        specialty_filter=specialty_filter,
+        specialty_list=specialty_list,
+        total_workers=total_workers,
+        total_active=total_active,
+    )
+
+
+@app.route("/workers/<int:worker_id>")
+@login_required
+def worker_profile(worker_id):
+    """
+    View a worker profile.
+    - admin/manager: any worker
+    - staff: only their own
+    """
+    viewer_id = session.get("user_id")
+    viewer_role = session.get("role")
+
+    # Staff can only view their own profile
+    if viewer_role == "staff" and viewer_id != worker_id:
+        flash("You can only view your own profile.", "danger")
+        return redirect(url_for("worker_profile", worker_id=viewer_id))
+
+    # Customers are not workers
+    if viewer_role == "customer":
+        flash("Access denied.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    conn = db()
+    c = conn.cursor()
+
+    worker = execute_query(c, """
+        SELECT u.*, s.name AS station_name
+        FROM users u
+        LEFT JOIN branches s ON s.id = u.branch_id
+        WHERE u.id = ? AND u.role != 'customer'
+    """, (worker_id,)).fetchone()
+
+    if not worker:
+        conn.close()
+        flash("Worker not found.", "danger")
+        return redirect(url_for("workers"))
+
+    # Worker documents
+    documents = execute_query(c, """
+        SELECT wd.*, u.username AS uploaded_by_username
+        FROM worker_documents wd
+        LEFT JOIN users u ON u.id = wd.uploaded_by_user_id
+        WHERE wd.user_id = ?
+        ORDER BY wd.uploaded_at DESC
+    """, (worker_id,)).fetchall()
+
+    # Lockout status
+    lockout = get_lockout_status(c, worker_id)
+
+    # Recent activity summary (last 10 rentals this user started or ended)
+    recent_activity = execute_query(c, """
+        SELECT 
+            r.id, r.start_time, r.end_time, r.status,
+            su.username AS started_by, eu.username AS ended_by,
+            b.bike_code
+        FROM daily_rentals r
+        LEFT JOIN users su ON su.id = r.started_by_user_id
+        LEFT JOIN users eu ON eu.id = r.ended_by_user_id
+        LEFT JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.started_by_user_id = ? OR r.ended_by_user_id = ?
+        ORDER BY r.start_time DESC
+        LIMIT 10
+    """, (worker_id, worker_id)).fetchall()
+
+    for r in recent_activity:
+        if r.get("start_time"): r["start_time"] = to_namibia_time(r["start_time"])
+        if r.get("end_time"): r["end_time"] = to_namibia_time(r["end_time"])
+
+    # Decide which fields the viewer can see
+    is_own = (viewer_id == worker_id)
+    visible = worker_visible_fields(viewer_role, is_own_profile=is_own)
+
+    conn.close()
+
+    return render_template(
+        "worker_profile.html",
+        title=f"Worker — {worker['full_name'] or worker['username']}",
+        worker=worker,
+        documents=documents,
+        lockout=lockout,
+        recent_activity=recent_activity,
+        visible=visible,
+        is_own=is_own,
+        viewer_role=viewer_role,
+    )
+
+
+@app.route("/workers/<int:worker_id>/edit", methods=["GET", "POST"])
+@login_required
+@manager_required
+def worker_edit(worker_id):
+    """
+    Edit a worker.
+    - Admin: all fields
+    - Manager: everything except salary + bank_details
+    """
+    viewer_role = session.get("role")
+
+    conn = db()
+    c = conn.cursor()
+
+    worker = execute_query(c, """
+        SELECT * FROM users WHERE id = ? AND role != 'customer'
+    """, (worker_id,)).fetchone()
+
+    if not worker:
+        conn.close()
+        flash("Worker not found.", "danger")
+        return redirect(url_for("workers"))
+
+    # Load stations for the dropdown
+    stations = execute_query(c, """
+        SELECT id, name FROM branches WHERE is_active = 1 ORDER BY name
+    """).fetchall()
+
+    if request.method == "POST":
+        # Fields everyone can set
+        full_name = (request.form.get("full_name") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        id_number = (request.form.get("id_number") or "").strip()
+        date_of_birth = (request.form.get("date_of_birth") or "").strip() or None
+        hire_date = (request.form.get("hire_date") or "").strip() or None
+        address = (request.form.get("address") or "").strip()
+        emergency_contact = (request.form.get("emergency_contact") or "").strip()
+        job_title = (request.form.get("job_title") or "").strip()
+        specialty = (request.form.get("specialty") or "").strip()
+        tax_number = (request.form.get("tax_number") or "").strip()
+        worker_notes = (request.form.get("worker_notes") or "").strip()
+        role = request.form.get("role", worker["role"])
+        branch_id = request.form.get("branch_id") or None
+        if branch_id:
+            branch_id = int(branch_id)
+
+        # Role-boundaries: a manager cannot create/promote to admin
+        if viewer_role == "manager" and role == "admin":
+            role = worker["role"]  # keep as-is
+            flash("Only an admin can assign the admin role.", "warning")
+
+        # Update base fields
+        execute_query(c, """
+            UPDATE users
+            SET full_name = ?, email = ?, phone = ?, id_number = ?,
+                date_of_birth = ?, hire_date = ?, address = ?,
+                emergency_contact = ?, job_title = ?, specialty = ?,
+                tax_number = ?, worker_notes = ?, role = ?, branch_id = ?
+            WHERE id = ?
+        """, (full_name, email, phone, id_number,
+              date_of_birth, hire_date, address,
+              emergency_contact, job_title, specialty,
+              tax_number, worker_notes, role, branch_id,
+              worker_id))
+
+
+        # ✅ Optional: photo upload
+        photo = request.files.get("photo") if request.files else None
+        if photo and photo.filename:
+            ok, err, ext = validate_upload(photo)
+            if not ok:
+                conn.close()
+                flash(f"Photo rejected: {err}", "danger")
+                return redirect(url_for("worker_edit", worker_id=worker_id))
+
+            use_cloudinary = all([
+                os.environ.get("CLOUDINARY_CLOUD_NAME"),
+                os.environ.get("CLOUDINARY_API_KEY"),
+                os.environ.get("CLOUDINARY_API_SECRET"),
+            ])
+
+            uploaded = False
+            new_photo_path = None
+
+            if use_cloudinary:
+                try:
+                    result = cloudinary.uploader.upload(photo)
+                    new_photo_path = result["secure_url"]
+                    uploaded = True
+                except Exception as e:
+                    print(f"⚠️ Cloudinary upload failed: {e}")
+
+            if not uploaded:
+                filename = f"worker_photo_{worker_id}_{secure_filename(photo.filename)}"
+                full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+                photo.save(full_path)
+                new_photo_path = f"private_uploads/{filename}"
+
+            execute_query(c, "UPDATE users SET photo_path = ? WHERE id = ?", (new_photo_path, worker_id))
+
+        # Salary + bank_details — admin only
+        if viewer_role == "admin":
+            salary_raw = (request.form.get("salary") or "").strip()
+            salary = float(salary_raw) if salary_raw else None
+            bank_details = (request.form.get("bank_details") or "").strip()
+
+            execute_query(c, """
+                UPDATE users SET salary = ?, bank_details = ? WHERE id = ?
+            """, (salary, bank_details, worker_id))
+
+        # Optional: reset password
+        new_password = (request.form.get("new_password") or "").strip()
+        if new_password:
+            ok, err = validate_password_strength(new_password)
+            if not ok:
+                conn.close()
+                flash(f"Password rejected: {err}", "danger")
+                return redirect(url_for("worker_edit", worker_id=worker_id))
+            execute_query(c, """
+                UPDATE users SET password_hash = ? WHERE id = ?
+            """, (generate_password_hash(new_password), worker_id))
+
+        conn.commit()
+        conn.close()
+
+        log_audit(
+            action="worker_edit",
+            entity_type="user",
+            entity_id=worker_id,
+            details=f"Updated worker '{worker['username']}' — role={role}, title={job_title}"
+        )
+
+        flash(f"Worker '{full_name or worker['username']}' updated.", "success")
+        return redirect(url_for("worker_profile", worker_id=worker_id))
+
+    conn.close()
+
+    return render_template(
+        "worker_edit.html",
+        title="Edit Worker",
+        worker=worker,
+        stations=stations,
+        viewer_role=viewer_role,
+    )
+
+
+
+
+
+
+
+@app.route("/workers/<int:worker_id>/documents/add", methods=["GET", "POST"])
+@login_required
+@manager_required
+def worker_add_document(worker_id):
+    """Upload a document for a worker."""
+    conn = db()
+    c = conn.cursor()
+
+    worker = execute_query(c, """
+        SELECT id, username, full_name FROM users WHERE id = ? AND role != 'customer'
+    """, (worker_id,)).fetchone()
+
+    if not worker:
+        conn.close()
+        flash("Worker not found.", "danger")
+        return redirect(url_for("workers"))
+
+    if request.method == "POST":
+        document_type = (request.form.get("document_type") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        upload = request.files.get("file")
+
+        if not document_type:
+            flash("Document type is required.", "danger")
+            conn.close()
+            return redirect(url_for("worker_add_document", worker_id=worker_id))
+
+        if not upload or not upload.filename:
+            flash("Please choose a file to upload.", "danger")
+            conn.close()
+            return redirect(url_for("worker_add_document", worker_id=worker_id))
+
+        ok, err, ext = validate_upload(upload)
+        if not ok:
+            flash(f"Upload rejected: {err}", "danger")
+            conn.close()
+            return redirect(url_for("worker_add_document", worker_id=worker_id))
+
+        use_cloudinary = all([
+            os.environ.get("CLOUDINARY_CLOUD_NAME"),
+            os.environ.get("CLOUDINARY_API_KEY"),
+            os.environ.get("CLOUDINARY_API_SECRET"),
+        ])
+
+        uploaded = False
+        file_path = None
+
+        # Try Cloudinary
+        if use_cloudinary:
+            try:
+                result = cloudinary.uploader.upload(upload)
+                file_path = result["secure_url"]
+                uploaded = True
+            except Exception as e:
+                print(f"⚠️ Cloudinary upload failed: {e}")
+
+        # Fallback to local
+        if not uploaded:
+            filename = f"worker_{worker_id}_{secure_filename(upload.filename)}"
+            full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+            upload.save(full_path)
+            file_path = f"private_uploads/{filename}"
+
+        execute_query(c, """
+            INSERT INTO worker_documents 
+            (user_id, document_type, file_path, uploaded_by_user_id, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (worker_id, document_type, file_path, session["user_id"], notes))
+        conn.commit()
+        conn.close()
+
+        log_audit(
+            action="worker_document_upload",
+            entity_type="user",
+            entity_id=worker_id,
+            details=f"Uploaded '{document_type}' for worker '{worker['username']}'"
+        )
+
+        flash("Document uploaded.", "success")
+        return redirect(url_for("worker_profile", worker_id=worker_id))
+
+    conn.close()
+    return render_template(
+        "worker_add_document.html",
+        title="Add Worker Document",
+        worker=worker
+    )
+
+
+@app.route("/worker-documents/<int:doc_id>/file")
+@login_required
+def serve_worker_document(doc_id):
+    """Serve a worker document with access control."""
+    viewer_id = session.get("user_id")
+    viewer_role = session.get("role")
+
+    conn = db()
+    c = conn.cursor()
+    doc = execute_query(c, """
+        SELECT wd.*, u.username 
+        FROM worker_documents wd
+        JOIN users u ON u.id = wd.user_id
+        WHERE wd.id = ?
+    """, (doc_id,)).fetchone()
+
+    if not doc:
+        conn.close()
+        flash("Document not found.", "danger")
+        return redirect(url_for("workers"))
+
+    # Access control
+    if viewer_role == "staff" and doc["user_id"] != viewer_id:
+        conn.close()
+        flash("You can only view your own documents.", "danger")
+        return redirect(url_for("worker_profile", worker_id=viewer_id))
+
+    if viewer_role == "customer":
+        conn.close()
+        flash("Access denied.", "danger")
+        return redirect(url_for("customer_portal"))
+
+    conn.close()
+
+    file_path = doc["file_path"]
+
+    if file_path.startswith("http"):
+        return redirect(file_path)
+
+    filename = os.path.basename(file_path)
+    full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+
+    if not os.path.exists(full_path):
+        flash(f"File not found: {filename}", "danger")
+        return redirect(url_for("worker_profile", worker_id=doc["user_id"]))
+
+    return send_file(full_path, as_attachment=False, download_name=filename)
+
+
+@app.route("/worker-documents/<int:doc_id>/delete", methods=["POST"])
+@login_required
+@manager_required
+def worker_delete_document(doc_id):
+    """Delete a worker document."""
+    conn = db()
+    c = conn.cursor()
+
+    doc = execute_query(c, """
+        SELECT * FROM worker_documents WHERE id = ?
+    """, (doc_id,)).fetchone()
+
+    if not doc:
+        conn.close()
+        flash("Document not found.", "danger")
+        return redirect(url_for("workers"))
+
+    # Try to delete the physical file (if local)
+    file_path = doc["file_path"]
+    if not file_path.startswith("http"):
+        filename = os.path.basename(file_path)
+        full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+        try:
+            if os.path.exists(full_path):
+                os.remove(full_path)
+        except Exception as e:
+            print(f"⚠️ Could not delete file: {e}")
+
+    execute_query(c, "DELETE FROM worker_documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    conn.close()
+
+    log_audit(
+        action="worker_document_delete",
+        entity_type="user",
+        entity_id=doc["user_id"],
+        details=f"Deleted document '{doc['document_type']}'"
+    )
+
+    flash("Document deleted.", "success")
+    return redirect(url_for("worker_profile", worker_id=doc["user_id"]))
+
+
+@app.route("/workers/<int:user_id>/photo")
+@login_required
+def serve_worker_photo(user_id):
+    """Serve a worker's profile photo."""
+    viewer_id = session.get("user_id")
+    viewer_role = session.get("role")
+
+    # Staff can only view their own photo
+    if viewer_role == "staff" and user_id != viewer_id:
+        abort(403)
+    if viewer_role == "customer":
+        abort(403)
+
+    conn = db()
+    c = conn.cursor()
+    worker = execute_query(c, "SELECT photo_path FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+
+    if not worker or not worker.get("photo_path"):
+        abort(404)
+
+    photo_path = worker["photo_path"]
+
+    if photo_path.startswith("http"):
+        return redirect(photo_path)
+
+    filename = os.path.basename(photo_path)
+    full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+
+    if not os.path.exists(full_path):
+        abort(404)
+
+    return send_file(full_path, as_attachment=False)
+
+
+
+
 
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
 @admin_required
 def add_user():
-    print("DEBUG: add_user was called")    
+   
     """Add a new user (Admin only)."""
     conn = db()
     c = conn.cursor()
@@ -3281,8 +3922,7 @@ def add_user():
 
     conn.close()
 
-    print("DEBUG add_user → stations =", stations)
-    print("DEBUG add_user → type =", type(stations))
+
 
     return render_template("add_user.html", title="Add User", stations=stations)
 
@@ -6673,26 +7313,54 @@ def payment_history():
         total_revenue=total_revenue
     )
 
-
-
-
 @app.route("/reports/revenue")
 @login_required
 @manager_required
 def revenue_report():
-    """Revenue report with daily/weekly/monthly views."""
+    """Revenue report with daily/weekly/monthly views, including damages."""
     conn = db()
     c = conn.cursor()
-    
+
     is_postgres = os.environ.get("DATABASE_URL") is not None
-    
-    # Get date range from query parameters
-    period = request.args.get("period", "daily")
-    date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
-    
+
+    # ---------- SAFE PARAMETER HANDLING ----------
+    period = (request.args.get("period") or "daily").strip()
+    date_filter = (request.args.get("date") or "").strip()
+
+    if period == "daily":
+        # Must be YYYY-MM-DD
+        if not date_filter or len(date_filter) != 10 or date_filter.count("-") != 2:
+            date_filter = datetime.now().strftime("%Y-%m-%d")
+    elif period == "monthly":
+        # Must be YYYY-MM
+        if date_filter and len(date_filter) >= 7:
+            date_filter = date_filter[:7]
+        if not date_filter or len(date_filter) != 7:
+            date_filter = datetime.now().strftime("%Y-%m")
+    elif period == "weekly":
+        # If user passed a monthly value, reset
+        if not date_filter or "W" not in date_filter.upper():
+            date_filter = ""  # weekly uses year/week params below
+    else:
+        period = "daily"
+        date_filter = datetime.now().strftime("%Y-%m-%d")
+
+    # ---------- VARIABLES ----------
+    daily_revenue = []
+    available_dates = []
+    daily_summary = None
+    weekly_summary = None
+    monthly_summary = None
+    weekly_trend = []
+    damage_revenue = []
+    damage_summary = None
+    report_title = "Revenue Report"
+
+    # =============================================
+    # DAILY
+    # =============================================
     if period == "daily":
         if is_postgres:
-            # PostgreSQL syntax
             daily_revenue = execute_query(c, """
                 SELECT 
                     DATE(r.payment_date) AS date,
@@ -6706,7 +7374,7 @@ def revenue_report():
                 GROUP BY DATE(r.payment_date)
                 ORDER BY DATE(r.payment_date) DESC
             """, (date_filter,)).fetchall()
-            
+
             daily_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6716,13 +7384,32 @@ def revenue_report():
                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
                 WHERE DATE(r.payment_date) = %s
             """, (date_filter,)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    DATE(d.paid_at) AS date,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE DATE(d.paid_at) = %s AND d.status = 'Paid'
+                GROUP BY DATE(d.paid_at)
+                ORDER BY DATE(d.paid_at) DESC
+            """, (date_filter,)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE DATE(paid_at) = %s AND status = 'Paid'
+            """, (date_filter,)).fetchone()
+
             available_dates = execute_query(c, """
                 SELECT DISTINCT DATE(payment_date) AS date
                 FROM rental_payments
                 ORDER BY date DESC
             """).fetchall()
-            
+
             weekly_trend = execute_query(c, """
                 SELECT 
                     DATE(r.payment_date) AS date,
@@ -6733,7 +7420,6 @@ def revenue_report():
                 ORDER BY DATE(r.payment_date) ASC
             """).fetchall()
         else:
-            # SQLite syntax
             daily_revenue = execute_query(c, """
                 SELECT 
                     date(r.payment_date) AS date,
@@ -6747,7 +7433,7 @@ def revenue_report():
                 GROUP BY date(r.payment_date)
                 ORDER BY date(r.payment_date) DESC
             """, (date_filter,)).fetchall()
-            
+
             daily_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6757,13 +7443,32 @@ def revenue_report():
                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
                 WHERE date(r.payment_date) = ?
             """, (date_filter,)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    date(d.paid_at) AS date,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE date(d.paid_at) = ? AND d.status = 'Paid'
+                GROUP BY date(d.paid_at)
+                ORDER BY date(d.paid_at) DESC
+            """, (date_filter,)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE date(paid_at) = ? AND status = 'Paid'
+            """, (date_filter,)).fetchone()
+
             available_dates = execute_query(c, """
                 SELECT DISTINCT date(payment_date) AS date
                 FROM rental_payments
                 ORDER BY date DESC
             """).fetchall()
-            
+
             weekly_trend = execute_query(c, """
                 SELECT 
                     date(r.payment_date) AS date,
@@ -6773,15 +7478,17 @@ def revenue_report():
                 GROUP BY date(r.payment_date)
                 ORDER BY date(r.payment_date) ASC
             """).fetchall()
-        
+
         report_title = f"Revenue Report - {date_filter}"
-        
+
+    # =============================================
+    # WEEKLY
+    # =============================================
     elif period == "weekly":
         year = request.args.get("year", datetime.now().strftime("%Y"))
         week = request.args.get("week", datetime.now().strftime("%W"))
-        
+
         if is_postgres:
-            # PostgreSQL syntax
             weekly_revenue = execute_query(c, """
                 SELECT 
                     EXTRACT(WEEK FROM r.payment_date) AS week,
@@ -6794,7 +7501,7 @@ def revenue_report():
                 GROUP BY EXTRACT(WEEK FROM r.payment_date), EXTRACT(YEAR FROM r.payment_date)
                 ORDER BY year DESC, week DESC
             """, (week, year)).fetchall()
-            
+
             weekly_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6805,7 +7512,29 @@ def revenue_report():
                 WHERE EXTRACT(WEEK FROM r.payment_date) = %s
                 AND EXTRACT(YEAR FROM r.payment_date) = %s
             """, (week, year)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    EXTRACT(WEEK FROM d.paid_at) AS week,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE EXTRACT(WEEK FROM d.paid_at) = %s
+                  AND EXTRACT(YEAR FROM d.paid_at) = %s
+                  AND d.status = 'Paid'
+                GROUP BY EXTRACT(WEEK FROM d.paid_at)
+            """, (week, year)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE EXTRACT(WEEK FROM paid_at) = %s
+                  AND EXTRACT(YEAR FROM paid_at) = %s
+                  AND status = 'Paid'
+            """, (week, year)).fetchone()
+
             available_weeks = execute_query(c, """
                 SELECT DISTINCT 
                     EXTRACT(WEEK FROM payment_date) AS week,
@@ -6815,7 +7544,6 @@ def revenue_report():
                 LIMIT 20
             """).fetchall()
         else:
-            # SQLite syntax
             weekly_revenue = execute_query(c, """
                 SELECT 
                     strftime('%W', r.payment_date) AS week,
@@ -6828,7 +7556,7 @@ def revenue_report():
                 GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
                 ORDER BY year DESC, week DESC
             """, (week, year)).fetchall()
-            
+
             weekly_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6839,7 +7567,29 @@ def revenue_report():
                 WHERE strftime('%W', r.payment_date) = ?
                 AND strftime('%Y', r.payment_date) = ?
             """, (week, year)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    strftime('%W', d.paid_at) AS week,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE strftime('%W', d.paid_at) = ?
+                  AND strftime('%Y', d.paid_at) = ?
+                  AND d.status = 'Paid'
+                GROUP BY strftime('%W', d.paid_at)
+            """, (week, year)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE strftime('%W', paid_at) = ?
+                  AND strftime('%Y', paid_at) = ?
+                  AND status = 'Paid'
+            """, (week, year)).fetchone()
+
             available_weeks = execute_query(c, """
                 SELECT DISTINCT 
                     strftime('%W', payment_date) AS week,
@@ -6848,16 +7598,19 @@ def revenue_report():
                 ORDER BY year DESC, week DESC
                 LIMIT 20
             """).fetchall()
-        
+
         daily_revenue = weekly_revenue
         available_dates = available_weeks
+        date_filter = f"{year}-W{week}"
         report_title = f"Weekly Revenue Report - Week {week}, {year}"
-        
-    else:  # monthly
-        month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
-        
+
+    # =============================================
+    # MONTHLY
+    # =============================================
+    else:
+        month_filter = date_filter  # already YYYY-MM
+
         if is_postgres:
-            # PostgreSQL syntax
             monthly_revenue = execute_query(c, """
                 SELECT 
                     TO_CHAR(r.payment_date, 'YYYY-MM') AS month,
@@ -6870,7 +7623,7 @@ def revenue_report():
                 GROUP BY TO_CHAR(r.payment_date, 'YYYY-MM')
                 ORDER BY month DESC
             """, (month_filter,)).fetchall()
-            
+
             monthly_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6880,14 +7633,31 @@ def revenue_report():
                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
                 WHERE TO_CHAR(r.payment_date, 'YYYY-MM') = %s
             """, (month_filter,)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    TO_CHAR(d.paid_at, 'YYYY-MM') AS month,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE TO_CHAR(d.paid_at, 'YYYY-MM') = %s AND d.status = 'Paid'
+                GROUP BY TO_CHAR(d.paid_at, 'YYYY-MM')
+            """, (month_filter,)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE TO_CHAR(paid_at, 'YYYY-MM') = %s AND status = 'Paid'
+            """, (month_filter,)).fetchone()
+
             available_months = execute_query(c, """
                 SELECT DISTINCT TO_CHAR(payment_date, 'YYYY-MM') AS month
                 FROM rental_payments
                 ORDER BY month DESC
             """).fetchall()
         else:
-            # SQLite syntax
             monthly_revenue = execute_query(c, """
                 SELECT 
                     strftime('%Y-%m', r.payment_date) AS month,
@@ -6900,7 +7670,7 @@ def revenue_report():
                 GROUP BY strftime('%Y-%m', r.payment_date)
                 ORDER BY month DESC
             """, (month_filter,)).fetchall()
-            
+
             monthly_summary = execute_query(c, """
                 SELECT 
                     COALESCE(SUM(amount), 0) AS total,
@@ -6910,19 +7680,112 @@ def revenue_report():
                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
                 WHERE strftime('%Y-%m', r.payment_date) = ?
             """, (month_filter,)).fetchone()
-            
+
+            damage_revenue = execute_query(c, """
+                SELECT 
+                    strftime('%Y-%m', d.paid_at) AS month,
+                    COUNT(*) AS transactions,
+                    COALESCE(SUM(d.amount), 0) AS total
+                FROM damage_claims d
+                WHERE strftime('%Y-%m', d.paid_at) = ? AND d.status = 'Paid'
+                GROUP BY strftime('%Y-%m', d.paid_at)
+            """, (month_filter,)).fetchall()
+
+            damage_summary = execute_query(c, """
+                SELECT 
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transactions
+                FROM damage_claims
+                WHERE strftime('%Y-%m', paid_at) = ? AND status = 'Paid'
+            """, (month_filter,)).fetchone()
+
             available_months = execute_query(c, """
                 SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
                 FROM rental_payments
                 ORDER BY month DESC
             """).fetchall()
-        
+
         daily_revenue = monthly_revenue
         available_dates = available_months
         report_title = f"Monthly Revenue Report - {month_filter}"
-    
+
+
+    # ---------- LIFETIME TOTALS (independent of filter) ----------
+    lifetime_rentals = execute_query(c, """
+        SELECT 
+            COALESCE(SUM(amount), 0) AS total,
+            COUNT(*) AS transactions
+        FROM rental_payments
+    """).fetchone()
+
+    lifetime_damages = execute_query(c, """
+        SELECT 
+            COALESCE(SUM(amount), 0) AS total,
+            COUNT(*) AS transactions
+        FROM damage_claims
+        WHERE status = 'Paid'
+    """).fetchone()
+
+    lifetime_rental_total = 0.0
+    lifetime_damage_total = 0.0
+    lifetime_rental_txn = 0
+    lifetime_damage_txn = 0
+
+    if lifetime_rentals:
+        if isinstance(lifetime_rentals, dict):
+            lifetime_rental_total = float(lifetime_rentals.get("total") or 0)
+            lifetime_rental_txn = int(lifetime_rentals.get("transactions") or 0)
+        else:
+            lifetime_rental_total = float(lifetime_rentals[0] or 0)
+            lifetime_rental_txn = int(lifetime_rentals[1] or 0)
+
+    if lifetime_damages:
+        if isinstance(lifetime_damages, dict):
+            lifetime_damage_total = float(lifetime_damages.get("total") or 0)
+            lifetime_damage_txn = int(lifetime_damages.get("transactions") or 0)
+        else:
+            lifetime_damage_total = float(lifetime_damages[0] or 0)
+            lifetime_damage_txn = int(lifetime_damages[1] or 0)
+
+    lifetime_combined = lifetime_rental_total + lifetime_damage_total
+    lifetime_total_txn = lifetime_rental_txn + lifetime_damage_txn
+
+    # Outstanding (unpaid) damages — useful to show as a separate number
+    outstanding_result = execute_query(c, """
+        SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
+        FROM damage_claims
+        WHERE status NOT IN ('Paid', 'Waived')
+    """).fetchone()
+    outstanding_damages = 0.0
+    outstanding_count = 0
+    if outstanding_result:
+        if isinstance(outstanding_result, dict):
+            outstanding_damages = float(outstanding_result.get("total") or 0)
+            outstanding_count = int(outstanding_result.get("cnt") or 0)
+        else:
+            outstanding_damages = float(outstanding_result[0] or 0)
+            outstanding_count = int(outstanding_result[1] or 0)
+
+
+
+    # ---------- COMBINED TOTALS ----------
+    rental_total = 0
+    damage_total = 0
+
+    if daily_summary:
+        rental_total = float(list(daily_summary.values())[0]) if isinstance(daily_summary, dict) else float(daily_summary[0])
+    elif weekly_summary:
+        rental_total = float(list(weekly_summary.values())[0]) if isinstance(weekly_summary, dict) else float(weekly_summary[0])
+    elif monthly_summary:
+        rental_total = float(list(monthly_summary.values())[0]) if isinstance(monthly_summary, dict) else float(monthly_summary[0])
+
+    if damage_summary:
+        damage_total = float(list(damage_summary.values())[0]) if isinstance(damage_summary, dict) else float(damage_summary[0])
+
+    combined_total = rental_total + damage_total
+
     conn.close()
-    
+
     return render_template(
         "revenue_report.html",
         title="Revenue Report",
@@ -6930,13 +7793,470 @@ def revenue_report():
         period=period,
         date_filter=date_filter,
         daily_revenue=daily_revenue,
-        daily_summary=daily_summary if 'daily_summary' in locals() else None,
-        weekly_summary=weekly_summary if 'weekly_summary' in locals() else None,
-        monthly_summary=monthly_summary if 'monthly_summary' in locals() else None,
+        daily_summary=daily_summary,
+        weekly_summary=weekly_summary,
+        monthly_summary=monthly_summary,
         available_dates=available_dates,
-        weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
-        report_type=period
+        weekly_trend=weekly_trend,
+        report_type=period,
+        damage_revenue=damage_revenue,
+        damage_summary=damage_summary,
+        rental_total=rental_total,
+        damage_total=damage_total,
+        combined_total=combined_total,
+
+        lifetime_rental_total=lifetime_rental_total,
+        lifetime_damage_total=lifetime_damage_total,
+        lifetime_combined=lifetime_combined,
+        lifetime_total_txn=lifetime_total_txn,
+        outstanding_damages=outstanding_damages,
+        outstanding_count=outstanding_count,
+
+
     )
+
+
+@app.route("/staff-activity/export.csv")
+@login_required
+@manager_required
+def staff_activity_export_csv():
+    """Export staff activity as CSV. Respects the current filters if any are set."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    staff_id = (request.args.get("staff_id") or "").strip()
+    station_id = (request.args.get("station_id") or "").strip()
+    action = (request.args.get("action") or "").strip()
+
+    query = """
+        SELECT
+            r.id, r.start_time, r.end_time, r.status, r.total_cost, r.notes,
+            c.full_name AS customer_name,
+            b.bike_code,
+            su.username AS started_by, su.full_name AS started_by_name,
+            eu.username AS ended_by, eu.full_name AS ended_by_name,
+            cu.username AS cancelled_by, cu.full_name AS cancelled_by_name,
+            ss.name AS start_station, es.name AS end_station
+        FROM daily_rentals r
+        LEFT JOIN customers c ON c.id = r.customer_id
+        LEFT JOIN bicycles b ON b.id = r.bicycle_id
+        LEFT JOIN users su ON su.id = r.started_by_user_id
+        LEFT JOIN users eu ON eu.id = r.ended_by_user_id
+        LEFT JOIN users cu ON cu.id = r.cancelled_by_user_id
+        LEFT JOIN branches ss ON ss.id = r.start_station_id
+        LEFT JOIN branches es ON es.id = r.end_station_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(r.start_time) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(r.start_time) <= ?"
+        params.append(date_to)
+    if staff_id:
+        query += " AND (r.started_by_user_id = ? OR r.ended_by_user_id = ? OR r.cancelled_by_user_id = ?)"
+        params.extend([staff_id, staff_id, staff_id])
+    if station_id:
+        query += " AND (r.start_station_id = ? OR r.end_station_id = ?)"
+        params.extend([station_id, station_id])
+    if action == "started":
+        query += " AND r.started_by_user_id IS NOT NULL"
+    elif action == "ended":
+        query += " AND r.ended_by_user_id IS NOT NULL"
+    elif action == "cancelled":
+        query += " AND r.cancelled_by_user_id IS NOT NULL"
+
+    query += " ORDER BY r.start_time DESC"
+
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    for r in rows:
+        if r.get("start_time"): r["start_time_display"] = to_namibia_time(r["start_time"])
+        if r.get("end_time"):   r["end_time_display"]   = to_namibia_time(r["end_time"])
+
+    columns = [
+        ("id", "Rental ID"),
+        ("customer_name", "Customer"),
+        ("bike_code", "Bicycle"),
+        ("started_by_name", "Started By (Name)"),
+        ("started_by", "Started By (User)"),
+        ("start_time_display", "Start Time (Namibia)"),
+        ("start_station", "Start Station"),
+        ("ended_by_name", "Ended By (Name)"),
+        ("ended_by", "Ended By (User)"),
+        ("end_time_display", "End Time (Namibia)"),
+        ("end_station", "End Station"),
+        ("cancelled_by_name", "Cancelled By (Name)"),
+        ("status", "Status"),
+        ("total_cost", "Total Cost"),
+    ]
+
+    filtered = bool(date_from or date_to or staff_id or station_id or action)
+    filename = _export_filename("staff_activity", filtered=filtered)
+    return build_csv_response(rows, columns, filename)
+
+
+@app.route("/staff-activity/export.pdf")
+@login_required
+@manager_required
+def staff_activity_export_pdf():
+    """Export staff activity as PDF."""
+    conn = db()
+    c = conn.cursor()
+
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    staff_id = (request.args.get("staff_id") or "").strip()
+    station_id = (request.args.get("station_id") or "").strip()
+    action = (request.args.get("action") or "").strip()
+
+    query = """
+        SELECT
+            r.id, r.start_time, r.end_time, r.status, r.total_cost,
+            c.full_name AS customer_name,
+            b.bike_code,
+            su.username AS started_by, su.full_name AS started_by_name,
+            eu.username AS ended_by, eu.full_name AS ended_by_name,
+            cu.username AS cancelled_by, cu.full_name AS cancelled_by_name,
+            ss.name AS start_station, es.name AS end_station
+        FROM daily_rentals r
+        LEFT JOIN customers c ON c.id = r.customer_id
+        LEFT JOIN bicycles b ON b.id = r.bicycle_id
+        LEFT JOIN users su ON su.id = r.started_by_user_id
+        LEFT JOIN users eu ON eu.id = r.ended_by_user_id
+        LEFT JOIN users cu ON cu.id = r.cancelled_by_user_id
+        LEFT JOIN branches ss ON ss.id = r.start_station_id
+        LEFT JOIN branches es ON es.id = r.end_station_id
+        WHERE 1=1
+    """
+    params = []
+
+    if date_from:
+        query += " AND date(r.start_time) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(r.start_time) <= ?"
+        params.append(date_to)
+    if staff_id:
+        query += " AND (r.started_by_user_id = ? OR r.ended_by_user_id = ? OR r.cancelled_by_user_id = ?)"
+        params.extend([staff_id, staff_id, staff_id])
+    if station_id:
+        query += " AND (r.start_station_id = ? OR r.end_station_id = ?)"
+        params.extend([station_id, station_id])
+    if action == "started":
+        query += " AND r.started_by_user_id IS NOT NULL"
+    elif action == "ended":
+        query += " AND r.ended_by_user_id IS NOT NULL"
+    elif action == "cancelled":
+        query += " AND r.cancelled_by_user_id IS NOT NULL"
+
+    query += " ORDER BY r.start_time DESC LIMIT 1000"
+
+    rows = execute_query(c, query, params).fetchall()
+    conn.close()
+
+    for r in rows:
+        r["start_time_display"] = to_namibia_time(r.get("start_time")) or "—"
+        r["end_time_display"] = to_namibia_time(r.get("end_time")) or "—"
+        r["started_display"] = r.get("started_by_name") or r.get("started_by") or "—"
+        r["ended_display"] = r.get("ended_by_name") or r.get("ended_by") or "—"
+
+    columns = [
+        ("id", "ID", 0.05),
+        ("customer_name", "Customer", 0.13),
+        ("bike_code", "Bike", 0.09),
+        ("started_display", "Started By", 0.13),
+        ("start_time_display", "Start", 0.13),
+        ("start_station", "Start Station", 0.12),
+        ("ended_display", "Ended By", 0.13),
+        ("end_time_display", "End", 0.13),
+        ("end_station", "End Station", 0.09),
+    ]
+
+    filters_meta = {
+        "date_from": date_from or "—",
+        "date_to": date_to or "—",
+        "staff_id": staff_id or "—",
+        "station_id": station_id or "—",
+        "action": action or "—",
+    }
+
+    return build_audit_pdf(
+        rows=rows,
+        columns=columns,
+        title="Staff Activity",
+        filters_meta=filters_meta,
+        generated_by=session.get("username", "admin"),
+    )
+
+
+
+# @app.route("/reports/revenue")
+# @login_required
+# @manager_required
+# def revenue_report():
+#     """Revenue report with daily/weekly/monthly views."""
+#     conn = db()
+#     c = conn.cursor()
+    
+#     is_postgres = os.environ.get("DATABASE_URL") is not None
+    
+#     # Get date range from query parameters
+#     period = request.args.get("period", "daily")
+#     date_filter = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    
+#     if period == "daily":
+#         if is_postgres:
+#             # PostgreSQL syntax
+#             daily_revenue = execute_query(c, """
+#                 SELECT 
+#                     DATE(r.payment_date) AS date,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total,
+#                     STRING_AGG(DISTINCT b.bike_code, ', ') AS bikes_rented
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 JOIN bicycles b ON b.id = dr.bicycle_id
+#                 WHERE DATE(r.payment_date) = %s
+#                 GROUP BY DATE(r.payment_date)
+#                 ORDER BY DATE(r.payment_date) DESC
+#             """, (date_filter,)).fetchall()
+            
+#             daily_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE DATE(r.payment_date) = %s
+#             """, (date_filter,)).fetchone()
+            
+#             available_dates = execute_query(c, """
+#                 SELECT DISTINCT DATE(payment_date) AS date
+#                 FROM rental_payments
+#                 ORDER BY date DESC
+#             """).fetchall()
+            
+#             weekly_trend = execute_query(c, """
+#                 SELECT 
+#                     DATE(r.payment_date) AS date,
+#                     COALESCE(SUM(r.amount), 0) AS total
+#                 FROM rental_payments r
+#                 WHERE DATE(r.payment_date) >= CURRENT_DATE - INTERVAL '7 days'
+#                 GROUP BY DATE(r.payment_date)
+#                 ORDER BY DATE(r.payment_date) ASC
+#             """).fetchall()
+#         else:
+#             # SQLite syntax
+#             daily_revenue = execute_query(c, """
+#                 SELECT 
+#                     date(r.payment_date) AS date,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total,
+#                     GROUP_CONCAT(DISTINCT b.bike_code) AS bikes_rented
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 JOIN bicycles b ON b.id = dr.bicycle_id
+#                 WHERE date(r.payment_date) = ?
+#                 GROUP BY date(r.payment_date)
+#                 ORDER BY date(r.payment_date) DESC
+#             """, (date_filter,)).fetchall()
+            
+#             daily_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE date(r.payment_date) = ?
+#             """, (date_filter,)).fetchone()
+            
+#             available_dates = execute_query(c, """
+#                 SELECT DISTINCT date(payment_date) AS date
+#                 FROM rental_payments
+#                 ORDER BY date DESC
+#             """).fetchall()
+            
+#             weekly_trend = execute_query(c, """
+#                 SELECT 
+#                     date(r.payment_date) AS date,
+#                     COALESCE(SUM(r.amount), 0) AS total
+#                 FROM rental_payments r
+#                 WHERE date(r.payment_date) >= date('now', '-7 days')
+#                 GROUP BY date(r.payment_date)
+#                 ORDER BY date(r.payment_date) ASC
+#             """).fetchall()
+        
+#         report_title = f"Revenue Report - {date_filter}"
+        
+#     elif period == "weekly":
+#         year = request.args.get("year", datetime.now().strftime("%Y"))
+#         week = request.args.get("week", datetime.now().strftime("%W"))
+        
+#         if is_postgres:
+#             # PostgreSQL syntax
+#             weekly_revenue = execute_query(c, """
+#                 SELECT 
+#                     EXTRACT(WEEK FROM r.payment_date) AS week,
+#                     EXTRACT(YEAR FROM r.payment_date) AS year,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total
+#                 FROM rental_payments r
+#                 WHERE EXTRACT(WEEK FROM r.payment_date) = %s
+#                 AND EXTRACT(YEAR FROM r.payment_date) = %s
+#                 GROUP BY EXTRACT(WEEK FROM r.payment_date), EXTRACT(YEAR FROM r.payment_date)
+#                 ORDER BY year DESC, week DESC
+#             """, (week, year)).fetchall()
+            
+#             weekly_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE EXTRACT(WEEK FROM r.payment_date) = %s
+#                 AND EXTRACT(YEAR FROM r.payment_date) = %s
+#             """, (week, year)).fetchone()
+            
+#             available_weeks = execute_query(c, """
+#                 SELECT DISTINCT 
+#                     EXTRACT(WEEK FROM payment_date) AS week,
+#                     EXTRACT(YEAR FROM payment_date) AS year
+#                 FROM rental_payments
+#                 ORDER BY year DESC, week DESC
+#                 LIMIT 20
+#             """).fetchall()
+#         else:
+#             # SQLite syntax
+#             weekly_revenue = execute_query(c, """
+#                 SELECT 
+#                     strftime('%W', r.payment_date) AS week,
+#                     strftime('%Y', r.payment_date) AS year,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total
+#                 FROM rental_payments r
+#                 WHERE strftime('%W', r.payment_date) = ?
+#                 AND strftime('%Y', r.payment_date) = ?
+#                 GROUP BY strftime('%W', r.payment_date), strftime('%Y', r.payment_date)
+#                 ORDER BY year DESC, week DESC
+#             """, (week, year)).fetchall()
+            
+#             weekly_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE strftime('%W', r.payment_date) = ?
+#                 AND strftime('%Y', r.payment_date) = ?
+#             """, (week, year)).fetchone()
+            
+#             available_weeks = execute_query(c, """
+#                 SELECT DISTINCT 
+#                     strftime('%W', payment_date) AS week,
+#                     strftime('%Y', payment_date) AS year
+#                 FROM rental_payments
+#                 ORDER BY year DESC, week DESC
+#                 LIMIT 20
+#             """).fetchall()
+        
+#         daily_revenue = weekly_revenue
+#         available_dates = available_weeks
+#         report_title = f"Weekly Revenue Report - Week {week}, {year}"
+        
+#     else:  # monthly
+#         month_filter = request.args.get("month", datetime.now().strftime("%Y-%m"))
+        
+#         if is_postgres:
+#             # PostgreSQL syntax
+#             monthly_revenue = execute_query(c, """
+#                 SELECT 
+#                     TO_CHAR(r.payment_date, 'YYYY-MM') AS month,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE TO_CHAR(r.payment_date, 'YYYY-MM') = %s
+#                 GROUP BY TO_CHAR(r.payment_date, 'YYYY-MM')
+#                 ORDER BY month DESC
+#             """, (month_filter,)).fetchall()
+            
+#             monthly_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE TO_CHAR(r.payment_date, 'YYYY-MM') = %s
+#             """, (month_filter,)).fetchone()
+            
+#             available_months = execute_query(c, """
+#                 SELECT DISTINCT TO_CHAR(payment_date, 'YYYY-MM') AS month
+#                 FROM rental_payments
+#                 ORDER BY month DESC
+#             """).fetchall()
+#         else:
+#             # SQLite syntax
+#             monthly_revenue = execute_query(c, """
+#                 SELECT 
+#                     strftime('%Y-%m', r.payment_date) AS month,
+#                     COUNT(*) AS transactions,
+#                     COALESCE(SUM(r.amount), 0) AS total,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE strftime('%Y-%m', r.payment_date) = ?
+#                 GROUP BY strftime('%Y-%m', r.payment_date)
+#                 ORDER BY month DESC
+#             """, (month_filter,)).fetchall()
+            
+#             monthly_summary = execute_query(c, """
+#                 SELECT 
+#                     COALESCE(SUM(amount), 0) AS total,
+#                     COUNT(*) AS transactions,
+#                     COUNT(DISTINCT dr.customer_id) AS unique_customers
+#                 FROM rental_payments r
+#                 JOIN daily_rentals dr ON dr.id = r.daily_rental_id
+#                 WHERE strftime('%Y-%m', r.payment_date) = ?
+#             """, (month_filter,)).fetchone()
+            
+#             available_months = execute_query(c, """
+#                 SELECT DISTINCT strftime('%Y-%m', payment_date) AS month
+#                 FROM rental_payments
+#                 ORDER BY month DESC
+#             """).fetchall()
+        
+#         daily_revenue = monthly_revenue
+#         available_dates = available_months
+#         report_title = f"Monthly Revenue Report - {month_filter}"
+    
+#     conn.close()
+    
+#     return render_template(
+#         "revenue_report.html",
+#         title="Revenue Report",
+#         report_title=report_title,
+#         period=period,
+#         date_filter=date_filter,
+#         daily_revenue=daily_revenue,
+#         daily_summary=daily_summary if 'daily_summary' in locals() else None,
+#         weekly_summary=weekly_summary if 'weekly_summary' in locals() else None,
+#         monthly_summary=monthly_summary if 'monthly_summary' in locals() else None,
+#         available_dates=available_dates,
+#         weekly_trend=weekly_trend if 'weekly_trend' in locals() else [],
+#         report_type=period
+#     )
 
 
 @app.route("/rentals/history")
@@ -10969,7 +12289,8 @@ with app.app_context():
         ensure_privacy_schema()
         ensure_lockout_schema()
         ensure_2fa_schema()
-        backfill_2fa_required()  
+        backfill_2fa_required()
+        ensure_workers_schema()  
         migrate_public_uploads_to_private()
         print("✅ Schema is up to date.")
     except Exception as e:

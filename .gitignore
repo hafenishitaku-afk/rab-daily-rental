@@ -33,3 +33,4 @@ env/
 # Temp dev scripts
 check_2fa.py
 reset_2fa.py
+private_uploads/

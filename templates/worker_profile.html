@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:15px;">
+    <div style="display:flex;gap:20px;align-items:center;">
+        {% if worker.photo_path %}
+        <img src="{{ url_for('serve_worker_photo', user_id=worker.id) }}" 
+             alt="Photo"
+             style="width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid #ffe500;">
+        {% else %}
+        <div style="width:90px;height:90px;border-radius:50%;background:#e4e7ec;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:bold;color:#667085;">
+            {{ (worker.full_name or worker.username)[:1]|upper }}
+        </div>
+        {% endif %}
+        <div>
+            <h1 style="margin:0;">{{ worker.full_name or worker.username }}</h1>
+            <p class="sub" style="margin:5px 0 0 0;">
+                {% if worker.job_title %}<b>{{ worker.job_title }}</b>{% endif %}
+                {% if worker.specialty %} · {{ worker.specialty }}{% endif %}
+                {% if worker.station_name %} · 📍 {{ worker.station_name }}{% endif %}
+            </p>
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                <span class="badge 
+                    {% if worker.role == 'admin' %}green
+                    {% elif worker.role == 'manager' %}blue
+                    {% else %}orange{% endif %}">
+                    {{ worker.role }}
+                </span>
+                {% if lockout.locked %}
+                <span class="badge red">🔒 Locked ({{ lockout.minutes_remaining }} min)</span>
+                {% endif %}
+                {% if worker.twofa_enabled %}
+                <span class="badge blue">🔐 2FA enabled</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        {% if viewer_role == 'admin' or viewer_role == 'manager' %}
+        <a href="{{ url_for('worker_edit', worker_id=worker.id) }}" class="btn yellow">✏️ Edit</a>
+        {% endif %}
+        {% if viewer_role == 'admin' and worker.id != session.user_id %}
+        <a href="{{ url_for('edit_user', user_id=worker.id) }}" class="btn small">🔧 Full User Edit</a>
+        {% endif %}
+        {% if viewer_role == 'admin' or viewer_role == 'manager' %}
+        <a href="{{ url_for('workers') }}" class="btn">← Back</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Contact -->
+<div class="card">
+    <h2>📞 Contact</h2>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Email</div>
+            <div class="value" style="font-size:16px;">{{ worker.email or '—' }}</div>
+        </div>
+        {% if 'phone' in visible %}
+        <div class="metric">
+            <div class="label">Phone</div>
+            <div class="value" style="font-size:16px;">
+                {% if worker.phone %}
+                <a href="tel:{{ worker.phone }}" style="color:#0d1f46;">{{ worker.phone }}</a>
+                {% else %}—{% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% if 'address' in visible %}
+        <div class="metric">
+            <div class="label">Address</div>
+            <div class="value" style="font-size:16px;">{{ worker.address or '—' }}</div>
+        </div>
+        {% endif %}
+        {% if 'emergency_contact' in visible %}
+        <div class="metric">
+            <div class="label">Emergency Contact</div>
+            <div class="value" style="font-size:16px;">{{ worker.emergency_contact or '—' }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Employment -->
+<div class="card">
+    <h2>💼 Employment</h2>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">Job Title</div>
+            <div class="value" style="font-size:18px;">{{ worker.job_title or '—' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Specialty</div>
+            <div class="value" style="font-size:18px;">{{ worker.specialty or '—' }}</div>
+        </div>
+        {% if 'hire_date' in visible %}
+        <div class="metric">
+            <div class="label">Hire Date</div>
+            <div class="value" style="font-size:16px;">{{ worker.hire_date or '—' }}</div>
+        </div>
+        {% endif %}
+        {% if 'date_of_birth' in visible %}
+        <div class="metric">
+            <div class="label">Date of Birth</div>
+            <div class="value" style="font-size:16px;">{{ worker.date_of_birth or '—' }}</div>
+        </div>
+        {% endif %}
+        <div class="metric">
+            <div class="label">Station</div>
+            <div class="value" style="font-size:16px;">{{ worker.station_name or '—' }}</div>
+        </div>
+        {% if 'id_number' in visible %}
+        <div class="metric">
+            <div class="label">ID / Passport</div>
+            <div class="value" style="font-size:16px;">{{ worker.id_number or '—' }}</div>
+        </div>
+        {% endif %}
+        {% if 'tax_number' in visible %}
+        <div class="metric">
+            <div class="label">Tax Number</div>
+            <div class="value" style="font-size:16px;">{{ worker.tax_number or '—' }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Salary + Bank (admin only) -->
+{% if 'salary' in visible or 'bank_details' in visible %}
+<div class="card" style="background:#fff8e1;border-left:5px solid #ffd700;">
+    <h2 style="margin-top:0;">💵 Confidential (Admin Only)</h2>
+    <div class="grid">
+        {% if 'salary' in visible %}
+        <div class="metric" style="background:#fff;">
+            <div class="label">Salary (N$)</div>
+            <div class="value" style="font-size:20px;">
+                {% if worker.salary is not none %}
+                N$ {{ "%.2f"|format(worker.salary) }}
+                {% else %}—{% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% if 'bank_details' in visible %}
+        <div class="metric" style="background:#fff;">
+            <div class="label">Bank Details</div>
+            <div class="value" style="font-size:14px;white-space:pre-wrap;">{{ worker.bank_details or '—' }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Notes -->
+{% if 'worker_notes' in visible and worker.worker_notes %}
+<div class="card">
+    <h2>📝 Notes</h2>
+    <p style="white-space:pre-wrap;">{{ worker.worker_notes }}</p>
+</div>
+{% endif %}
+
+<!-- Documents -->
+{% if viewer_role == 'admin' or viewer_role == 'manager' or is_own %}
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="margin:0;">📄 Documents</h2>
+        {% if viewer_role == 'admin' or viewer_role == 'manager' %}
+        <a href="{{ url_for('worker_add_document', worker_id=worker.id) }}" class="btn small yellow">
+            + Add Document
+        </a>
+        {% endif %}
+    </div>
+    {% if documents %}
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-top:15px;">
+        {% for d in documents %}
+        <div class="metric" style="text-align:center;position:relative;">
+            <div style="font-size:36px;margin-bottom:5px;">
+                {% if d.document_type == 'id_copy' %}🪪
+                {% elif d.document_type == 'photo' %}📸
+                {% elif d.document_type == 'contract' %}📝
+                {% else %}📄{% endif %}
+            </div>
+            <div style="font-weight:bold;text-transform:capitalize;">{{ d.document_type.replace('_', ' ') }}</div>
+            <div style="color:#667085;font-size:12px;">{{ d.uploaded_at }}</div>
+            <div style="margin-top:10px;display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
+                <a href="{{ url_for('serve_worker_document', doc_id=d.id) }}" target="_blank" class="btn small">👁️ View</a>
+                {% if viewer_role == 'admin' or viewer_role == 'manager' %}
+                <form method="post" action="{{ url_for('worker_delete_document', doc_id=d.id) }}" 
+                      style="display:inline;"
+                      onsubmit="return confirm('Delete this document?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn small" style="background:#dc3545;color:#fff;">🗑️</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:#667085;">No documents uploaded yet.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Recent Activity -->
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="margin:0;">📊 Recent Activity</h2>
+        <a href="{{ url_for('staff_activity', staff_id=worker.id) }}" class="btn small">
+            View Full Staff Activity →
+        </a>
+    </div>
+    {% if recent_activity %}
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Rental</th>
+                <th>Bike</th>
+                <th>Started</th>
+                <th>Ended</th>
+                <th>Status</th>
+            </tr>
+            {% for r in recent_activity %}
+            <tr>
+                <td><b>#{{ r.id }}</b></td>
+                <td>{{ r.bike_code or '—' }}</td>
+                <td>
+                    {% if r.started_by == worker.username %}
+                    <span class="badge green">✅ by this worker</span>
+                    {% else %}
+                    <span style="color:#667085;">—</span>
+                    {% endif %}
+                    <br><small>{{ r.start_time or '' }}</small>
+                </td>
+                <td>
+                    {% if r.ended_by == worker.username %}
+                    <span class="badge green">✅ by this worker</span>
+                    {% else %}
+                    <span style="color:#667085;">—</span>
+                    {% endif %}
+                    <br><small>{{ r.end_time or '' }}</small>
+                </td>
+                <td>
+                    <span class="badge {% if r.status == 'Active' %}blue{% elif r.status == 'Cancelled' %}red{% else %}green{% endif %}">
+                        {{ r.status }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% else %}
+    <p style="color:#667085;">No recent rental activity.</p>
+    {% endif %}
+</div>
+
+<div class="actions">
+    {% if viewer_role == 'admin' or viewer_role == 'manager' %}
+    <a href="{{ url_for('workers') }}" class="btn">← Back to Workers</a>
+    {% endif %}
+    <a href="{{ url_for('dashboard') }}" class="btn">← Dashboard</a>
+</div>
+
+{% endblock %}

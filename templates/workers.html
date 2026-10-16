@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+        <h1>👷 Workers</h1>
+        <p class="sub">Manage your team — roles, titles, and specialties.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a href="{{ url_for('users') }}" class="btn small">👥 User Management</a>
+        <a href="{{ url_for('staff_activity') }}" class="btn small">🧾 Staff Activity</a>
+    </div>
+</div>
+
+<!-- Summary -->
+<div class="grid">
+    <div class="metric">
+        <div class="label">Total Workers</div>
+        <div class="value">{{ total_workers }}</div>
+    </div>
+    <div class="metric" style="border-left:4px solid #16834b;">
+        <div class="label">Active</div>
+        <div class="value" style="color:#16834b;">{{ total_active }}</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <form method="get" action="{{ url_for('workers') }}" 
+          style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+        <label style="flex:1;min-width:220px;">
+            Search (name, username, title)
+            <input type="text" name="search" value="{{ search or '' }}"
+                   placeholder="Search workers...">
+        </label>
+        <label style="flex:1;min-width:140px;">
+            Role
+            <select name="role">
+                <option value="">All roles</option>
+                <option value="admin" {% if role_filter == 'admin' %}selected{% endif %}>Admin</option>
+                <option value="manager" {% if role_filter == 'manager' %}selected{% endif %}>Manager</option>
+                <option value="staff" {% if role_filter == 'staff' %}selected{% endif %}>Staff</option>
+            </select>
+        </label>
+        <label style="flex:1;min-width:160px;">
+            Specialty
+            <select name="specialty">
+                <option value="">All specialties</option>
+                {% for s in specialty_list %}
+                <option value="{{ s }}" {% if specialty_filter == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn yellow">🔍 Filter</button>
+            <a href="{{ url_for('workers') }}" class="btn">Clear</a>
+        </div>
+    </form>
+</div>
+
+<!-- Worker List -->
+<div class="card">
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Photo</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Job Title</th>
+                <th>Specialty</th>
+                <th>Station</th>
+                <th>Contact</th>
+                <th>Actions</th>
+            </tr>
+            {% if workers %}
+                {% for w in workers %}
+                <tr>
+                    <td>
+                        {% if w.photo_path %}
+                        <img src="{{ url_for('serve_worker_photo', user_id=w.id) }}" 
+                             alt="Photo"
+                             style="width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #e4e7ec;">
+                        {% else %}
+                        <div style="width:42px;height:42px;border-radius:50%;background:#e4e7ec;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#667085;">
+                            {{ (w.full_name or w.username)[:1]|upper }}
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <b>{{ w.full_name or '—' }}</b>
+                        <br>
+                        <small style="color:#667085;">@{{ w.username }}</small>
+                    </td>
+                    <td>
+                        <span class="badge 
+                            {% if w.role == 'admin' %}green
+                            {% elif w.role == 'manager' %}blue
+                            {% else %}orange{% endif %}">
+                            {{ w.role }}
+                        </span>
+                    </td>
+                    <td>{{ w.job_title or '—' }}</td>
+                    <td>
+                        {% if w.specialty %}
+                            <span class="badge" style="background:#e4e7ec;">{{ w.specialty }}</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if w.station_name %}
+                            <span class="badge blue">{{ w.station_name }}</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if w.phone %}
+                        <a href="tel:{{ w.phone }}" style="color:#0d1f46;">{{ w.phone }}</a>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a class="btn small" href="{{ url_for('worker_profile', worker_id=w.id) }}">👁️ View</a>
+                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        <a class="btn small yellow" href="{{ url_for('worker_edit', worker_id=w.id) }}">✏️ Edit</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#667085;padding:20px;">
+                        No workers match your filters.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+</div>
+
+{% endblock %}
