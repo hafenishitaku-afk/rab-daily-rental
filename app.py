@@ -5490,7 +5490,7 @@ def customers():
         temp_list = list(temp_password)
         secrets.SystemRandom().shuffle(temp_list)
         temp_password = ''.join(temp_list)
-
+        password_hash = generate_password_hash(temp_password)
 
         # Insert user
         try:
