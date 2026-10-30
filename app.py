@@ -11560,9 +11560,32 @@ def end_rental(rental_id):
         daily_cap = rental["daily_cap"]
         deposit_paid = float(rental["deposit_paid"] or 0)
 
-        # Calculate cost
-        raw_cost = total_hours * hourly_rate
-        total_cost = min(raw_cost, daily_cap)
+        # # Calculate cost
+        # raw_cost = total_hours * hourly_rate
+        # total_cost = min(raw_cost, daily_cap)
+
+        # Calculate cost (Cumulative Daily Cap Logic)
+        full_days = int(total_hours // 24)
+        remaining_hours = total_hours % 24
+
+        # Cost for full days (capped)
+        daily_cost = full_days * daily_cap
+        
+        # Cost for remaining hours (capped at the daily cap)
+        remaining_cost = min(remaining_hours * hourly_rate, daily_cap)
+        
+        # Base cost before late fees
+        base_cost = daily_cost + remaining_cost
+        
+        # Late fee (after 6pm local time)
+        late_fee = 0
+        if local_now.hour >= 18:
+            late_fee = 10 * (local_now.hour - 18)
+            
+        # Total cost
+        total_cost = base_cost + late_fee
+
+
 
         # Late fee (after 6pm local time)
         late_fee = 0
@@ -11681,8 +11704,18 @@ def end_rental(rental_id):
     hourly_rate = rental["hourly_rate"]
     daily_cap = rental["daily_cap"]
     deposit_paid = float(rental["deposit_paid"] or 0)
-    preview_raw = preview_hours * hourly_rate
-    preview_capped = min(preview_raw, daily_cap)
+
+    # Cumulative Preview Calculation
+    p_full_days = int(preview_hours // 24)
+    p_remaining_hours = preview_hours % 24
+    p_daily_cost = p_full_days * daily_cap
+    p_remaining_cost = min(p_remaining_hours * hourly_rate, daily_cap)
+    
+    preview_raw = preview_hours * hourly_rate # Keep this just for display
+    preview_capped = p_daily_cost + p_remaining_cost 
+
+    # preview_raw = preview_hours * hourly_rate
+    # preview_capped = min(preview_raw, daily_cap)
     preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
     preview_total = preview_capped + preview_late
     preview_change = round(deposit_paid - preview_total, 2)

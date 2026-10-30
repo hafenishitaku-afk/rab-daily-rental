@@ -92,7 +92,7 @@
     </p> -->
 
     <p style="color:#667085;font-size:12px;margin-top:10px;">
-        ⏱️ Cost = min(hours × rate, daily cap) + late fee.
+        ⏱️ Cost = (Full Days × Daily Cap) + (Remaining Hours × Rate) + late fee.
         Deposit (N$ {{ "%.2f"|format(deposit_paid) }}) is then applied.
         {% if preview_late > 0 %}
             <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
