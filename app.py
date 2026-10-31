@@ -1847,21 +1847,36 @@ def init_db():
     result = c.fetchone()
     count = result['count'] if isinstance(result, dict) else result[0]
     
+    # if count == 0:
+    #     if is_postgres:
+    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 20, 120, 50)")
+    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Electric', 30, 180, 75)")
+    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Mountain', 25, 150, 60)")
+    #     else:
+    #         c.executescript("""
+    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+    #             VALUES ('Standard', 20, 120, 50);
+    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+    #             VALUES ('Electric', 30, 180, 75);
+    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
+    #             VALUES ('Mountain', 25, 150, 60);
+    #         """)
+
     if count == 0:
         if is_postgres:
-            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 20, 120, 50)")
-            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Electric', 30, 180, 75)")
-            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Mountain', 25, 150, 60)")
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 60, 480, 50)")
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Electric', 90, 720, 75)")
+            execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Mountain', 75, 600, 60)")
         else:
             c.executescript("""
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Standard', 20, 120, 50);
+                VALUES ('Standard', 60, 480, 50);
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Electric', 30, 180, 75);
+                VALUES ('Electric', 90, 720, 75);
                 INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-                VALUES ('Mountain', 25, 150, 60);
+                VALUES ('Mountain', 75, 600, 60);
             """)
-    
+
     # =============================================
     # CREATE DEFAULT USERS
     # =============================================

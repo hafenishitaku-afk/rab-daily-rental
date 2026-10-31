@@ -183,12 +183,19 @@
 <script>
 function updateRates() {
     var bikeType = document.getElementById("bike_type").value;
+    // var rates = {
+    //     "Standard": { hourly: 20, daily: 120, deposit: 50 },
+    //     "Electric": { hourly: 30, daily: 180, deposit: 75 },
+    //     "Mountain": { hourly: 25, daily: 150, deposit: 60 }
+    // };
+
     var rates = {
-        "Standard": { hourly: 20, daily: 120, deposit: 50 },
-        "Electric": { hourly: 30, daily: 180, deposit: 75 },
-        "Mountain": { hourly: 25, daily: 150, deposit: 60 }
-    };
-    
+        "Standard": { hourly: 60, daily: 480, deposit: 50 },
+        "Electric": { hourly: 90, daily: 720, deposit: 75 },
+        "Mountain": { hourly: 75, daily: 600, deposit: 60 }
+    };    
+
+
     if (rates[bikeType]) {
         document.getElementById("hourly_rate").value = rates[bikeType].hourly;
         document.getElementById("daily_cap").value = rates[bikeType].daily;
