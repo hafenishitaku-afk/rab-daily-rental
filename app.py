@@ -10007,8 +10007,17 @@ def bicycles():
             )
 
             flash(f"Bicycle {bike_code} added successfully.", "success")
-        except sqlite3.IntegrityError:
-            flash("Bicycle code already exists.", "danger")
+        # except sqlite3.IntegrityError:
+        #     flash("Bicycle code already exists.", "danger")
+
+        except (sqlite3.IntegrityError, Exception) as e:
+            # Check if it's a unique violation for the bike code
+            if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
+                flash(f"Bicycle code '{bike_code}' already exists. Please use a different code.", "danger")
+            else:
+                flash(f"Error adding bicycle: {str(e)}", "danger")
+
+
 
         conn.close()
         return redirect(url_for("bicycles"))
