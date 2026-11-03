@@ -49,7 +49,8 @@
             <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_raw) }}</div>
         </div>
         <div class="metric" style="background:white;">
-            <div class="label">Daily Cap Applied</div>
+            <!-- <div class="label">Daily Cap Applied</div> -->
+            <div class="label">Base Hours Cost</div>
             <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_capped) }}</div>
         </div>
         <div class="metric" style="background:white;">
@@ -84,18 +85,14 @@
         </div>
 
     </div>
-    <!-- <p style="color:#667085;font-size:12px;margin-top:10px;">
-        ⏱️ Cost is calculated based on the current time. 
-        {% if preview_late > 0 %}
-            <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
-        {% endif %}
-    </p> -->
+
 
     <p style="color:#667085;font-size:12px;margin-top:10px;">
-        ⏱️ Cost = (Full Days × Daily Cap) + (Remaining Hours × Rate) + late fee.
+        <!-- ⏱️ Cost = (Full Days × Daily Cap) + (Remaining Hours × Rate) + late fee. -->
+        ⏱️ Cost = (Total Hours × Rate) + (Night Hours × N$10 penalty).
         Deposit (N$ {{ "%.2f"|format(deposit_paid) }}) is then applied.
         {% if preview_late > 0 %}
-            <span style="color:#dc3545;">⚠️ Late fee applied (after 6pm)</span>
+            <span style="color:#dc3545;">⚠️ Nighttime penalty applied (N$10/hr after 6pm)</span>
         {% endif %}
     </p>
 

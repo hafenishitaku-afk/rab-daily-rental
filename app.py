@@ -11584,29 +11584,28 @@ def end_rental(rental_id):
         daily_cap = rental["daily_cap"]
         deposit_paid = float(rental["deposit_paid"] or 0)
 
-        # # Calculate cost
-        # raw_cost = total_hours * hourly_rate
-        # total_cost = min(raw_cost, daily_cap)
 
-        # Calculate cost (Cumulative Daily Cap Logic)
-        full_days = int(total_hours // 24)
-        remaining_hours = total_hours % 24
-
-        # Cost for full days (capped)
-        daily_cost = full_days * daily_cap
+        # --- NEW TIME-OF-DAY PRICING LOGIC ---
+        # 1. Calculate base cost for all hours
+        base_cost = total_hours * hourly_rate
         
-        # Cost for remaining hours (capped at the daily cap)
-        remaining_cost = min(remaining_hours * hourly_rate, daily_cap)
+        # 2. Calculate how many hours occurred at night (18:00 to 06:00)
+        night_hours = 0
+        current_check = start_time_utc
         
-        # Base cost before late fees
-        base_cost = daily_cost + remaining_cost
-        
-        # Late fee (after 6pm local time)
-        late_fee = 0
-        if local_now.hour >= 18:
-            late_fee = 10 * (local_now.hour - 18)
+        # We loop through the rental hour by hour to find night hours
+        # (Note: Namibian time is UTC+2, so 18:00 local is 16:00 UTC, 06:00 local is 04:00 UTC)
+        while current_check < end_time_utc:
+            # Convert current UTC hour to local Namibian hour
+            local_hour = (current_check.hour + 2) % 24
             
-        # Total cost
+            if local_hour >= 18 or local_hour < 6:
+                night_hours += 1
+                
+            current_check += timedelta(hours=1)
+            
+        # 3. Calculate penalty (N$10 for every night hour)
+        late_fee = night_hours * 10
         total_cost = base_cost + late_fee
 
 
@@ -11730,17 +11729,20 @@ def end_rental(rental_id):
     deposit_paid = float(rental["deposit_paid"] or 0)
 
     # Cumulative Preview Calculation
-    p_full_days = int(preview_hours // 24)
-    p_remaining_hours = preview_hours % 24
-    p_daily_cost = p_full_days * daily_cap
-    p_remaining_cost = min(p_remaining_hours * hourly_rate, daily_cap)
+    # Cumulative Preview Calculation
+    preview_raw = preview_hours * hourly_rate
     
-    preview_raw = preview_hours * hourly_rate # Keep this just for display
-    preview_capped = p_daily_cost + p_remaining_cost 
-
-    # preview_raw = preview_hours * hourly_rate
-    # preview_capped = min(preview_raw, daily_cap)
-    preview_late = 10 * (local_now.hour - 18) if local_now.hour >= 18 else 0
+    # Calculate preview night hours
+    preview_night_hours = 0
+    p_check = start_time_utc
+    while p_check < utc_now:
+        p_local_hour = (p_check.hour + 2) % 24
+        if p_local_hour >= 18 or p_local_hour < 6:
+            preview_night_hours += 1
+        p_check += timedelta(hours=1)
+        
+    preview_late = preview_night_hours * 10
+    preview_capped = preview_raw # We are no longer capping at a daily maximum
     preview_total = preview_capped + preview_late
     preview_change = round(deposit_paid - preview_total, 2)
 
