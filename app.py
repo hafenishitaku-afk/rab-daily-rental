@@ -1247,7 +1247,7 @@ def init_db():
         # POSTGRESQL SYNTAX (Production on Render)
         # =============================================
         
-        # Users table
+        # 1. Users
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS users(
                 id SERIAL PRIMARY KEY,
@@ -1261,7 +1261,22 @@ def init_db():
             );
         """)
         
-        # Customers table
+        # 2. Branches (MUST BE BEFORE BICYCLES)
+        execute_query(c, """
+            CREATE TABLE IF NOT EXISTS branches(
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                location TEXT,
+                address TEXT,
+                phone TEXT,
+                email TEXT,
+                manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 3. Customers
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS customers(
                 id SERIAL PRIMARY KEY,
@@ -1280,7 +1295,7 @@ def init_db():
             );
         """)
         
-        # Customer Documents
+        # 4. Customer Documents
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS customer_documents(
                 id SERIAL PRIMARY KEY,
@@ -1291,22 +1306,7 @@ def init_db():
             );
         """)
         
-        # Branches
-        execute_query(c, """
-            CREATE TABLE IF NOT EXISTS branches(
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                location TEXT,
-                address TEXT,
-                phone TEXT,
-                email TEXT,
-                manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        
-        # Bicycles
+        # 5. Bicycles
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycles(
                 id SERIAL PRIMARY KEY,
@@ -1314,8 +1314,8 @@ def init_db():
                 brand TEXT,
                 model TEXT,
                 bike_type TEXT DEFAULT 'Standard',
-                hourly_rate REAL DEFAULT 20,
-                daily_cap REAL DEFAULT 120,
+                hourly_rate REAL DEFAULT 60,
+                daily_cap REAL DEFAULT 480,
                 deposit_amount REAL DEFAULT 50,
                 status TEXT DEFAULT 'Available',
                 branch_id INTEGER REFERENCES branches(id),
@@ -1323,7 +1323,7 @@ def init_db():
             );
         """)
         
-        # Daily Rentals
+        # 6. Daily Rentals
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS daily_rentals(
                 id SERIAL PRIMARY KEY,
@@ -1352,19 +1352,19 @@ def init_db():
             );
         """)
         
-        # Daily Rates
+        # 7. Daily Rates
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS daily_rates(
                 id SERIAL PRIMARY KEY,
                 bike_type TEXT,
-                hourly_rate REAL DEFAULT 20,
-                daily_cap REAL DEFAULT 120,
+                hourly_rate REAL DEFAULT 60,
+                daily_cap REAL DEFAULT 480,
                 deposit REAL DEFAULT 50,
                 is_active INTEGER DEFAULT 1
             );
         """)
         
-        # Rental Payments
+        # 8. Rental Payments
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS rental_payments(
                 id SERIAL PRIMARY KEY,
@@ -1376,7 +1376,7 @@ def init_db():
             );
         """)
         
-        # Verification Requests
+        # 9. Verification Requests
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS verification_requests(
                 id SERIAL PRIMARY KEY,
@@ -1388,7 +1388,7 @@ def init_db():
             );
         """)
         
-        # Reminder Logs
+        # 10. Reminder Logs
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS reminder_logs(
                 id SERIAL PRIMARY KEY,
@@ -1399,7 +1399,7 @@ def init_db():
             );
         """)
         
-        # Discount Codes
+        # 11. Discount Codes
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS discount_codes(
                 id SERIAL PRIMARY KEY,
@@ -1417,7 +1417,7 @@ def init_db():
             );
         """)
         
-        # Discount Usage
+        # 12. Discount Usage
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS discount_usage(
                 id SERIAL PRIMARY KEY,
@@ -1429,7 +1429,7 @@ def init_db():
             );
         """)
         
-        # Loyalty Points
+        # 13. Loyalty Points
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS loyalty_points(
                 id SERIAL PRIMARY KEY,
@@ -1442,7 +1442,7 @@ def init_db():
             );
         """)
         
-        # Points Transactions
+        # 14. Points Transactions
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS points_transactions(
                 id SERIAL PRIMARY KEY,
@@ -1455,7 +1455,7 @@ def init_db():
             );
         """)
         
-        # Maintenance Records
+        # 15. Maintenance Records
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS maintenance_records(
                 id SERIAL PRIMARY KEY,
@@ -1472,7 +1472,7 @@ def init_db():
             );
         """)
         
-        # Bike Conditions
+        # 16. Bike Conditions
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS bike_conditions(
                 id SERIAL PRIMARY KEY,
@@ -1486,7 +1486,7 @@ def init_db():
             );
         """)
         
-        # Bicycle Health
+        # 17. Bicycle Health
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycle_health(
                 id SERIAL PRIMARY KEY,
@@ -1503,7 +1503,7 @@ def init_db():
             );
         """)
         
-        # Bicycle Health History
+        # 18. Bicycle Health History
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS bicycle_health_history(
                 id SERIAL PRIMARY KEY,
@@ -1515,7 +1515,7 @@ def init_db():
             );
         """)
         
-        # Announcements
+        # 19. Announcements
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcements(
                 id SERIAL PRIMARY KEY,
@@ -1533,7 +1533,7 @@ def init_db():
             );
         """)
         
-        # Announcement Comments
+        # 20. Announcement Comments
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcement_comments(
                 id SERIAL PRIMARY KEY,
@@ -1546,7 +1546,7 @@ def init_db():
             );
         """)
         
-        # Announcement Reads
+        # 21. Announcement Reads
         execute_query(c, """
             CREATE TABLE IF NOT EXISTS announcement_reads(
                 id SERIAL PRIMARY KEY,
@@ -1571,6 +1571,19 @@ def init_db():
             email TEXT,
             branch_id INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS branches(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            location TEXT,
+            address TEXT,
+            phone TEXT,
+            email TEXT,
+            manager_id INTEGER,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
         );
         
         CREATE TABLE IF NOT EXISTS customers(
@@ -1605,8 +1618,8 @@ def init_db():
             brand TEXT,
             model TEXT,
             bike_type TEXT DEFAULT 'Standard',
-            hourly_rate REAL DEFAULT 20,
-            daily_cap REAL DEFAULT 120,
+            hourly_rate REAL DEFAULT 60,
+            daily_cap REAL DEFAULT 480,
             deposit_amount REAL DEFAULT 50,
             status TEXT DEFAULT 'Available',
             branch_id INTEGER,
@@ -1647,8 +1660,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS daily_rates(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bike_type TEXT,
-            hourly_rate REAL DEFAULT 20,
-            daily_cap REAL DEFAULT 120,
+            hourly_rate REAL DEFAULT 60,
+            daily_cap REAL DEFAULT 480,
             deposit REAL DEFAULT 50,
             is_active INTEGER DEFAULT 1
         );
@@ -1762,19 +1775,6 @@ def init_db():
             FOREIGN KEY (rental_id) REFERENCES daily_rentals(id) ON DELETE CASCADE
         );
         
-        CREATE TABLE IF NOT EXISTS branches(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            location TEXT,
-            address TEXT,
-            phone TEXT,
-            email TEXT,
-            manager_id INTEGER,
-            is_active INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
-        );
-        
         CREATE TABLE IF NOT EXISTS bicycle_health(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bicycle_id INTEGER NOT NULL,
@@ -1842,27 +1842,10 @@ def init_db():
     # =============================================
     # ADD DEFAULT RATES (Works for both)
     # =============================================
-    
-    # Check if rates exist
     execute_query(c, "SELECT COUNT(*) as count FROM daily_rates")
     result = c.fetchone()
     count = result['count'] if isinstance(result, dict) else result[0]
     
-    # if count == 0:
-    #     if is_postgres:
-    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 20, 120, 50)")
-    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Electric', 30, 180, 75)")
-    #         execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Mountain', 25, 150, 60)")
-    #     else:
-    #         c.executescript("""
-    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-    #             VALUES ('Standard', 20, 120, 50);
-    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-    #             VALUES ('Electric', 30, 180, 75);
-    #             INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) 
-    #             VALUES ('Mountain', 25, 150, 60);
-    #         """)
-
     if count == 0:
         if is_postgres:
             execute_query(c, "INSERT INTO daily_rates (bike_type, hourly_rate, daily_cap, deposit) VALUES ('Standard', 60, 480, 50)")
@@ -1920,8 +1903,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-
-
+    print("✅ Database initialized successfully!")
  
 
 
