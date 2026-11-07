@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Welcome - RAB Daily Rentals</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .portal-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .portal-card {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        .portal-btn {
+            display: block;
+            width: 100%;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            text-decoration: none;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .btn-staff {
+            background-color: #ffe500;
+            color: #111;
+            border: none;
+        }
+        .btn-staff:hover { background-color: #ffd000; }
+        
+        .btn-customer {
+            background-color: #0d1f46;
+            color: #fff;
+        }
+        .btn-customer:hover { background-color: #1a305e; }
+    </style>
+</head>
+<body>
+    <div class="portal-container">
+        <div class="portal-card">
+
+
+            <img src="{{ url_for('static', filename='Mylogo.png') }}" 
+                 alt="RAB Rent A Bike" 
+                 style="height:180px; width:430px; margin-bottom:10px;"> 
+            <h1 style="color: #0d1f46; margin-bottom: 10px;">Hello👋! Welcome to RAB</h1>                
+            <p style="color: #667085; margin-bottom: 30px;">Please select how you want to proceed.</p>
+
+            <!-- 👇 ADD THIS TO SHOW ERRORS ON THE FRONT DOOR 👇 -->
+            {% with msgs = get_flashed_messages(with_categories=true) %}
+                {% for cat, msg in msgs %}
+                    <div class="flash {{ cat }}" style="margin-bottom:15px; padding:10px; border-radius:5px; background:#fdeceb; color:#dc3545;">{{ msg }}</div>
+                {% endfor %}
+            {% endwith %}
+            <!-- 👆 END OF FLASH MESSAGES 👆 -->
+            
+
+
+            <!-- STAFF LOGIN (Username Verification Form) -->
+            <form action="{{ url_for('staff_verify') }}" method="POST" style="margin-bottom: 15px; background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #ffe500;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <label style="display:block; text-align:left; font-weight:bold; margin-bottom:8px;">👔 Staff Access</label>
+                <input type="text" name="username" placeholder="Enter your staff username" required
+                       style="width:100%; padding:12px; border:1px solid #ddd; border-radius:6px; margin-bottom:10px;">
+                <button type="submit" class="portal-btn btn-staff" style="margin:0; padding:12px;">
+                    Continue to Staff Login &rarr;
+                </button>
+            </form>
+
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+            <!-- CUSTOMER LOGIN (Direct Link) -->
+            <a href="{{ url_for('customer_login') }}" class="portal-btn btn-customer">
+                👤 Customer Login
+            </a>
+        </div>
+    </div>
+</body>
+</html>

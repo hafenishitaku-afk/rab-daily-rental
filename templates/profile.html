@@ -68,31 +68,51 @@
 
 </div>
 
-<div class="card" style="background:#f8f9fa;">
-    <h2>🔐 Two-Factor Authentication</h2>
+<div class="card" style="background:#f8f9fa; border-left: 5px solid #ffd700;">
+    <h2 style="margin-top:0;">🔐 Two-Factor Authentication (2FA)</h2>
+    
     {% if user.twofa_enabled %}
-        <p style="color:#16834b;font-weight:bold;">✅ 2FA is enabled</p>
-        <p style="color:#667085;font-size:13px;">
-            Your account is protected. Login will require a 6-digit code from your authenticator app.
-        </p>
+        <p style="color:#16834b;font-weight:bold;">✅ 2FA is enabled. Your account is secure.</p>
+        <p style="color:#667085;font-size:13px;">You will be asked for a 6-digit code from your phone app when you log in.</p>
         {% if not user.twofa_required %}
         <form method="post" action="{{ url_for('twofa_disable') }}" style="margin-top:10px;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn small" style="background:#dc3545;color:#fff;"
-                    onclick="return confirm('Disable 2FA? Your account will be less secure.');">
-                Disable 2FA
-            </button>
+            <button class="btn small" style="background:#dc3545;color:#fff;">Disable 2FA</button>
         </form>
         {% endif %}
     {% else %}
         <p style="color:#a66300;font-weight:bold;">⚠️ 2FA is not enabled</p>
-        <p style="color:#667085;font-size:13px;">
-            Add a second layer of security to your account.
-            {% if user.twofa_required %}
-            <br><b>2FA is mandatory for your role.</b>
-            {% endif %}
-        </p>
-        <a href="{{ url_for('twofa_setup') }}" class="btn small yellow" style="margin-top:10px;">🔐 Enable 2FA</a>
+        
+        <!-- 👇 NEW EXPLANATION ADDED HERE 👇 -->
+        <div style="color:#333; font-size:14px; line-height:1.6; margin-bottom:15px;">
+            <p><strong>What is it?</strong> It is a second lock on your account. Even if someone steals your password, they still can't log in without the code from your phone.</p>
+            
+            <p><strong>How do I set it up?</strong> It takes 2 minutes:</p>
+            <ol style="margin-left:20px; margin-bottom:10px; line-height: 1.8;">
+                <li>Click the <strong>"Enable 2FA"</strong> button below.</li>
+                <li>You will see a square barcode (QR code) on the next screen.</li>
+                <li>Download a free app on your phone like <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Authy</strong> from your App Store.</li>
+                <li>Open the app and tap the <strong>"+"</strong> button to scan the barcode.</li>
+                <li>Type the 6-digit number the app shows you into the website.</li>
+            </ol>
+            
+            <div style="background: #fff8e1; border-left: 4px solid #ffd700; padding: 10px; margin-top: 15px; font-size: 13px; color: #333;">
+                <strong>Can't scan the barcode?</strong><br>
+            <p style="color:#667085; font-size:12px; margin-top:15px;">
+                ⏱️ <strong>Note:</strong> The 6-digit code in your app changes every 30 seconds. This is normal and keeps your account secure! If a code is rejected during setup, simply wait for the app to generate the next one and try again.
+            </p>                
+                If your camera isn't working (or you are using your phone to view the website), look for the text link on the next screen that says <strong>"Can't scan? Enter this code manually"</strong>.
+                <br><br>
+                Click it, and a long text code will appear. Simply copy that code and paste it into your Authenticator app (choose "Enter a setup key" instead of "Scan barcode"). The app will generate your 6-digit codes perfectly!
+            </div>
+            
+            <p style="color:#667085; font-size:12px;">We will also give you 8 backup codes to print and keep safe, just in case you lose your phone.</p>
+        </div>
+        <!-- 👆 END OF NEW EXPLANATION 👆 -->
+
+        <a href="{{ url_for('twofa_setup') }}" class="btn small yellow" style="display:inline-block; text-decoration:none; color:#111; font-weight:bold; padding:10px 20px; border-radius:5px;">
+            🔐 Enable 2FA
+        </a>
     {% endif %}
 </div>
 

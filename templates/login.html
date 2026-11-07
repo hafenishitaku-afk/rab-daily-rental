@@ -16,14 +16,14 @@
             <p style="color:#667085;margin-bottom:25px;font-size:14px;letter-spacing:2px;">DAILY RENTAL</p>
             
             <!-- ✅ Staff / Customer Login Selector -->
-            <div style="display:flex;gap:10px;margin-bottom:20px;">
+            <!-- <div style="display:flex;gap:10px;margin-bottom:20px;">
                 <div style="flex:1;text-align:center;padding:10px;background:#ffe500;border-radius:8px;color:#111;font-weight:bold;">
                     👔 Staff Login
                 </div>
                 <a href="{{ url_for('customer_login') }}" style="flex:1;text-align:center;padding:10px;background:#f8f9fa;border-radius:8px;color:#667085;text-decoration:none;">
                     👤 Customer Login
                 </a>
-            </div>
+            </div> -->
             
             <form method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -45,6 +45,12 @@
                 By logging in you agree to our
                 <a href="{{ url_for('privacy_policy') }}" style="color:#0d1f46;">Privacy Policy</a>.
             </p>
+
+            <div style="margin-top: 15px;">
+                <a href="{{ url_for('home') }}" style="color: #667085; text-decoration: none; font-size: 14px;">
+                    🔙 Back to Portal
+                </a>
+            </div>
 
 
             {% with msgs = get_flashed_messages(with_categories=true) %}

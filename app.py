@@ -236,7 +236,7 @@ def _enforce_idle_timeout():
 
         session.clear()
         flash("You have been logged out due to inactivity. Please log in again.", "warning")
-        return redirect(url_for("login"))
+        return redirect(url_for("home"))
 
     # Update last_activity on every active request
     session["last_activity"] = now
@@ -1089,6 +1089,7 @@ def get_count(cursor, query, params=None):
 
 
 
+
 # =============================================
 # NOTIFICATION CONFIGURATION
 # =============================================
@@ -1225,7 +1226,7 @@ def login_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             flash("Please login to access this page.", "warning")
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
         return f(*args, **kwargs)
     return wrapper
 
@@ -2423,15 +2424,62 @@ def ensure_lockout_schema():
     conn.commit()
     conn.close()
 
+# @app.route("/")
+# def home():
+#     return redirect(url_for("dashboard") if session.get("user_id") else url_for("home"))
+
 @app.route("/")
 def home():
-    return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
+    if session.get("user_id"):
+        # If already logged in, send to correct dashboard
+        if session.get("role") == "customer":
+            return redirect(url_for("customer_portal"))
+        return redirect(url_for("dashboard"))
+    
+    # If not logged in, show the portal choice page
+    return render_template("portal.html")
+
+
+
+@app.route("/staff-verify", methods=["POST"])
+def staff_verify():
+    """Step 1: Check if the entered username belongs to staff."""
+    username = request.form.get("username", "").strip()
+
+    if not username:
+        flash("Please enter your staff username.", "warning")
+        return redirect(url_for("home"))
+
+    conn = db()
+    c = conn.cursor()
+    # Check if the user exists AND is not a customer
+    user = execute_query(c, "SELECT role FROM users WHERE username = ?", (username,)).fetchone()
+    conn.close()
+
+    if user and user["role"] in ("admin", "manager", "staff"):
+        # Username is valid staff! Set a session flag to allow them into the real login page
+        session["staff_verified"] = True
+        return redirect(url_for("login", portal="staff"))
+    else:
+        # If wrong username or a customer, kick them back to the start
+        session.pop("staff_verified", None)
+        flash("Access denied. That is not a registered staff username.", "danger")
+        return redirect(url_for("home"))
+
+
 
 
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("50 per minute;200 per hour")
 def login():
+    # 🛑 SECURITY GUARD: Block anyone who didn't pass the username check
+    if not session.get("staff_verified"):
+        return redirect(url_for("home"))
+
     if request.method == "POST":
+        # ... (keep all your existing login code here) ...
+
+
         conn = db()
         c = conn.cursor()
         username = request.form.get("username", "").strip()
@@ -2464,6 +2512,7 @@ def login():
 
         # ✅ Successful login path
         if user and check_password_hash(user["password_hash"], password):
+            session.pop("staff_verified", None) # Clean up the verification flag
             from datetime import datetime, timezone
             session["last_activity"] = datetime.now(timezone.utc).timestamp()
 
@@ -2517,7 +2566,7 @@ def login():
                 if customer:
                     session["customer_id"] = customer["id"]
 
-                flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
+                flash(f"Hello 👋 once again! Welcome back 🤝, {user['full_name'] or user['username']}❗", "success")
                 return redirect(url_for("customer_portal"))
 
             # Staff / manager / admin
@@ -2527,7 +2576,7 @@ def login():
             session["full_name"] = user["full_name"]
             session["station_id"] = user.get("branch_id")
 
-            flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
+            flash(f"Hello 👋 once again! Welcome back 🤝, {user['full_name'] or user['username']}❗", "success")
             return redirect(url_for("dashboard"))
 
         # ✅ Failed login path — runs ONCE
@@ -2656,7 +2705,7 @@ def customer_login():
             if customer:
                 session["customer_id"] = customer["id"]
 
-            flash(f"Welcome back, {user['full_name'] or user['username']}!", "success")
+            flash(f"Hello 👋 once again! Welcome back 🤝, {user['full_name'] or user['username']}❗", "success")
             return redirect(url_for("customer_portal"))
 
         # ✅ Failed login — runs ONCE
@@ -3121,7 +3170,7 @@ def role_required(allowed_roles):
         def wrapper(*args, **kwargs):
             if not session.get("user_id"):
                 flash("Please login to access this page.", "warning")
-                return redirect(url_for("login"))
+                return redirect(url_for("home"))
             
             conn = db()
             c = conn.cursor()
@@ -3170,7 +3219,7 @@ def staff_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             flash("Please login to access this page.", "warning")
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
         
         if session.get("role") == "customer":
             flash("Access denied. Staff only.", "danger")
@@ -3187,7 +3236,7 @@ def customer_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             flash("Please login to access this page.", "warning")
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
         
         if session.get("role") != "customer":
             flash("Access denied. Customers only.", "danger")
@@ -11502,7 +11551,7 @@ def customer_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             flash("Please login to access this page.", "warning")
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
         
         if session.get("role") != "customer":
             flash("Access denied. Customers only.", "danger")
@@ -11520,7 +11569,7 @@ def staff_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             flash("Please login to access this page.", "warning")
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
         
         if session.get("role") == "customer":
             flash("Access denied. Staff only.", "danger")
@@ -11889,10 +11938,7 @@ def cancel_rental(rental_id):
     )
     return redirect(request.referrer or url_for("dashboard"))
 
-# @app.route("/logout")
-# def logout():
-#     session.clear()
-#     return redirect(url_for("login"))
+
 
 @app.route("/logout")
 def logout():
@@ -11912,7 +11958,7 @@ def logout():
         )
     session.clear()
     flash("You have been logged out.", "success")
-    return redirect(url_for("login"))
+    return redirect(url_for("home"))
 
 
 
