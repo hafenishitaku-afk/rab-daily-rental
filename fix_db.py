@@ -102,6 +102,26 @@ def fix_db():
         print(f"❌ Failed to create awards: {e}")
         conn.rollback()
 
+
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                user_name TEXT NOT NULL,
+                user_role TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                content TEXT,
+                file_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        print("✅ Checked suggestions table")
+    except Exception as e:
+        print(f"❌ Failed to create suggestions: {e}")
+        conn.rollback()
+
     conn.commit()
     cursor.close()
     conn.close()

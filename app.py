@@ -2157,6 +2157,25 @@ def ensure_schema_columns():
             # If it already exists, ignore. Otherwise print for debugging.
             print(f"ensure_schema_columns: {table}.{column} → {e}")
 
+
+    # ✅ Manually create missing tables for PostgreSQL
+    try:
+        if is_postgres:
+            execute_query(c, """
+                CREATE TABLE IF NOT EXISTS suggestions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    user_name TEXT NOT NULL,
+                    user_role TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    content TEXT,
+                    file_path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+    except Exception as e:
+        print(f"⚠️ Could not create suggestions table: {e}")
+
     conn.commit()
     conn.close()
 
@@ -4203,7 +4222,12 @@ def award_certificate_pdf(award_id):
     # =============================================
     # 7. FOOTER: SIGNATURES & BOTTOM BADGES
     # =============================================
-    issued_date = award['issued_at'][:10]
+
+    if isinstance(award['issued_at'], str):
+        issued_date = award['issued_at'][:10]
+    else:
+        issued_date = award['issued_at'].strftime('%Y-%m-%d')
+
     bottom_y = 35*mm
 
     # --- Left Side: Signature ---
