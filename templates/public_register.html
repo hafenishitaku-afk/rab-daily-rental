@@ -7,7 +7,8 @@
     <p class="sub">Fill in your details below to apply for a rental account.</p>
 
     <div class="card">
-        <form method="post" enctype="multipart/form-data" id="regForm">
+        <!-- ✅ ADDED action="{{ url_for('public_register') }}" -->
+        <form method="post" enctype="multipart/form-data" action="{{ url_for('public_register') }}" id="regForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             
             <div class="formgrid">
@@ -41,7 +42,6 @@
                     <input type="text" name="address">
                 </label>
                 
-                <!-- ✅ NEW GENDER FIELD -->
                 <label>
                     Gender
                     <select name="gender">
@@ -90,24 +90,26 @@
                 <input type="hidden" name="signature_data" id="signatureData">
             </div>
             
-            <button class="btn yellow" style="margin-top:20px; width:100%; font-size:16px;" type="submit" onclick="this.innerHTML='⏳ Submitting...'; this.style.opacity='0.7'; this.disabled=true;">
+            <!-- ✅ FIXED SUBMIT BUTTON -->
+            <button type="submit" id="submitBtn" class="btn yellow" style="margin-top:20px; width:100%; font-size:16px;">
                 Submit Registration
             </button> 
 
-    </form>
-</div>
+        </form>
+    </div>
 
-<!-- ✅ POLISHED WARNING & BACK BUTTON -->
-<div style="background: #fff8e1; border: 1px solid #ffd700; border-radius: 8px; padding: 15px; margin-top: 20px; text-align: center;">
-    <p style="color: #a66300; margin: 0; font-size: 14px; font-weight: bold;">
-        ⚠️ NB: If you click '🔙 Back', your entered details will NOT be saved. You will have to restart. Click 'Submit Registration' when you are done.
-    </p>
-</div>
+    <!-- ✅ POLISHED WARNING & BACK BUTTON -->
+    <div style="background: #fff8e1; border: 1px solid #ffd700; border-radius: 8px; padding: 15px; margin-top: 20px; text-align: center;">
+        <p style="color: #a66300; margin: 0; font-size: 14px; font-weight: bold;">
+            ⚠️ NB: If you click '🔙 Back', your entered details will NOT be saved. You will have to restart. Click 'Submit Registration' when you are done.
+        </p>
+    </div>
 
-<div style="margin-top: 20px; text-align: center;">
-    <a href="{{ url_for('register_landing') }}" class="btn" style="display: inline-block; padding: 12px 30px; background: #667085; color: #fff; text-decoration: none; font-weight: bold; border-radius: 8px; box-sizing: border-box;">
-        🔙 Back
-    </a>
+    <div style="margin-top: 20px; text-align: center;">
+        <a href="{{ url_for('register_landing') }}" class="btn" style="display: inline-block; padding: 12px 30px; background: #667085; color: #fff; text-decoration: none; font-weight: bold; border-radius: 8px; box-sizing: border-box;">
+            🔙 Back
+        </a>
+    </div>
 </div>
 
 <script>
@@ -116,7 +118,6 @@ var canvas = document.getElementById('signatureCanvas');
 var ctx = canvas.getContext('2d');
 var drawing = false;
 
-// Set canvas size
 canvas.width = canvas.offsetWidth;
 canvas.height = 150;
 
@@ -125,7 +126,6 @@ ctx.lineWidth = 2;
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
 
-// Mouse events
 canvas.addEventListener('mousedown', function(e) {
     drawing = true;
     var rect = canvas.getBoundingClientRect();
@@ -146,7 +146,6 @@ canvas.addEventListener('mouseup', function() {
     document.getElementById('signatureData').value = canvas.toDataURL();
 });
 
-// Touch events for mobile
 canvas.addEventListener('touchstart', function(e) {
     e.preventDefault();
     drawing = true;
@@ -176,6 +175,14 @@ function clearSignature() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     document.getElementById('signatureData').value = '';
 }
+
+// ✅ SAFELY DISABLE BUTTON ON SUBMIT
+document.getElementById('regForm').addEventListener('submit', function() {
+    var btn = document.getElementById('submitBtn');
+    btn.innerHTML = '⏳ Submitting...';
+    btn.style.opacity = '0.7';
+    btn.disabled = true;
+});
 </script>
 
 {% endblock %}
