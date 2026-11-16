@@ -5278,6 +5278,7 @@ def approve_registration(reg_id):
     reg = execute_query(c, "SELECT * FROM pending_registrations WHERE id = ?", (reg_id,)).fetchone()
     
     if not reg:
+        conn.close()
         flash("Registration not found.", "danger")
         return redirect(url_for("pending_registrations"))
 
@@ -5295,34 +5296,20 @@ def approve_registration(reg_id):
     if existing_user:
         username = f"cust_{reg['phone']}"
     
-    execute_query(c, """
+    # ✅ Use insert_and_get_id to get the user ID (works on both SQLite and Postgres)
+    user_id = insert_and_get_id(c, """
         INSERT INTO users (username, password_hash, role, full_name, email)
         VALUES (?, ?, 'customer', ?, ?)
     """, (username, generate_password_hash(temp_password), reg["full_name"], reg["email"]))
 
-    # ✅ Save the generated credentials to pending_registrations
-    execute_query(c, """
-        UPDATE pending_registrations 
-        SET status = 'Approved', 
-            generated_username = ?, 
-            generated_password = ?,
-            reviewed_by = ?,
-            reviewed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    """, (username, temp_password, session["user_id"], reg_id))
-
-
-    user_id = c.lastrowid # SQLite. (For Postgres, use RETURNING id logic)
-
     # 2. Create the Customer record
-    execute_query(c, """
+    # ✅ Use insert_and_get_id to get the customer ID
+    customer_id = insert_and_get_id(c, """
         INSERT INTO customers (
             full_name, id_number, phone, email, address, user_id, 
-            terms_accepted, signature_data, verification_status, gender
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Verified', ?)
-    """, (reg["full_name"], reg["id_number"], reg["phone"], reg["email"], reg["address"], user_id, reg["terms_accepted"], reg["signature_data"], reg["gender"]))
-   
-    customer_id = c.lastrowid
+            terms_accepted, signature_data, verification_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Verified')
+    """, (reg["full_name"], reg["id_number"], reg["phone"], reg["email"], reg["address"], user_id, reg["terms_accepted"], reg["signature_data"]))
 
     # 3. Move the uploaded documents to the customer's official folder
     if reg["id_photo_path"]:
@@ -5347,8 +5334,16 @@ def approve_registration(reg_id):
             reviewed_at = CURRENT_TIMESTAMP
         WHERE id = ?
     """, (username, temp_password, session["user_id"], reg_id))
+    
     conn.commit()
     conn.close()
+
+    log_audit(
+        action="registration_approve",
+        entity_type="customer",
+        entity_id=customer_id,
+        details=f"Approved registration for {reg['full_name']} (Username: {username})"
+    )
 
     flash(f"Customer '{reg['full_name']}' approved! Username: {username} | Password: {temp_password}", "success")
     flash("Please give these credentials to the customer so they can log in and change their password.", "info")
