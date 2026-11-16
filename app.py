@@ -5130,17 +5130,24 @@ def public_register():
         UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-        id_path = None
+        # ✅ Check file size before saving
+        MAX_FILE_SIZE = 5 * 1024 * 1024 # 5 MB
+        
         if id_photo and id_photo.filename:
-            filename = f"pending_id_{secure_filename(id_photo.filename)}"
-            id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            id_path = f"uploads/{filename}"
+            id_photo.seek(0, os.SEEK_END)
+            file_size = id_photo.tell()
+            id_photo.seek(0)
+            if file_size > MAX_FILE_SIZE:
+                flash("Your ID photo is too large. Please upload a file smaller than 5MB.", "danger")
+                return redirect(url_for("public_register"))
 
-        photo_path = None
         if customer_photo and customer_photo.filename:
-            filename = f"pending_photo_{secure_filename(customer_photo.filename)}"
-            customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
-            photo_path = f"uploads/{filename}"
+            customer_photo.seek(0, os.SEEK_END)
+            file_size = customer_photo.tell()
+            customer_photo.seek(0)
+            if file_size > MAX_FILE_SIZE:
+                flash("Your customer photo is too large. Please upload a file smaller than 5MB.", "danger")
+                return redirect(url_for("public_register"))
 
         # Insert into pending table
         execute_query(c, """
