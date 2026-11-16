@@ -179,6 +179,7 @@ if not _secret_key:
         )
 app.secret_key = _secret_key
 
+app.jinja_env.filters['local_time'] = to_namibia_time
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -479,7 +480,29 @@ def validate_password_strength(password):
 
     return True, None
 
+def validate_namibian_identity(phone, id_number):
+    """
+    Validates Phone (10 digits), ID (11 digits), or Passport (8 alphanumeric).
+    Returns (is_valid, error_message)
+    """
+    import re
+    
+    # Check Phone
+    if phone:
+        if not re.fullmatch(r"\d{10}", phone):
+            return False, "Phone number must be exactly 10 digits (e.g., 0811234567)."
+    
+    # Check ID / Passport
+    if id_number:
+        # Check if it's an 11-digit ID
+        is_id = re.fullmatch(r"\d{11}", id_number)
+        # Check if it's an 8-character Passport (Letters and numbers)
+        is_passport = re.fullmatch(r"[A-Za-z0-9]{8}", id_number)
+        
+        if not (is_id or is_passport):
+            return False, "ID number must be 11 digits, or Passport must be 8 characters (letters/numbers)."
 
+    return True, None
 
 
 ALLOWED_MIME_TYPES = {
@@ -525,7 +548,10 @@ def _role_idle_seconds(role):
     return minutes * 60
 
 
-PRIVACY_EMAIL = "privacy@rab.com"
+PRIVACY_EMAIL = "rabprivacy@gmail.com"
+
+
+
 
 
 def db():
@@ -1838,6 +1864,64 @@ def init_db():
             UNIQUE(announcement_id, user_id)
         );
         """)
+
+
+        # ✅ WARNINGS TABLE
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS warnings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,                -- ✅ Removed NOT NULL
+                customer_id INTEGER,            -- ✅ Added for customer warnings
+                issued_by_id INTEGER NOT NULL,
+                level TEXT NOT NULL,            -- ✅ Added for Minor, Serious, etc.
+                reason TEXT NOT NULL,
+                status TEXT DEFAULT 'Unsigned',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                signed_at TEXT
+            )
+        """)
+
+        # ✅ PENDING REGISTRATIONS TABLE
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS pending_registrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                full_name TEXT NOT NULL,
+                id_number TEXT,
+                phone TEXT NOT NULL,
+                email TEXT,
+                address TEXT,
+                gender TEXT,
+                id_photo_path TEXT,
+                customer_photo_path TEXT,
+                signature_data TEXT,
+                terms_accepted INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'Pending', 
+                rejection_reason TEXT,          -- ✅ Added
+                reviewed_by INTEGER,            -- ✅ Added
+                reviewed_at TEXT,               -- ✅ Added
+                generated_username TEXT,        -- ✅ Added
+                generated_password TEXT,        -- ✅ Added
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ✅ AWARDS TABLE
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS awards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                customer_id INTEGER,
+                award_title TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                issued_by_id INTEGER NOT NULL,
+                issued_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+
+
+
+
     
     # =============================================
     # ADD DEFAULT RATES (Works for both)
@@ -2025,6 +2109,20 @@ def ensure_schema_columns():
         ("daily_rentals", "end_station_id",       "INTEGER", "INTEGER"),
         # bicycles — current location
         ("bicycles",      "current_station_id",   "INTEGER", "INTEGER"),
+                # daily_rentals — expected return station
+        ("daily_rentals", "expected_end_station_id", "INTEGER", "INTEGER"),
+                # customers — gender
+        ("customers", "gender", "TEXT", "TEXT"),
+        ("customers", "banned_until", "TEXT", "TEXT"),
+
+        ("warnings", "customer_id", "INTEGER", "INTEGER"),
+        ("warnings", "level", "TEXT", "TEXT"),
+        ("pending_registrations", "rejection_reason", "TEXT", "TEXT"),
+        ("pending_registrations", "reviewed_by", "INTEGER", "INTEGER"),
+        ("pending_registrations", "reviewed_at", "TEXT", "TEXT"),
+        ("pending_registrations", "generated_username", "TEXT", "TEXT"),
+        ("pending_registrations", "generated_password", "TEXT", "TEXT"),
+
     ]
 
     for table, column, sqlite_type, pg_type in columns:
@@ -2368,6 +2466,22 @@ def ensure_audit_schema():
         ON audit_log(created_at DESC);
         """)
 
+
+
+    # ✅ SUGGESTIONS TABLE
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            user_name TEXT NOT NULL,
+            user_role TEXT NOT NULL,
+            content_type TEXT NOT NULL, -- 'text' or 'audio'
+            content TEXT,
+            file_path TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -2406,9 +2520,6 @@ def ensure_lockout_schema():
     conn.commit()
     conn.close()
 
-# @app.route("/")
-# def home():
-#     return redirect(url_for("dashboard") if session.get("user_id") else url_for("home"))
 
 @app.route("/")
 def home():
@@ -2439,9 +2550,10 @@ def staff_verify():
     conn.close()
 
     if user and user["role"] in ("admin", "manager", "staff"):
-        # Username is valid staff! Set a session flag to allow them into the real login page
         session["staff_verified"] = True
+        session["verified_staff_username"] = username  # <-- SAVE THIS
         return redirect(url_for("login", portal="staff"))
+
     else:
         # If wrong username or a customer, kick them back to the start
         session.pop("staff_verified", None)
@@ -2451,26 +2563,32 @@ def staff_verify():
 
 
 
+
+
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("50 per minute;200 per hour")
 def login():
-    # 🛑 SECURITY GUARD: Block anyone who didn't pass the username check
     if not session.get("staff_verified"):
         return redirect(url_for("home"))
 
     if request.method == "POST":
-        # ... (keep all your existing login code here) ...
-
-
         conn = db()
         c = conn.cursor()
-        username = request.form.get("username", "").strip()
+        
+        # GET BOTH USERNAMES
+        verified_username = session.get("verified_staff_username")
+        login_username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
-        user = execute_query(c,
-            "SELECT * FROM users WHERE username = ?",
-            (username,)
-        ).fetchone()
+        # ✅ CHECK 1: Did they type the same username they verified?
+        if verified_username and login_username != verified_username:
+            flash("Security Error: You must log in with the username you verified.", "danger")
+            return redirect(url_for("home"))
+
+        user = execute_query(c, "SELECT * FROM users WHERE username = ?", (login_username,)).fetchone()
+        
+        # ... (keep the rest of your lockout and password check logic) ...
+
 
         # ✅ Check lockout status BEFORE verifying password
         if user:
@@ -2478,7 +2596,7 @@ def login():
             if lockout["locked"]:
                 log_login_attempt(
                     user_id=user["id"],
-                    username_attempted=username,
+                    username_attempted=login_username,
                     success=False,
                     ip_address=request.remote_addr,
                     user_agent=request.headers.get("User-Agent"),
@@ -2500,7 +2618,7 @@ def login():
 
             log_login_attempt(
                 user_id=user["id"],
-                username_attempted=username,
+                username_attempted=login_username,
                 success=True,
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get("User-Agent"),
@@ -2509,7 +2627,7 @@ def login():
                 action="login_success",
                 entity_type="user",
                 entity_id=user["id"],
-                details=f"User {username} logged in",
+                details=f"User {user['username']} logged in", # <--- FIXED
                 user_id=user["id"],
                 username=user["username"],
                 user_role=user["role"],
@@ -2564,7 +2682,7 @@ def login():
         # ✅ Failed login path — runs ONCE
         log_login_attempt(
             user_id=user["id"] if user else None,
-            username_attempted=username,
+            username_attempted=login_username,
             success=False,
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
@@ -2963,7 +3081,7 @@ def _build_customer_data_pdf(customer, documents, rentals, payments,
                    "A machine-readable JSON version accompanies this PDF in the export.")
     y -= 4 * mm
     pdf.drawString(x, y, 
-                   "For questions, contact privacy@rab.com")
+                   "For questions, contact rabprivacy@gmail.com")
 
     pdf.save()
     buf.seek(0)
@@ -3145,6 +3263,36 @@ def maybe_rehash_password(cursor, user_id, stored_hash, plain_password):
     return False
 
 
+
+def check_serious_warnings(c, user_id):
+    """Returns True if a user has 2 or more Serious warnings in the last 30 days."""
+    from datetime import datetime, timedelta
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    count = get_single_value(c, """
+        SELECT COUNT(*) FROM warnings 
+        WHERE user_id = ? 
+        AND level IN ('Serious', 'Final')
+        AND date(created_at) >= ?
+    """, (user_id, thirty_days_ago))
+    
+    return count >= 2
+
+def check_customer_ban(c, customer_id):
+    """Returns True if a customer has 2 serious warnings in the last 30 days (ban them)."""
+    from datetime import datetime, timedelta
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    count = get_single_value(c, """
+        SELECT COUNT(*) FROM warnings 
+        WHERE customer_id = ? 
+        AND level IN ('Serious', 'Final')
+        AND date(created_at) >= ?
+    """, (customer_id, thirty_days_ago))
+    
+    return count >= 2
+
+
 def role_required(allowed_roles):
     """Decorator to check if user has required role."""
     def decorator(f):
@@ -3228,7 +3376,36 @@ def customer_required(f):
     return wrapper
 
 
-
+@app.after_request
+def log_downloads(response):
+    """Automatically log any request that is a file download (CSV, PDF, ZIP, images)."""
+    
+    # Only track successful requests
+    if response.status_code == 200:
+        
+        # Check the Content-Disposition header (which is set when files are downloaded)
+        content_disposition = response.headers.get("Content-Disposition", "")
+        
+        # Check if it's a file being served (not just a normal page)
+        if "attachment" in content_disposition or request.path.startswith("/receipt/") or request.path.startswith("/rentals/") and "/agreement.pdf" in request.path:
+            
+            # Extract the filename from the header
+            filename = "Unknown File"
+            if "filename=" in content_disposition:
+                filename = content_disposition.split("filename=")[1].strip('"').strip("'")
+            
+            # Log it safely (using app context to prevent crashes)
+            try:
+                with app.app_context():
+                    log_audit(
+                        action="data_export",
+                        entity_type="system",
+                        details=f"Downloaded File: {filename} (Path: {request.path})"
+                    )
+            except Exception as e:
+                print(f"⚠️ Could not log export: {e}")
+                
+    return response
 
 @app.route("/users")
 @login_required
@@ -3285,6 +3462,62 @@ def users():
 # =============================================
 # WORKERS (HR)
 # =============================================
+
+
+@app.route("/suggestions", methods=["GET", "POST"])
+@login_required
+def suggestions():
+    """Staff/Customer suggestion box."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        content = request.form.get("content", "").strip()
+        audio_data = request.files.get("audio_data")
+        
+        content_type = "text"
+        file_path = None
+
+        # Handle Audio Upload (if provided)
+        if audio_data and audio_data.filename:
+            import uuid
+            filename = f"voice_suggestion_{uuid.uuid4().hex}.webm"
+            # Ensure the folder exists
+            audio_folder = os.path.join(BASE, 'static', 'audio')
+            os.makedirs(audio_folder, exist_ok=True)
+            
+            filepath = os.path.join(audio_folder, filename)
+            audio_data.save(filepath)
+            file_path = f"audio/{filename}"
+            content_type = "audio"
+
+        if not content and not file_path:
+            flash("Please type a suggestion or record a voice note.", "danger")
+            return redirect(url_for("suggestions"))
+
+        execute_query(c, """
+            INSERT INTO suggestions (user_id, user_name, user_role, content_type, content, file_path)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (session["user_id"], session.get("full_name", session["username"]), session.get("role"), content_type, content, file_path))
+        
+        conn.commit()
+        flash("Thank you! Your suggestion has been submitted anonymously to the management.", "success")
+        return redirect(url_for("dashboard"))
+
+    # GET logic: Only Admin and Manager can see all suggestions.
+    suggestions_list = []
+    if session.get("role") in ("admin", "manager"):
+        suggestions_list = execute_query(c, """
+            SELECT * FROM suggestions ORDER BY created_at DESC
+        """).fetchall()
+
+    conn.close()
+    return render_template(
+        "suggestions.html",
+        title="Suggestion Box",
+        suggestions=suggestions_list
+    )
+
 
 @app.route("/workers")
 @login_required
@@ -3593,8 +3826,680 @@ def worker_edit(worker_id):
 
 
 
+@app.route("/awards", methods=["GET", "POST"])
+@login_required
+@admin_required
+def awards():
+    """Admin page to issue awards."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        target_type = request.form.get("target_type")
+        target_id = request.form.get("target_id")
+        title = request.form.get("award_title", "").strip()
+        reason = request.form.get("reason", "").strip()
+
+        if not target_id or not title or not reason:
+            flash("All fields are required.", "danger")
+        else:
+            user_id = target_id if target_type == 'staff' else None
+            customer_id = target_id if target_type == 'customer' else None
+
+            # ✅ Verify the person actually exists before giving them an award
+            if target_type == 'staff':
+                person = execute_query(c, "SELECT full_name FROM users WHERE id = ?", (target_id,)).fetchone()
+            else:
+                person = execute_query(c, "SELECT full_name FROM customers WHERE id = ?", (target_id,)).fetchone()
+                
+            if not person:
+                flash("Error: The selected person does not exist in the database.", "danger")
+            else:
+                execute_query(c, """
+                    INSERT INTO awards (user_id, customer_id, award_title, reason, issued_by_id)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (user_id, customer_id, title, reason, session["user_id"]))
+                
+                conn.commit()
+                flash(f"Award '{title}' issued successfully!", "success")
+                return redirect(url_for("awards"))
+
+    # Get lists for dropdown
+    users = execute_query(c, "SELECT id, full_name, username, role FROM users WHERE role != 'admin' ORDER BY full_name").fetchall()
+    customers = execute_query(c, "SELECT id, full_name FROM customers WHERE verification_status = 'Verified' ORDER BY full_name").fetchall()
+
+    # Get all issued awards
+    awards_list = execute_query(c, """
+        SELECT a.*, 
+               COALESCE(u.full_name, cu.full_name, 'Deleted User') as recipient_name,
+               COALESCE(u.role, 'Customer') as recipient_role,
+               COALESCE(issuer.username, 'System') as issuer_name
+        FROM awards a
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN customers cu ON cu.id = a.customer_id
+        LEFT JOIN users issuer ON issuer.id = a.issued_by_id
+        ORDER BY a.issued_at DESC
+    """).fetchall()
+
+    conn.close()
+    return render_template("awards_admin.html", title="Award System", users=users, customers=customers, awards=awards_list)
 
 
+@app.route("/awards/my")
+@login_required
+def my_awards():
+    """View awards received by the logged-in user/customer."""
+    conn = db()
+    c = conn.cursor()
+
+    customer_id = None
+    if session.get("role") == "customer":
+        customer = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (session["user_id"],)).fetchone()
+        if customer:
+            customer_id = customer["id"]
+
+    if customer_id:
+        my_list = execute_query(c, "SELECT * FROM awards WHERE customer_id = ? ORDER BY issued_at DESC", (customer_id,)).fetchall()
+    else:
+        my_list = execute_query(c, "SELECT * FROM awards WHERE user_id = ? ORDER BY issued_at DESC", (session["user_id"],)).fetchall()
+
+    conn.close()
+    return render_template("awards_user.html", title="My Awards", awards=my_list)
+
+@app.route("/awards/<int:award_id>/certificate.pdf")
+@login_required
+def award_certificate_pdf(award_id):
+    """Generate a premium, highly decorated PDF certificate."""
+    from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.utils import ImageReader
+    from io import BytesIO
+    import os
+
+    conn = db()
+    c = conn.cursor()
+
+    award = execute_query(c, """
+        SELECT a.*, 
+               COALESCE(u.full_name, cu.full_name) as recipient_name,
+               COALESCE(u.role, 'Customer') as recipient_role
+        FROM awards a
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN customers cu ON cu.id = a.customer_id
+        WHERE a.id = ?
+    """, (award_id,)).fetchone()
+    conn.close()
+
+    if not award:
+        flash("Award not found.", "danger")
+        return redirect(url_for("dashboard"))
+
+    recipient_name = award.get('recipient_name') or "Valued Member"
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=landscape(A4))
+    width, height = landscape(A4)
+    
+    # =============================================
+    # 1. COLOR PALETTE
+    # =============================================
+    bg_color = colors.HexColor("#FDFBF7")    # Premium Cream
+    navy = colors.HexColor("#0A1B3F")        # Deep Navy Blue
+    gold = colors.HexColor("#D4AF37")        # Classic Gold
+    maroon = colors.HexColor("#7A1115")      # Deep Red
+    text_dark = colors.HexColor("#1A1A1A")
+    text_muted = colors.HexColor("#555555")
+    
+    # Background
+    pdf.setFillColor(bg_color)
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # Double Border (Navy outer, Gold inner)
+    pdf.setStrokeColor(navy)
+    pdf.setLineWidth(2)
+    pdf.rect(10*mm, 10*mm, width-20*mm, height-20*mm)
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(0.5)
+    pdf.rect(12*mm, 12*mm, width-24*mm, height-24*mm)
+
+    # =============================================
+    # 2. PROFESSIONAL CORNER RIBBONS
+    # =============================================
+    # --- TOP LEFT RIBBON ---
+    pdf.setFillColor(gold)
+    p = pdf.beginPath()
+    p.moveTo(12*mm, height-12*mm)
+    p.lineTo(90*mm, height-12*mm)
+    p.curveTo(70*mm, height-40*mm, 40*mm, height-70*mm, 12*mm, height-90*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+    
+    pdf.setFillColor(navy)
+    p = pdf.beginPath()
+    p.moveTo(12*mm, height-12*mm)
+    p.lineTo(70*mm, height-12*mm)
+    p.curveTo(55*mm, height-30*mm, 30*mm, height-55*mm, 12*mm, height-70*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    pdf.setFillColor(maroon)
+    p = pdf.beginPath()
+    p.moveTo(12*mm, height-12*mm)
+    p.lineTo(50*mm, height-12*mm)
+    p.curveTo(40*mm, height-20*mm, 20*mm, height-40*mm, 12*mm, height-50*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    # --- BOTTOM RIGHT RIBBON ---
+    pdf.setFillColor(gold)
+    p = pdf.beginPath()
+    p.moveTo(width-12*mm, 12*mm)
+    p.lineTo(width-90*mm, 12*mm)
+    p.curveTo(width-70*mm, 40*mm, width-40*mm, 70*mm, width-12*mm, 90*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+    
+    pdf.setFillColor(navy)
+    p = pdf.beginPath()
+    p.moveTo(width-12*mm, 12*mm)
+    p.lineTo(width-70*mm, 12*mm)
+    p.curveTo(width-55*mm, 30*mm, width-30*mm, 55*mm, width-12*mm, 70*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    pdf.setFillColor(maroon)
+    p = pdf.beginPath()
+    p.moveTo(width-12*mm, 12*mm)
+    p.lineTo(width-50*mm, 12*mm)
+    p.curveTo(width-40*mm, 20*mm, width-20*mm, 40*mm, width-12*mm, 50*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    # =============================================
+    # 3. MIDDLE LEFT & RIGHT ACCENTS
+    # =============================================
+    def draw_middle_accent(x, y, direction=1):
+        pdf.setFillColor(gold)
+        p = pdf.beginPath()
+        p.moveTo(x, y + 10*mm)
+        p.lineTo(x + (15*mm * direction), y)
+        p.lineTo(x, y - 10*mm)
+        p.lineTo(x + (5*mm * direction), y)
+        p.close()
+        pdf.drawPath(p, fill=1, stroke=0)
+        
+        pdf.setFillColor(maroon)
+        p = pdf.beginPath()
+        p.moveTo(x, y + 6*mm)
+        p.lineTo(x + (8*mm * direction), y)
+        p.lineTo(x, y - 6*mm)
+        p.lineTo(x + (2*mm * direction), y)
+        p.close()
+        pdf.drawPath(p, fill=1, stroke=0)
+
+    draw_middle_accent(12*mm, height/2, direction=1)
+    draw_middle_accent(width-12*mm, height/2, direction=-1)
+
+    # =============================================
+    # 4. LOGOS & WATERMARK
+    # =============================================
+    logo_path = os.path.join(BASE, 'static', 'Mylogo.png')
+    if os.path.exists(logo_path):
+        try:
+            # Watermark (Center) - Increased transparency
+            pdf.saveState()
+            pdf.setFillAlpha(0.09) 
+            logo = ImageReader(logo_path)
+            pdf.drawImage(logo, width/2 - 50*mm, height/2 - 40*mm, width=180*mm, height=120*mm, mask='auto', preserveAspectRatio=True)
+            #pdf.drawImage(logo, width/2 - 70*mm, height/2 - 40*mm, width=180*mm, height=120*mm, mask='auto', preserveAspectRatio=True)
+            pdf.restoreState()
+            
+            # Top Right Logo - Shifted further right
+            #pdf.drawImage(logo, width - 45*mm, height - 35*mm, width=35*mm, height=20*mm, mask='auto', preserveAspectRatio=True, anchor='c')
+            #pdf.drawImage(logo, width - 50*mm, height - 30*mm, width=35*mm, height=20*mm, mask='auto', preserveAspectRatio=True, anchor='c')
+            pdf.drawImage(logo, width - 60*mm, height - 35*mm, width=46*mm, height=23*mm, mask='auto', preserveAspectRatio=True, anchor='c')
+            #right pdf.drawImage(logo, width - 60*mm, height - 35*mm, width=35*mm, height=20*mm, mask='auto', preserveAspectRatio=True, anchor='c')
+        except Exception as e:
+            print(f"Could not draw logos: {e}")
+
+    # =============================================
+    # 5. TOP RIGHT GOLD SEAL
+    # =============================================
+    seal_x = width - 30*mm
+    seal_y = height - 45*mm
+    
+    # Red Ribbon Tails
+    pdf.setFillColor(maroon)
+    p = pdf.beginPath()
+    p.moveTo(seal_x - 6*mm, seal_y - 8*mm)
+    p.lineTo(seal_x - 12*mm, seal_y - 22*mm)
+    p.lineTo(seal_x - 4*mm, seal_y - 18*mm)
+    p.lineTo(seal_x, seal_y - 12*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    p = pdf.beginPath()
+    p.moveTo(seal_x + 6*mm, seal_y - 8*mm)
+    p.lineTo(seal_x + 12*mm, seal_y - 22*mm)
+    p.lineTo(seal_x + 4*mm, seal_y - 18*mm)
+    p.lineTo(seal_x, seal_y - 12*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    # Gold Badge
+    pdf.setFillColor(gold)
+    pdf.circle(seal_x, seal_y, 10*mm, fill=1, stroke=0)
+    pdf.setStrokeColor(navy)
+    pdf.setLineWidth(1)
+    pdf.circle(seal_x, seal_y, 8*mm, fill=0, stroke=1)
+    
+    # Badge Text
+    pdf.setFillColor(navy)
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawCentredString(seal_x, seal_y + 2*mm, "AWARD")
+    pdf.setFont("Helvetica-Bold", 6)
+    pdf.drawCentredString(seal_x, seal_y - 1*mm, "OF")
+    pdf.drawCentredString(seal_x, seal_y - 4*mm, "EXCELLENCE")
+
+    # =============================================
+    # 6. TYPOGRAPHY & MAIN TEXT
+    # =============================================
+    
+    # Top Ornate Line
+    line_y = height - 35*mm
+    line_start = width/2 - 70*mm
+    line_end = width/2 + 70*mm
+    
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(1)
+    pdf.line(line_start, line_y, line_end, line_y)
+    
+    # 5 Stars on the line
+    def draw_small_star(cx, cy):
+        pdf.setFillColor(gold)
+        p = pdf.beginPath()
+        p.moveTo(cx, cy + 3*mm)
+        p.lineTo(cx + 1*mm, cy + 1*mm)
+        p.lineTo(cx + 3*mm, cy + 1*mm)
+        p.lineTo(cx + 1.5*mm, cy - 1*mm)
+        p.lineTo(cx + 2*mm, cy - 3*mm)
+        p.lineTo(cx, cy - 1.5*mm)
+        p.lineTo(cx - 2*mm, cy - 3*mm)
+        p.lineTo(cx - 1.5*mm, cy - 1*mm)
+        p.lineTo(cx - 3*mm, cy + 1*mm)
+        p.lineTo(cx - 1*mm, cy + 1*mm)
+        p.close()
+        pdf.drawPath(p, fill=1, stroke=0)
+
+    # Calculate positions for 5 stars (center, then +/- 2 offsets)
+    star_spacing = 30*mm
+    draw_small_star(width/2, line_y)
+    draw_small_star(width/2 - star_spacing, line_y)
+    draw_small_star(width/2 + star_spacing, line_y)
+    draw_small_star(width/2 - (star_spacing * 2), line_y)
+    draw_small_star(width/2 + (star_spacing * 2), line_y)
+
+    # "CERTIFICATE"
+    pdf.setFont("Times-Bold", 38)
+    pdf.setFillColor(text_dark)
+    pdf.drawCentredString(width/2, height - 50*mm, "CERTIFICATE")
+    
+    # "OF ACHIEVEMENT"
+    pdf.setFont("Times-Roman", 20)
+    pdf.drawCentredString(width/2, height - 60*mm, "OF ACHIEVEMENT")
+
+    # Company Name
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.setFillColor(navy)
+    pdf.drawCentredString(width/2, height - 68*mm, "RAB BICYCLE SOLUTIONS CC")
+    
+    # Divider
+    pdf.setStrokeColor(colors.HexColor("#D3D3D3"))
+    pdf.setLineWidth(1)
+    pdf.line(width/2 - 30*mm, height - 73*mm, width/2 + 30*mm, height - 73*mm)
+
+    # Presented To
+    pdf.setFont("Helvetica", 11)
+    pdf.setFillColor(text_muted)
+    pdf.drawCentredString(width/2, height - 83*mm, "THIS CERTIFICATE IS PROUDLY PRESENTED TO")
+
+    # RECIPIENT NAME
+    pdf.setFont("Times-BoldItalic", 42)
+    pdf.setFillColor(navy) 
+    pdf.drawCentredString(width/2, height - 102*mm, str(recipient_name))
+
+    # Description text
+    pdf.setFont("Helvetica", 11)
+    pdf.setFillColor(text_muted)
+    pdf.drawCentredString(width/2, height - 114*mm, "This certificate is given to the recipient for their achievement in the field of")
+
+    # Award Title (Large, Bold, Red)
+    pdf.setFont("Times-BoldItalic", 24)
+    pdf.setFillColor(maroon)
+    pdf.drawCentredString(width/2, height - 126*mm, f"'{award['award_title']}'")
+    
+    # Reason (Text Wrapping)
+    pdf.setFont("Helvetica", 11)
+    pdf.setFillColor(text_muted)
+    
+    words = award['reason'].split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(current_line + " " + word) < 80: 
+            current_line += " " + word
+        else:
+            lines.append(current_line)
+            current_line = word
+    lines.append(current_line)
+    
+    y_pos = height - 138*mm
+    for line in lines:
+        pdf.drawCentredString(width/2, y_pos, line.strip())
+        y_pos -= 6*mm
+
+    # =============================================
+    # 7. FOOTER: SIGNATURES & BOTTOM BADGES
+    # =============================================
+    issued_date = award['issued_at'][:10]
+    bottom_y = 35*mm
+
+    # --- Left Side: Signature ---
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(1.5)
+    pdf.line(40*mm, bottom_y + 10*mm, 80*mm, bottom_y + 10*mm)
+    
+    pdf.setFont("Times-Roman", 12)
+    pdf.setFillColor(text_dark)
+    pdf.drawString(40*mm, bottom_y + 4*mm, "Authorized Signature")
+    
+    pdf.setFont("Times-Roman", 12)
+    pdf.setFillColor(text_dark)
+    pdf.drawString(40*mm, bottom_y - 2*mm, "RAB Management")
+
+    # --- Center: Star Badge & Date ---
+    star_x = width/2
+    star_y = bottom_y + 10*mm
+    
+    # Star Shape
+    pdf.setFillColor(gold)
+    p = pdf.beginPath()
+    p.moveTo(star_x, star_y + 10*mm)
+    p.lineTo(star_x + 3*mm, star_y + 3*mm)
+    p.lineTo(star_x + 10*mm, star_y + 3*mm)
+    p.lineTo(star_x + 4*mm, star_y - 2*mm)
+    p.lineTo(star_x + 6*mm, star_y - 9*mm)
+    p.lineTo(star_x, star_y - 5*mm)
+    p.lineTo(star_x - 6*mm, star_y - 9*mm)
+    p.lineTo(star_x - 4*mm, star_y - 2*mm)
+    p.lineTo(star_x - 10*mm, star_y + 3*mm)
+    p.lineTo(star_x - 3*mm, star_y + 3*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+    
+    # Star Base (Podium - Navy)
+    pdf.setFillColor(navy)
+    p = pdf.beginPath()
+    p.moveTo(star_x - 7*mm, star_y - 9*mm)
+    p.lineTo(star_x + 7*mm, star_y - 9*mm)
+    p.lineTo(star_x + 5*mm, star_y - 13*mm)
+    p.lineTo(star_x - 5*mm, star_y - 13*mm)
+    p.close()
+    pdf.drawPath(p, fill=1, stroke=0)
+
+    # Date
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.setFillColor(navy)
+    pdf.drawCentredString(star_x, bottom_y - 6*mm, "DATE")
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColor(text_muted)
+    pdf.drawCentredString(star_x, bottom_y - 10*mm, issued_date)
+
+    pdf.save()
+    buf.seek(0)
+    
+    safe_name = str(recipient_name).replace(' ', '_')
+    filename = f"RAB_Award_{safe_name}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+@app.route("/awards/<int:award_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_award(award_id):
+    """Admin action: Delete an award."""
+    conn = db()
+    c = conn.cursor()
+
+    award = execute_query(c, "SELECT award_title FROM awards WHERE id = ?", (award_id,)).fetchone()
+    
+    if not award:
+        conn.close()
+        flash("Award not found.", "danger")
+        return redirect(url_for("awards"))
+
+    execute_query(c, "DELETE FROM awards WHERE id = ?", (award_id,))
+    conn.commit()
+
+    log_audit(
+        action="award_delete",
+        entity_type="award",
+        entity_id=award_id,
+        details=f"Admin deleted award '{award['award_title']}'"
+    )
+
+    conn.close()
+    flash("Award deleted successfully.", "success")
+    return redirect(url_for("awards"))
+
+
+@app.route("/warnings", methods=["GET", "POST"])
+@login_required
+@admin_required
+def warnings():
+    """Admin view to issue and manage warnings."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        # We need to know if this is a staff warning or customer warning
+        target_type = request.form.get("target_type") # 'staff' or 'customer'
+        target_id = request.form.get("target_id")
+        level = request.form.get("level") # Minor, Moderate, Serious, Final
+        reason = request.form.get("reason", "").strip()
+
+        if not target_id or not reason or not level:
+            flash("All fields are required.", "danger")
+        else:
+            user_id = target_id if target_type == 'staff' else None
+            customer_id = target_id if target_type == 'customer' else None
+
+            execute_query(c, """
+                INSERT INTO warnings (user_id, customer_id, issued_by_id, level, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, customer_id, session["user_id"], level, reason))
+            
+            conn.commit()
+            
+
+
+
+            # ✅ Check for escalation
+            if target_type == 'staff':
+                if check_serious_warnings(c, target_id):
+                    flash("🚨 CRITICAL ALERT: This staff member now has 2 Serious warnings this month. ACTION REQUIRED: Consider termination.", "danger")
+            else:
+                # It's a customer
+                if check_customer_ban(c, target_id):
+                    from datetime import datetime, timedelta
+                    # Calculate 6 months from today
+                    ban_date = (datetime.now() + timedelta(days=182)).strftime('%Y-%m-%d')
+                    
+                    execute_query(c, "UPDATE customers SET banned_until = ? WHERE id = ?", (ban_date, target_id))
+                    conn.commit()
+                    
+                    flash(f"🚨 CRITICAL ALERT: Customer has 2 Serious warnings. They have been automatically BANNED until {ban_date}.", "danger")
+                else:
+                    flash("Warning issued successfully to Customer.", "success")
+
+    # Get all users (except admin) for the dropdown
+    users = execute_query(c, "SELECT id, username, full_name, role FROM users WHERE role != 'admin' ORDER BY full_name").fetchall()
+
+    # ✅ Get all customers for the dropdown
+
+    customers = execute_query(c, "SELECT id, full_name FROM customers WHERE verification_status = 'Verified' ORDER BY full_name").fetchall()
+
+    # Get all warnings
+    warnings_list = execute_query(c, """
+        SELECT w.*, 
+               u.full_name as user_name, u.role as user_role, 
+               cu.full_name as customer_name,
+               a.username as issued_by_name
+        FROM warnings w
+        LEFT JOIN users u ON u.id = w.user_id
+        LEFT JOIN customers cu ON cu.id = w.customer_id
+        LEFT JOIN users a ON a.id = w.issued_by_id
+        ORDER BY w.created_at DESC
+    """).fetchall()
+
+    conn.close()
+    return render_template("warnings_admin.html", title="Warning System", users=users, customers=customers, warnings=warnings_list)
+
+
+@app.route("/warnings/my", methods=["GET"])
+@login_required
+def my_warnings():
+    """User/Customer view to see and sign their warnings."""
+    conn = db()
+    c = conn.cursor()
+
+    # Get the customer ID if they are a customer
+    customer_id = None
+    if session.get("role") == "customer":
+        customer = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (session["user_id"],)).fetchone()
+        if customer:
+            customer_id = customer["id"]
+
+    # Fetch warnings (either by user_id or customer_id)
+    if customer_id:
+        my_list = execute_query(c, """
+            SELECT * FROM warnings WHERE customer_id = ? ORDER BY created_at DESC
+        """, (customer_id,)).fetchall()
+    else:
+        my_list = execute_query(c, """
+            SELECT * FROM warnings WHERE user_id = ? ORDER BY created_at DESC
+        """, (session["user_id"],)).fetchall()
+
+    conn.close()
+    return render_template("warnings_user.html", title="My Warnings", warnings=my_list)
+
+@app.route("/warnings/<int:warning_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_warning(warning_id):
+    """Admin can delete a warning."""
+    conn = db()
+    c = conn.cursor()
+
+    # Check if it exists
+    warning = execute_query(c, "SELECT id FROM warnings WHERE id = ?", (warning_id,)).fetchone()
+    if warning:
+        execute_query(c, "DELETE FROM warnings WHERE id = ?", (warning_id,))
+        conn.commit()
+        log_audit(
+            action="warning_delete",
+            entity_type="warning",
+            entity_id=warning_id,
+            details=f"Admin deleted warning #{warning_id}"
+        )
+        flash("Warning deleted successfully.", "success")
+    else:
+        flash("Warning not found.", "danger")
+    
+    conn.close()
+    return redirect(url_for("warnings"))
+
+
+@app.route("/warnings/<int:warning_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_warning(warning_id):
+    """Admin can edit the reason for a warning."""
+    conn = db()
+    c = conn.cursor()
+
+    warning = execute_query(c, """
+        SELECT w.*, 
+               COALESCE(u.full_name, cu.full_name) as user_name
+        FROM warnings w
+        LEFT JOIN users u ON u.id = w.user_id
+        LEFT JOIN customers cu ON cu.id = w.customer_id
+        WHERE w.id = ?
+    """, (warning_id,)).fetchone()
+
+    if not warning:
+        conn.close()
+        flash("Warning not found.", "danger")
+        return redirect(url_for("warnings"))
+
+    if request.method == "POST":
+        new_reason = request.form.get("reason", "").strip()
+        
+        if not new_reason:
+            flash("Reason cannot be empty.", "danger")
+        else:
+            execute_query(c, "UPDATE warnings SET reason = ? WHERE id = ?", (new_reason, warning_id))
+            conn.commit()
+            
+            log_audit(
+                action="warning_edit",
+                entity_type="warning",
+                entity_id=warning_id,
+                details=f"Admin edited warning #{warning_id}"
+            )
+            
+            flash("Warning updated successfully.", "success")
+            conn.close()
+            return redirect(url_for("warnings"))
+
+    conn.close()
+    return render_template("edit_warning.html", title="Edit Warning", warning=warning)
+
+
+@app.route("/warnings/<int:warning_id>/sign", methods=["POST"])
+@login_required
+def sign_warning(warning_id):
+    """User signs the warning."""
+    conn = db()
+    c = conn.cursor()
+
+    # Check if warning belongs to this user OR this customer
+    customer_id = None
+    if session.get("role") == "customer":
+        customer = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (session["user_id"],)).fetchone()
+        if customer:
+            customer_id = customer["id"]
+
+    if customer_id:
+        warning = execute_query(c, "SELECT * FROM warnings WHERE id = ? AND customer_id = ?", (warning_id, customer_id)).fetchone()
+    else:
+        warning = execute_query(c, "SELECT * FROM warnings WHERE id = ? AND user_id = ?", (warning_id, session["user_id"])).fetchone()
+
+    if warning and warning["status"] == "Unsigned":
+        execute_query(c, """
+            UPDATE warnings 
+            SET status = 'Signed', signed_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (warning_id,))
+        conn.commit()
+        flash("You have acknowledged and signed this warning.", "success")
+    else:
+        flash("Warning not found or already signed.", "danger")
+    
+    conn.close()
+    return redirect(url_for("my_warnings"))
 
 
 @app.route("/workers/<int:worker_id>/documents/add", methods=["GET", "POST"])
@@ -4146,6 +5051,332 @@ def stations():
 
 
 
+# =============================================
+# PUBLIC SELF-REGISTRATION
+# =============================================
+
+@app.route("/register-now", methods=["GET", "POST"])
+def public_register():
+    """Public page for customers to register themselves."""
+    conn = db()
+    c = conn.cursor()
+
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        id_number = request.form.get("id_number", "").strip()
+        email = request.form.get("email", "").strip()
+        address = request.form.get("address", "").strip()
+        gender = request.form.get("gender", "").strip()
+        terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
+        signature_data = request.form.get("signature_data", "").strip()
+        
+        id_photo = request.files.get("id_photo")
+        customer_photo = request.files.get("customer_photo")
+
+        # ✅ Check if ID / Passport number already exists
+        if id_number:
+            existing = execute_query(c, """
+                SELECT id FROM customers WHERE id_number = ?
+                UNION 
+                SELECT id FROM pending_registrations WHERE id_number = ?
+            """, (id_number, id_number)).fetchone()
+            
+            if existing:
+                flash("A customer with this ID / Passport number already exists in the system.", "danger")
+                return redirect(url_for("public_register"))
+
+        # ✅ Validate the formats
+        is_valid, error_msg = validate_namibian_identity(phone, id_number)
+        if not is_valid:
+            flash(error_msg, "danger")
+            return redirect(url_for("public_register"))
+
+        if not full_name or not phone:
+            flash("Name and phone are required.", "danger")
+            return redirect(url_for("public_register"))
+        
+        if not terms_accepted:
+            flash("You must accept the Terms & Conditions.", "danger")
+            return redirect(url_for("public_register"))
+
+        # Handle File Uploads
+        import os
+        from werkzeug.utils import secure_filename
+        UPLOAD_FOLDER = os.path.join(BASE, 'static', 'uploads')
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+        id_path = None
+        if id_photo and id_photo.filename:
+            filename = f"pending_id_{secure_filename(id_photo.filename)}"
+            id_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            id_path = f"uploads/{filename}"
+
+        photo_path = None
+        if customer_photo and customer_photo.filename:
+            filename = f"pending_photo_{secure_filename(customer_photo.filename)}"
+            customer_photo.save(os.path.join(UPLOAD_FOLDER, filename))
+            photo_path = f"uploads/{filename}"
+
+        # Insert into pending table
+        execute_query(c, """
+            INSERT INTO pending_registrations 
+            (full_name, id_number, phone, email, address, gender, id_photo_path, customer_photo_path, signature_data, terms_accepted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (full_name, id_number, phone, email, address, gender, id_path, photo_path, signature_data, terms_accepted))
+        
+        conn.commit()
+        conn.close()
+
+        flash("Thank you for registering with RAB! Your application has been sent. RAB staff will review it shortly.", "success")
+        return redirect(url_for("registration_success"))
+
+    conn.close()
+    return render_template("public_register.html", title="Register with RAB")
+
+@app.route("/check-status", methods=["GET", "POST"])
+def check_status():
+    """Page where applicants enter their phone number to check status."""
+    if request.method == "POST":
+        phone = request.form.get("phone", "").strip()
+        
+        conn = db()
+        c = conn.cursor()
+        
+        # Check pending registrations
+        reg = execute_query(c, """
+            SELECT * FROM pending_registrations 
+            WHERE phone = ? OR phone = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (phone, f"0{phone[1:]}" if phone.startswith("+264") else phone)).fetchone()
+        
+        conn.close()
+
+
+        if not reg:
+
+            flash("No registration found with that phone number. Please check your number or register again.", "danger")
+            return redirect(url_for("check_status"))
+                  
+ 
+
+        if reg["status"] == "Pending":
+            flash("⏳ Your application is still under review by RAB staff. Please check back later.", "info")
+            return redirect(url_for("check_status"))
+
+        elif reg["status"] == "Rejected":
+                    # Show the rejection reason
+                    flash(f"❌ Unfortunately, your application was rejected. Reason: {reg['rejection_reason'] or 'No reason provided'}. Please visit our office for more information.", "danger")
+                    return redirect(url_for("check_status"))
+
+        elif reg["status"] == "Approved":
+            # ✅ Send them to the success page with their details
+            return render_template("check_status_result.html", title="Application Approved", reg=reg)
+
+        elif reg["status"] == "Approved":
+            flash(f"🎉 Your account has been approved! Please keep these details safe:", "success")
+            flash(f"👤 Username: {reg['generated_username']}", "info")
+            flash(f"🔑 Password: {reg['generated_password']}", "info")
+            flash("Please log in and change your password immediately. We recommend enabling 2FA in your account settings.", "warning")
+
+
+        return redirect(url_for("check_status"))
+        
+    return render_template("check_status.html", title="Check Application Status")
+
+
+@app.route("/how-to-register")
+def how_to_register():
+    """Public page explaining what is needed to register."""
+    return render_template("how_to_register.html", title="How to Register")
+
+
+@app.route("/register")
+def register_landing():
+    """Dedicated landing page for new customer registrations."""
+    return render_template("register_landing.html", title="Join RAB - Registration")
+
+
+@app.route("/registration-success")
+def registration_success():
+    """Page shown after a customer successfully submits their details."""
+    return render_template("registration_success.html", title="Registration Submitted")
+
+
+@app.route("/admin/pending-registrations")
+@login_required
+@staff_required
+def pending_registrations():
+    """Staff view to review, approve, or reject pending registrations."""
+    conn = db()
+    c = conn.cursor()
+
+    # ✅ Get ALL registrations (Pending, Approved, Rejected)
+    pending = execute_query(c, """
+        SELECT p.*, u.username as reviewer_name
+        FROM pending_registrations p
+        LEFT JOIN users u ON u.id = p.reviewed_by
+        ORDER BY 
+            CASE WHEN p.status = 'Pending' THEN 0 ELSE 1 END, -- Pending first
+            p.created_at DESC
+    """).fetchall()
+    
+    conn.close()
+    return render_template("pending_registrations.html", title="Registrations History", pending=pending)
+
+@app.route("/admin/pending-registrations/<int:reg_id>/approve", methods=["POST"])
+@login_required
+@staff_required
+def approve_registration(reg_id):
+    """Approve a registration: create the User and Customer records."""
+    conn = db()
+    c = conn.cursor()
+
+    reg = execute_query(c, "SELECT * FROM pending_registrations WHERE id = ?", (reg_id,)).fetchone()
+    
+    if not reg:
+        flash("Registration not found.", "danger")
+        return redirect(url_for("pending_registrations"))
+
+    # 1. Create the User account
+    import secrets
+    import string
+    # Generate a temporary password
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+    
+    username = reg["phone"] # Use phone as username
+    
+    # Ensure username is unique
+    existing_user = execute_query(c, "SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    if existing_user:
+        username = f"cust_{reg['phone']}"
+    
+    execute_query(c, """
+        INSERT INTO users (username, password_hash, role, full_name, email)
+        VALUES (?, ?, 'customer', ?, ?)
+    """, (username, generate_password_hash(temp_password), reg["full_name"], reg["email"]))
+
+    # ✅ Save the generated credentials to pending_registrations
+    execute_query(c, """
+        UPDATE pending_registrations 
+        SET status = 'Approved', 
+            generated_username = ?, 
+            generated_password = ?,
+            reviewed_by = ?,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (username, temp_password, session["user_id"], reg_id))
+
+
+    user_id = c.lastrowid # SQLite. (For Postgres, use RETURNING id logic)
+
+    # 2. Create the Customer record
+    execute_query(c, """
+        INSERT INTO customers (
+            full_name, id_number, phone, email, address, user_id, 
+            terms_accepted, signature_data, verification_status, gender
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Verified', ?)
+    """, (reg["full_name"], reg["id_number"], reg["phone"], reg["email"], reg["address"], user_id, reg["terms_accepted"], reg["signature_data"], reg["gender"]))
+   
+    customer_id = c.lastrowid
+
+    # 3. Move the uploaded documents to the customer's official folder
+    if reg["id_photo_path"]:
+        execute_query(c, """
+            INSERT INTO customer_documents (customer_id, document_type, file_path)
+            VALUES (?, 'id_copy', ?)
+        """, (customer_id, reg["id_photo_path"]))
+        
+    if reg["customer_photo_path"]:
+        execute_query(c, """
+            INSERT INTO customer_documents (customer_id, document_type, file_path)
+            VALUES (?, 'customer_photo', ?)
+        """, (customer_id, reg["customer_photo_path"]))
+
+    # 4. Update pending status AND save the generated credentials
+    execute_query(c, """
+        UPDATE pending_registrations 
+        SET status = 'Approved', 
+            generated_username = ?, 
+            generated_password = ?,
+            reviewed_by = ?,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    """, (username, temp_password, session["user_id"], reg_id))
+    conn.commit()
+    conn.close()
+
+    flash(f"Customer '{reg['full_name']}' approved! Username: {username} | Password: {temp_password}", "success")
+    flash("Please give these credentials to the customer so they can log in and change their password.", "info")
+    
+    return redirect(url_for("pending_registrations"))
+
+
+@app.route("/admin/pending-registrations/<int:reg_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_registration(reg_id):
+    """Admin action: Delete a registration record."""
+    conn = db()
+    c = conn.cursor()
+
+    reg = execute_query(c, "SELECT * FROM pending_registrations WHERE id = ?", (reg_id,)).fetchone()
+    
+    if not reg:
+        conn.close()
+        flash("Registration not found.", "danger")
+        return redirect(url_for("pending_registrations"))
+
+    execute_query(c, "DELETE FROM pending_registrations WHERE id = ?", (reg_id,))
+    conn.commit()
+
+    log_audit(
+        action="registration_delete",
+        entity_type="system",
+        details=f"Admin deleted pending registration for '{reg['full_name']}'"
+    )
+
+    conn.close()
+    flash(f"Registration for '{reg['full_name']}' has been deleted.", "success")
+    return redirect(url_for("pending_registrations"))
+
+@app.route("/admin/pending-registrations/<int:reg_id>/reject", methods=["POST"])
+@login_required
+@staff_required
+def reject_registration(reg_id):
+    """Reject a registration with a reason."""
+    reason = request.form.get("reason", "").strip()
+    
+    if not reason:
+        flash("You must provide a reason for rejection.", "danger")
+        return redirect(url_for("pending_registrations"))
+
+    conn = db()
+    c = conn.cursor()
+    
+    reg = execute_query(c, "SELECT full_name FROM pending_registrations WHERE id = ?", (reg_id,)).fetchone()
+    
+    execute_query(c, """
+        UPDATE pending_registrations 
+        SET status = 'Rejected', rejection_reason = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+    """, (reason, session["user_id"], reg_id))
+    
+    conn.commit()
+    conn.close()
+    
+    log_audit(
+        action="registration_reject",
+        entity_type="customer",
+        details=f"Rejected registration for {reg['full_name']}. Reason: {reason}"
+    )
+    
+    flash(f"Registration rejected. Reason: {reason}", "warning")
+    return redirect(url_for("pending_registrations"))
+
+
+
 @app.route("/items", methods=["GET", "POST"])
 @login_required
 @admin_required
@@ -4583,6 +5814,8 @@ def customer_data_export():
 
     # Find the customer ID for this user
     conn = db()
+
+
     c = conn.cursor()
     customer_row = execute_query(c, 
         "SELECT id FROM customers WHERE user_id = ?", (session["user_id"],)
@@ -4623,7 +5856,7 @@ def customer_data_export():
             "  - signatures/signature.png Your digital signature (if on file)\n\n"
             "Your rights under the Namibian Data Protection Act (Act 5 of 2022):\n"
             "  - Access, correction, deletion, portability, objection\n\n"
-            "Questions: privacy@rab.com\n"
+            "Questions: rabprivacy@gmail.com\n"
         )
         zf.writestr("README.txt", readme)
 
@@ -4774,7 +6007,6 @@ def customer_rent():
 
 
 
-
 @app.route("/dashboard")
 @login_required
 @staff_required
@@ -4813,7 +6045,7 @@ def dashboard():
             AND total_cost >= 0
         """)
     
-    # ✅ Get active rentals with correct duration
+    # ✅ Get active rentals (With GROUP BY to prevent duplicates)
     if is_postgres:
         rentals = execute_query(c, """
             SELECT 
@@ -4821,6 +6053,9 @@ def dashboard():
                 c.full_name,
                 b.bike_code,
                 r.start_time,
+                r.deposit_paid,
+                (SELECT name FROM branches WHERE id = r.start_station_id) AS pickup_station,
+                (SELECT name FROM branches WHERE id = r.expected_end_station_id) AS dropoff_station,
                 CONCAT(
                     GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) / 3600)), 'h ',
                     GREATEST(0, FLOOR((EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - r.start_time)) % 3600) / 60)), 'm'
@@ -4829,6 +6064,7 @@ def dashboard():
             JOIN customers c ON c.id = r.customer_id
             JOIN bicycles b ON b.id = r.bicycle_id
             WHERE r.status = 'Active'
+            GROUP BY r.id, c.full_name, b.bike_code, r.start_time, r.start_station_id, r.expected_end_station_id
             ORDER BY r.start_time DESC
         """).fetchall()
     else:
@@ -4838,35 +6074,34 @@ def dashboard():
                 c.full_name,
                 b.bike_code,
                 r.start_time,
+                r.deposit_paid,
+                (SELECT name FROM branches WHERE id = r.start_station_id) AS pickup_station,
+                (SELECT name FROM branches WHERE id = r.expected_end_station_id) AS dropoff_station,
                 CAST(MAX(0, (strftime('%s', 'now') - strftime('%s', r.start_time))) / 3600 AS INTEGER) || 'h ' ||
                 CAST(MAX(0, ((strftime('%s', 'now') - strftime('%s', r.start_time)) % 3600)) / 60 AS INTEGER) || 'm' AS duration
             FROM daily_rentals r
             JOIN customers c ON c.id = r.customer_id
             JOIN bicycles b ON b.id = r.bicycle_id
             WHERE r.status = 'Active'
+            GROUP BY r.id, c.full_name, b.bike_code, r.start_time, r.start_station_id, r.expected_end_station_id
             ORDER BY r.start_time DESC
         """).fetchall()
-    
-    # ✅ FIX: Format start_time for display - Convert UTC to Local (Namibia time)
+
+    # Format start_time for display - Convert UTC to Local (Namibia time)
     for rental in rentals:
         if rental.get("start_time"):
             if isinstance(rental["start_time"], datetime):
-                # Add 2 hours for Namibia time (UTC+2)
                 local_start = rental["start_time"] + timedelta(hours=2)
                 rental["start_time"] = local_start.strftime("%Y-%m-%d %H:%M")
-                print(f"✅ Formatted start_time (datetime): {rental['start_time']}")
             elif isinstance(rental["start_time"], str):
                 try:
                     dt = datetime.fromisoformat(rental["start_time"])
                     local_dt = dt + timedelta(hours=2)
                     rental["start_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
-                    print(f"✅ Formatted start_time (string): {rental['start_time']}")
-                except Exception as e:
-                    print(f"❌ Error parsing start_time: {e}")
+                except Exception:
                     rental["start_time"] = rental["start_time"]
         else:
             rental["start_time"] = "Time not recorded"
-            print("⚠️ start_time is None or empty")
     
     # Unpaid rentals
     unpaid_rentals = execute_query(c, """
@@ -4884,10 +6119,7 @@ def dashboard():
         AND (r.payment_status IS NULL OR r.payment_status != 'Paid')
         ORDER BY r.end_time DESC
     """).fetchall()
-        # ✅ Pending privacy requests
-    pending_privacy = get_single_value(c, """
-        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Pending'
-    """)
+    
     # Format dates for unpaid rentals
     for rental in unpaid_rentals:
         if rental.get("start_time"):
@@ -4913,8 +6145,23 @@ def dashboard():
                     rental["end_time"] = local_dt.strftime("%Y-%m-%d %H:%M")
                 except:
                     rental["end_time"] = rental["end_time"]
-    
 
+    # ✅ Pending privacy requests
+    pending_privacy = get_single_value(c, """
+        SELECT COUNT(*) FROM privacy_requests WHERE status = 'Pending'
+    """)
+
+    # ✅ Station Performance Table
+    station_performance = execute_query(c, """
+        SELECT 
+            b.name AS station_name,
+            SUM(CASE WHEN r.start_station_id = b.id THEN 1 ELSE 0 END) AS starts,
+            SUM(CASE WHEN r.end_station_id = b.id THEN 1 ELSE 0 END) AS ends
+        FROM branches b
+        LEFT JOIN daily_rentals r ON b.id = r.start_station_id OR b.id = r.end_station_id
+        GROUP BY b.id, b.name
+        ORDER BY b.name
+    """).fetchall()
     
     conn.close()
     
@@ -4933,12 +6180,9 @@ def dashboard():
         rentals=rentals,
         unpaid_rentals=unpaid_rentals,
         pending_privacy=pending_privacy,
+        station_performance=station_performance,
         retention=RETENTION
     )
-
-
-
-
 
 @app.route("/rentals/start", methods=["GET", "POST"])
 @login_required
@@ -4965,6 +6209,30 @@ def start_rental():
                 "danger"
             )
             return redirect(url_for("customer_damages", customer_id=customer_id))
+
+
+        # ✅ Block if customer has an unpaid balance from a COMPLETED rental
+        unpaid_rental = execute_query(c, """
+            SELECT r.id, (r.total_cost - (COALESCE((SELECT SUM(amount) FROM rental_payments WHERE daily_rental_id = r.id), 0) + COALESCE(r.deposit_paid, 0))) AS balance
+            FROM daily_rentals r
+            WHERE r.customer_id = ? 
+              AND r.status = 'Completed' 
+              AND r.payment_status != 'Paid'
+        """, (customer_id,)).fetchall()
+
+        # Filter for actual outstanding amounts
+        for debt in unpaid_rental:
+            if debt["balance"] and float(debt["balance"]) > 0:
+                conn.close()
+                flash(
+                    f"Cannot start rental: this customer has an unpaid balance of N$ {float(debt['balance']):.2f} "
+                    f"from a previous rental (#{debt['id']}). Please settle the balance first.",
+                    "danger"
+                )
+                return redirect(url_for("record_payment", rental_id=debt["id"]))
+
+
+
 
         # ✅ Block if customer already has an active rental
         existing_active = execute_query(c, """
@@ -4993,6 +6261,24 @@ def start_rental():
                 )
             return redirect(url_for("start_rental"))
 
+        # ✅ Block if the BICYCLE is already actively rented to ANYONE
+        bike_active = execute_query(c, """
+            SELECT r.id, c.full_name
+            FROM daily_rentals r
+            JOIN customers c ON c.id = r.customer_id
+            WHERE r.bicycle_id = ? AND r.status = 'Active'
+        """, (bicycle_id,)).fetchone()
+
+        if bike_active:
+            conn.close()
+            # Note: Changed 'bike['bike_code']' to just 'bicycle_id' to prevent NameError if bike isn't loaded yet
+            flash(
+                f"Cannot start rental: Bicycle ID {bicycle_id} is already actively rented to {bike_active['full_name']}. "
+                f"Please end that rental first.",
+                "danger"
+            )
+            return redirect(url_for("start_rental"))
+
         # ✅ Convert local time to UTC for storage
         if start_time:
             local_dt = datetime.fromisoformat(start_time)
@@ -5011,6 +6297,21 @@ def start_rental():
             conn.close()
             flash("Customer must be verified before renting.", "danger")
             return redirect(url_for("start_rental"))
+
+        # ✅ Check if Customer is Banned
+        from datetime import datetime
+        customer_ban = execute_query(c, "SELECT banned_until FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        
+        if customer_ban and customer_ban["banned_until"]:
+            ban_date = datetime.strptime(customer_ban["banned_until"], '%Y-%m-%d').date()
+            today = datetime.now().date()
+            
+            if ban_date > today:
+                conn.close()
+                flash(f"Cannot start rental: This customer is currently BANNED until {customer_ban['banned_until']} due to multiple serious warnings.", "danger")
+                return redirect(url_for("start_rental"))
+
+
 
         bike = execute_query(c, """
             SELECT hourly_rate, daily_cap, deposit_amount FROM bicycles WHERE id = ?
@@ -5032,17 +6333,25 @@ def start_rental():
         start_station_id = request.form.get("start_station_id") or None
         if start_station_id:
             start_station_id = int(start_station_id)
+            
+        # ✅ Expected drop-off station
+        expected_end_station_id = request.form.get("expected_end_station_id") or None
+        if expected_end_station_id:
+            expected_end_station_id = int(expected_end_station_id)
 
+        # ✅ SINGLE Rental Insertion (includes expected_end_station_id)
         rental_id = insert_and_get_id(c, """
             INSERT INTO daily_rentals (
                 customer_id, bicycle_id, start_time,
                 hourly_rate, daily_cap, deposit_paid, status,
-                agreement_signed, started_by_user_id, start_station_id
-            ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, ?, ?)
+                agreement_signed, started_by_user_id, start_station_id,
+                expected_end_station_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, ?, ?, ?)
         """, (customer_id, bicycle_id, start_time_utc,
               bike["hourly_rate"], bike["daily_cap"], deposit_paid,
-              session["user_id"], start_station_id))
+              session["user_id"], start_station_id, expected_end_station_id))
 
+        # Update bicycle status
         execute_query(c, "UPDATE bicycles SET status = 'Rented' WHERE id = ?", (bicycle_id,))
 
         # Save start condition note
@@ -5051,7 +6360,7 @@ def start_rental():
             UPDATE daily_rentals SET start_condition_note = ? WHERE id = ?
         """, (start_condition_note, rental_id))
 
-        # Save selected items
+        # Save selected items (moved to AFTER rental_id is created)
         selected_items = request.form.getlist("items")
         for item_id in selected_items:
             try:
@@ -5062,6 +6371,7 @@ def start_rental():
             except Exception as e:
                 print(f"skip item {item_id}: {e}")
 
+        # Audit Log
         log_audit(
             action="rental_start",
             entity_type="daily_rental",
@@ -5119,6 +6429,37 @@ def start_rental():
         default_station_id=default_station_id,
         now=local_now.strftime("%Y-%m-%dT%H:%M")
     )
+
+
+@app.route("/customers/<int:customer_id>/unban", methods=["POST"])
+@login_required
+@admin_required
+def unban_customer(customer_id):
+    """Admin action: Remove the ban from a customer's profile."""
+    conn = db()
+    c = conn.cursor()
+
+    customer = execute_query(c, "SELECT full_name FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    
+    if not customer:
+        conn.close()
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+
+    execute_query(c, "UPDATE customers SET banned_until = NULL WHERE id = ?", (customer_id,))
+    conn.commit()
+
+    log_audit(
+        action="customer_unban",
+        entity_type="customer",
+        entity_id=customer_id,
+        details=f"Admin manually unbanned customer '{customer['full_name']}'"
+    )
+
+    conn.close()
+    flash(f"Customer '{customer['full_name']}' has been unbanned and can rent again.", "success")
+    return redirect(url_for("customer_detail", customer_id=customer_id))
+
 
 @app.route("/login-history")
 @login_required
@@ -5325,6 +6666,97 @@ def audit_log_page():
         total_pages=total_pages,
     )
 
+
+@app.route("/audit-log-master")
+@login_required
+@admin_required
+def audit_log_master():
+    """The HIDDEN Audit Log page with Export and Cleanup buttons."""
+    conn = db()
+    c = conn.cursor()
+
+    # Filters
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    user_filter = (request.args.get("user_filter") or "").strip()
+    action_filter = (request.args.get("action_filter") or "").strip()
+    entity_filter = (request.args.get("entity_filter") or "").strip()
+    page = int(request.args.get("page", 1))
+    per_page = 100
+    offset = (page - 1) * per_page
+
+    query = "SELECT * FROM audit_log WHERE 1=1"
+    params = []
+
+    if date_from:
+        query += " AND date(created_at) >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date(created_at) <= ?"
+        params.append(date_to)
+    if user_filter:
+        query += " AND (username LIKE ? OR user_role LIKE ?)"
+        like = f"%{user_filter}%"
+        params.extend([like, like])
+    if action_filter:
+        query += " AND action = ?"
+        params.append(action_filter)
+    if entity_filter:
+        query += " AND entity_type = ?"
+        params.append(entity_filter)
+
+    # Count for pagination
+    count_query = "SELECT COUNT(*) AS cnt FROM (" + query + ") AS sub"
+    total_count = get_single_value(c, count_query, params)
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([per_page, offset])
+
+    entries = execute_query(c, query, params).fetchall()
+
+    # Convert UTC → Namibia local time
+    for e in entries:
+        if e.get("created_at"):
+            e["created_at_display"] = to_namibia_time(e["created_at"])
+        else:
+            e["created_at_display"] = "—"
+        if session.get("role") == "admin":
+            e["ip_display"] = e.get("ip_address") or "—"
+        else:
+            e["ip_display"] = mask_ip(e.get("ip_address"))
+
+    # Get the list of distinct actions for the filter dropdown
+    actions = execute_query(c, """
+        SELECT DISTINCT action FROM audit_log ORDER BY action
+    """).fetchall()
+    action_list = [a["action"] if isinstance(a, dict) else a[0] for a in actions]
+
+    # Distinct entity types
+    entities = execute_query(c, """
+        SELECT DISTINCT entity_type FROM audit_log 
+        WHERE entity_type IS NOT NULL ORDER BY entity_type
+    """).fetchall()
+    entity_list = [a["entity_type"] if isinstance(a, dict) else a[0] for a in entities]
+
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+    conn.close()
+
+    return render_template(
+        "audit_log_master.html", # <-- New template
+        title="Master Audit Log",
+        entries=entries,
+        action_list=action_list,
+        entity_list=entity_list,
+        date_from=date_from,
+        date_to=date_to,
+        user_filter=user_filter,
+        action_filter=action_filter,
+        entity_filter=entity_filter,
+        page=page,
+        total_pages=total_pages,
+    )
+
+
 @app.route("/admin/run-cleanup", methods=["POST"])
 @login_required
 @admin_required
@@ -5389,7 +6821,24 @@ def customers():
         
         terms_accepted = 1 if request.form.get("terms_accepted") == "on" else 0
         signature_data = request.form.get("signature_data", "").strip()
-        
+
+
+        # ✅ Validate the formats
+        is_valid, error_msg = validate_namibian_identity(phone, id_number)
+        if not is_valid:
+            flash(error_msg, "danger")
+            conn.close()
+            return redirect(url_for("customers"))
+
+        # ✅ Check if ID / Passport number already exists
+        if id_number:
+            existing = execute_query(c, "SELECT id FROM customers WHERE id_number = ?", (id_number,)).fetchone()
+            if existing:
+                flash("A customer with this ID / Passport number already exists in the system.", "danger")
+                conn.close()
+                return redirect(url_for("customers"))
+
+
         if not full_name or not phone:
             flash("Name and phone are required.", "danger")
             return redirect(url_for("customers"))
@@ -5455,13 +6904,16 @@ def customers():
         
         # customer_id = c.lastrowid
 
+        # Get the gender from the form
+        gender = request.form.get("gender", "").strip()
+
         customer_id = insert_and_get_id(c, """
             INSERT INTO customers (
                 full_name, id_number, phone, email, address, user_id,
-                terms_accepted, terms_accepted_date, signature_data, verification_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')
+                terms_accepted, terms_accepted_date, signature_data, verification_status, gender
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending', ?)
         """, (full_name, id_number, phone, email, address, user_id,
-              terms_accepted, signature_data))
+              terms_accepted, signature_data, gender))
 
         # if is_postgres:
         #     customer_result = execute_query(c, "SELECT id FROM customers WHERE user_id = ?", (user_id,)).fetchone()
@@ -5605,6 +7057,61 @@ def customers():
         title="Customers",
         customers=customers,
         search=search
+    )
+
+
+@app.route("/customers/<int:customer_id>/view")
+@login_required
+@staff_required
+def view_customer(customer_id):
+    """Staff view of a single customer's full profile."""
+    conn = db()
+    c = conn.cursor()
+
+    customer = execute_query(c, "SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    
+    if not customer:
+        conn.close()
+        flash("Customer not found.", "danger")
+        return redirect(url_for("customers"))
+
+    # Get their rental history
+    rentals = execute_query(c, """
+        SELECT r.*, b.bike_code, b.brand, b.model
+        FROM daily_rentals r
+        JOIN bicycles b ON b.id = r.bicycle_id
+        WHERE r.customer_id = ?
+        ORDER BY r.start_time DESC
+    """, (customer_id,)).fetchall()
+
+    # Get their warnings
+    warnings = execute_query(c, """
+        SELECT * FROM warnings WHERE customer_id = ? ORDER BY created_at DESC
+    """, (customer_id,)).fetchall()
+
+    # Get their documents
+    documents = execute_query(c, "SELECT * FROM customer_documents WHERE customer_id = ?", (customer_id,)).fetchall()
+
+    # Format dates
+    for r in rentals:
+        if r.get("start_time"):
+            r["start_time"] = to_namibia_time(r["start_time"])
+        if r.get("end_time"):
+            r["end_time"] = to_namibia_time(r["end_time"])
+            
+    for w in warnings:
+        if w.get("created_at"):
+            w["created_at"] = to_namibia_time(w["created_at"])
+
+    conn.close()
+
+    return render_template(
+        "view_customer.html",
+        title=f"Profile - {customer['full_name']}",
+        customer=customer,
+        rentals=rentals,
+        warnings=warnings,
+        documents=documents
     )
 
 
@@ -6127,6 +7634,8 @@ def login_history_export_csv():
     conn = db()
     c = conn.cursor()
 
+
+
     date_from = (request.args.get("date_from") or "").strip()
     date_to = (request.args.get("date_to") or "").strip()
     user_filter = (request.args.get("user_filter") or "").strip()
@@ -6198,6 +7707,8 @@ def build_audit_pdf(rows, columns, title, filters_meta, generated_by):
     - generated_by: username of the admin who exported
     """
     from datetime import datetime
+
+
 
     buf = BytesIO()
     # Landscape for wide tables
@@ -6335,6 +7846,8 @@ def audit_log_export_csv():
     """Export audit log as CSV. Respects filters if any are set."""
     conn = db()
     c = conn.cursor()
+
+
 
     date_from = (request.args.get("date_from") or "").strip()
     date_to = (request.args.get("date_to") or "").strip()
@@ -6582,7 +8095,7 @@ def document_views_export_csv():
 
 @app.route("/customers/<int:customer_id>/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
-@admin_required
+@staff_required
 def delete_document(customer_id, doc_id):
     """Delete a customer document."""
     conn = db()
@@ -6708,11 +8221,16 @@ def serve_document(doc_id):
     # ✅ Local private file → stream
     filename = os.path.basename(file_path)
     full_path = os.path.join(PRIVATE_UPLOAD_FOLDER, filename)
+    old_path = os.path.join(BASE, 'static', 'uploads', filename)
+
+    # Check private_uploads first, then fallback to static/uploads
+    if not os.path.exists(full_path) and os.path.exists(old_path):
+        full_path = old_path
 
     if not os.path.exists(full_path):
-        flash(f"Document file not found: {filename}", "danger")
+        flash(f"Document file not found: {filename}", danger)
         return redirect(url_for("view_documents", customer_id=doc["customer_id"]))
-
+    
     return send_file(
         full_path,
         as_attachment=False,
@@ -6821,20 +8339,32 @@ def record_payment(rental_id):
         flash("Rental not found.", "danger")
         return redirect(url_for("dashboard"))
     
-    # Format start_time for display
-    if rental.get("start_time"):
-        if isinstance(rental["start_time"], datetime):
-            rental["start_time"] = rental["start_time"].strftime("%Y-%m-%d %H:%M")
+    # Calculate exactly what has been paid so far (cash only)
+    total_cash_paid = get_single_value(c, """
+        SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = ?
+    """, (rental_id,))
     
-    # ✅ Compute deposit and net due
     deposit_paid = float(rental["deposit_paid"] or 0)
     total_cost = float(rental["total_cost"] or 0)
-    net_due = round(total_cost - deposit_paid, 2)  # positive = customer owes, negative = refund
     
-    # ✅ If refund is due, redirect to the refund page
+    # Total paid = Cash + Deposit
+    total_paid = float(total_cash_paid) + deposit_paid
+    
+    # Remaining balance = Cost - Total Paid
+    net_due = round(total_cost - total_paid, 2)
+    
+    # If net_due is negative, a refund is due
     if net_due < 0:
         conn.close()
         return redirect(url_for("refund_rental", rental_id=rental_id))
+    
+    # If they owe 0, they are fully paid
+    if net_due == 0:
+        execute_query(c, "UPDATE daily_rentals SET payment_status = 'Paid' WHERE id = ?", (rental_id,))
+        conn.commit()
+        conn.close()
+        flash("This rental is already fully paid.", "info")
+        return redirect(url_for("dashboard"))
     
     if request.method == "POST":
         amount = float(request.form.get("amount", 0))
@@ -6844,38 +8374,35 @@ def record_payment(rental_id):
             flash("Payment amount must be greater than zero.", "danger")
             return redirect(url_for("record_payment", rental_id=rental_id))
         
+        # Record the cash payment
         execute_query(c, """
             INSERT INTO rental_payments (daily_rental_id, amount, payment_method, status)
             VALUES (?, ?, ?, 'Completed')
         """, (rental_id, amount, payment_method))
         
-        execute_query(c, """
-            UPDATE daily_rentals 
-            SET payment_status = 'Paid',
-                payment_method = ?
-            WHERE id = ?
-        """, (payment_method, rental_id))
+        # Check the new total paid
+        new_total_cash = float(total_cash_paid) + amount
+        new_total_paid = new_total_cash + deposit_paid
+        
+        # If the new total paid >= total cost, mark as Paid
+        if new_total_paid >= total_cost:
+            execute_query(c, """
+                UPDATE daily_rentals 
+                SET payment_status = 'Paid', payment_method = ?
+                WHERE id = ?
+            """, (payment_method, rental_id))
+            flash(f"Payment of N$ {amount:.2f} recorded. Rental is now fully paid!", "success")
+        else:
+            execute_query(c, """
+                UPDATE daily_rentals 
+                SET payment_status = 'Partial', payment_method = ?
+                WHERE id = ?
+            """, (payment_method, rental_id))
+            flash(f"Partial payment of N$ {amount:.2f} recorded. Remaining balance: N$ {round(total_cost - new_total_paid, 2):.2f}", "success")
         
         conn.commit()
-
-        log_audit(
-            action="payment_record",
-            entity_type="daily_rental",
-            entity_id=rental_id,
-            details=f"Recorded payment N${amount:.2f} ({payment_method}) for rental #{rental_id}"
-        )
-
         conn.close()
-        
-        flash(f"Payment of N$ {amount:.2f} recorded successfully!", "success")
         return redirect(url_for("payment_history"))
-    
-    # Get total payments for this rental
-    total_paid = get_single_value(c, """
-        SELECT COALESCE(SUM(amount), 0) 
-        FROM rental_payments 
-        WHERE daily_rental_id = ?
-    """, (rental_id,))
     
     conn.close()
     
@@ -6887,7 +8414,6 @@ def record_payment(rental_id):
         deposit_paid=deposit_paid,
         net_due=net_due
     )
-
 
 
 @app.route("/privacy/request-deletion", methods=["POST"])
@@ -7235,10 +8761,11 @@ def payment_history():
             p.*,
             r.id AS rental_id,
             r.total_cost AS rental_cost,
-            r.total_hours,
             r.deposit_paid,
+            r.total_hours,
             b.bike_code,
-            c.full_name
+            c.full_name,
+            (r.total_cost - (COALESCE((SELECT SUM(amount) FROM rental_payments WHERE daily_rental_id = r.id), 0) + COALESCE(r.deposit_paid, 0))) AS remaining_payment
         FROM rental_payments p
         JOIN daily_rentals r ON r.id = p.daily_rental_id
         JOIN bicycles b ON b.id = r.bicycle_id
@@ -7252,17 +8779,9 @@ def payment_history():
         if payment.get("payment_date"):
             payment["payment_date"] = to_namibia_time(payment["payment_date"])
 
-    # ✅ Total Rental Cost — gross revenue (each rental counted once)
-    total_rental_cost = get_single_value(c, """
-        SELECT COALESCE(SUM(total_cost), 0)
-        FROM daily_rentals
-        WHERE status IN ('Completed', 'Active')
-    """)
-
-    # ✅ Total Net Settled — actual cash moved (payments minus refunds)
-    total_settled = get_single_value(c, """
-        SELECT COALESCE(SUM(amount), 0) FROM rental_payments
-    """)
+    # Totals
+    total_rental_cost = get_single_value(c, "SELECT COALESCE(SUM(total_cost), 0) FROM daily_rentals WHERE status IN ('Completed', 'Active')")
+    total_settled = get_single_value(c, "SELECT COALESCE(SUM(amount), 0) FROM rental_payments")
 
     conn.close()
 
@@ -7273,9 +8792,6 @@ def payment_history():
         total_rental_cost=total_rental_cost,
         total_settled=total_settled,
     )
-
-
-
 
 
 @app.route("/reports/revenue")
@@ -7793,6 +9309,9 @@ def staff_activity_export_csv():
     conn = db()
     c = conn.cursor()
 
+
+
+
     date_from = (request.args.get("date_from") or "").strip()
     date_to = (request.args.get("date_to") or "").strip()
     staff_id = (request.args.get("staff_id") or "").strip()
@@ -7965,7 +9484,6 @@ def staff_activity_export_pdf():
 
 
 
-
 @app.route("/rentals/history")
 @login_required
 @staff_required
@@ -7975,13 +9493,12 @@ def rental_history():
     conn = db()
     c = conn.cursor()
 
-    # Get filter parameters
     status_filter = request.args.get("status", "")
     date_from = request.args.get("date_from", "")
     date_to = request.args.get("date_to", "")
     search = request.args.get("search", "").strip()
 
-    # Build query
+    # ✅ Safe, formatted query with ALL commas
     query = """
         SELECT
             r.id,
@@ -7989,6 +9506,7 @@ def rental_history():
             r.end_time,
             r.total_hours,
             r.total_cost,
+            r.deposit_paid,
             r.payment_status,
             r.status AS rental_status,
             c.full_name,
@@ -7996,6 +9514,7 @@ def rental_history():
             b.bike_code,
             b.brand,
             b.model,
+            (SELECT COALESCE(SUM(amount), 0) FROM rental_payments WHERE daily_rental_id = r.id) AS total_paid,
             (SELECT COUNT(*) FROM rental_payments WHERE daily_rental_id = r.id) AS payment_count
         FROM daily_rentals r
         JOIN customers c ON c.id = r.customer_id
@@ -8017,8 +9536,6 @@ def rental_history():
         query += " AND date(r.start_time) <= ?"
         params.append(date_to)
 
-
-
     if search:
         query += f""" AND (
             {ci_like('c.full_name', '?')} OR 
@@ -8028,20 +9545,49 @@ def rental_history():
         search_term = f"%{search}%"
         params.extend([search_term, search_term, search_term])
 
-
+    # ✅ Ensure there is a space before ORDER BY
     query += " ORDER BY r.start_time DESC LIMIT 100"
-
 
     rentals = execute_query(c, query, params).fetchall()
 
-    # ✅ FIX: Convert start_time and end_time from UTC to Namibia local time (UTC+2)
+    # ✅ Calculate remaining payment in Python
+    for rental in rentals:
+        cost = float(rental.get("total_cost") or 0)
+        paid = float(rental.get("total_paid") or 0)
+        deposit = float(rental.get("deposit_paid") or 0)
+        rental["remaining_payment"] = round(cost - (paid + deposit), 2)
+
+    # Convert start_time and end_time
+    from datetime import datetime, timedelta
     for rental in rentals:
         if rental.get("start_time"):
-            rental["start_time"] = to_namibia_time(rental["start_time"])
-        if rental.get("end_time"):
-            rental["end_time"] = to_namibia_time(rental["end_time"])            
+            try:
+                if isinstance(rental["start_time"], str):
+                    raw_str = rental["start_time"].replace("T", " ").split(".")[0]
+                    if len(raw_str) == 16:
+                        dt = datetime.strptime(raw_str, "%Y-%m-%d %H:%M")
+                    else:
+                        dt = datetime.strptime(raw_str, "%Y-%m-%d %H:%M:%S")
+                    rental["start_time"] = (dt + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+                else:
+                    rental["start_time"] = to_namibia_time(rental["start_time"])
+            except Exception:
+                rental["start_time"] = str(rental["start_time"])[:16]
 
-    # Get summary stats
+        if rental.get("end_time"):
+            try:
+                if isinstance(rental["end_time"], str):
+                    raw_str = rental["end_time"].replace("T", " ").split(".")[0]
+                    if len(raw_str) == 16:
+                        dt = datetime.strptime(raw_str, "%Y-%m-%d %H:%M")
+                    else:
+                        dt = datetime.strptime(raw_str, "%Y-%m-%d %H:%M:%S")
+                    rental["end_time"] = (dt + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+                else:
+                    rental["end_time"] = to_namibia_time(rental["end_time"])
+            except Exception:
+                rental["end_time"] = str(rental["end_time"])[:16]
+
     total_rentals = len(rentals)
     total_revenue = sum(float(r.get("total_cost") or 0) for r in rentals)
     paid_count = sum(1 for r in rentals if r.get("payment_status") == "Paid")
@@ -8068,7 +9614,6 @@ def rental_history():
     )
 
 
-
 @app.route("/rentals/<int:rental_id>/agreement.pdf")
 @login_required
 def rental_agreement_pdf(rental_id):
@@ -8087,6 +9632,7 @@ def rental_agreement_pdf(rental_id):
             c.id_number,
             c.phone,
             c.address,
+            c.gender,           
             c.signature_data,
             b.bike_code,
             b.brand,
@@ -8129,13 +9675,14 @@ def rental_agreement_pdf(rental_id):
     details = [
         ("Full Name", rental["full_name"]),
         ("ID / Passport", rental["id_number"] or "Not provided"),
+        ("Gender", rental["gender"] or "Not provided"),
         ("Phone", rental["phone"]),
         ("Address", rental["address"] or "Not provided"),
     ]
     for label, value in details:
         pdf.drawString(x + 5*mm, y, f"{label}: {value}")
         y -= 6*mm
-    
+        
     y -= 4*mm
     
     # Bicycle Details
@@ -8153,6 +9700,9 @@ def rental_agreement_pdf(rental_id):
     
     y -= 8*mm
     
+
+
+    
     # Rental Details
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(x, y, "RENTAL DETAILS")
@@ -8169,7 +9719,7 @@ def rental_agreement_pdf(rental_id):
     elif rental['end_time']:
         pdf.drawString(x + 5*mm, y, f"End Time: {to_namibia_time(rental['end_time'])}")
         y -= 6*mm
-        pdf.drawString(x + 5*mm, y, f"Total Hours: {rental['total_hours']:.1f}")
+        pdf.drawString(x + 5*mm, y, f"Total Minutes: {int(rental['total_hours'] or 0)}")
         y -= 6*mm
         pdf.drawString(x + 5*mm, y, f"Total Cost: N$ {rental['total_cost']:.2f}")
     else:
@@ -8221,7 +9771,7 @@ def rental_agreement_pdf(rental_id):
 
 @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
 @login_required
-@manager_required
+@staff_required
 def edit_customer(customer_id):
     """Edit customer details."""
     from datetime import datetime
@@ -8261,20 +9811,42 @@ def edit_customer(customer_id):
         email = request.form.get("email", "").strip()
         address = request.form.get("address", "").strip()
         verification_status = request.form.get("verification_status", "Pending")
-        
+
+
+
+        # ✅ Validate the formats
+        is_valid, error_msg = validate_namibian_identity(phone, id_number)
+        if not is_valid:
+            flash(error_msg, "danger")
+            conn.close()
+            return redirect(url_for("edit_customer", customer_id=customer_id))
+
+
+
         if not full_name or not phone:
             flash("Name and phone are required.", "danger")
             return redirect(url_for("edit_customer", customer_id=customer_id))
         
         id_photo = request.files.get("id_photo") if request.files else None
         customer_photo = request.files.get("customer_photo") if request.files else None
-        
+
+
+        # Get gender from form
+        gender = request.form.get("gender", "").strip()
+
         execute_query(c, """
             UPDATE customers 
             SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
-                verification_status = ?
+                verification_status = ?, gender = ?
             WHERE id = ?
-        """, (full_name, id_number, phone, email, address, verification_status, customer_id))
+        """, (full_name, id_number, phone, email, address, verification_status, gender, customer_id))
+
+        # execute_query(c, """
+        #     UPDATE customers 
+        #     SET full_name = ?, id_number = ?, phone = ?, email = ?, address = ?,
+        #         verification_status = ?
+        #     WHERE id = ?
+        # """, (full_name, id_number, phone, email, address, verification_status, customer_id))
         
         # Handle document uploads with fallback
         from werkzeug.utils import secure_filename
@@ -8649,7 +10221,7 @@ def bicycle_health_dashboard():
 
 @app.route("/bicycle-health/<int:bicycle_id>")
 @login_required
-@manager_required
+@staff_required
 def bicycle_health_detail(bicycle_id):
     """View detailed health information for a specific bicycle."""
     conn = db()
@@ -9911,7 +11483,7 @@ def analytics_dashboard():
 
 @app.route("/bicycles/<int:bicycle_id>/edit", methods=["GET", "POST"])
 @login_required
-@manager_required
+@staff_required
 def edit_bicycle(bicycle_id):
     """Edit a bicycle's details."""
     conn = db()
@@ -11052,7 +12624,6 @@ def export_revenue_csv():
 
 
 
-
 @app.route("/receipt/<int:payment_id>")
 @login_required
 def generate_receipt(payment_id):
@@ -11065,9 +12636,10 @@ def generate_receipt(payment_id):
     from datetime import datetime, timedelta
     
     conn = db()
+
+
     c = conn.cursor()
     
-    # Get payment details with customer and rental info (incl. deposit)
     payment = execute_query(c, """
         SELECT 
             p.*,
@@ -11082,86 +12654,74 @@ def generate_receipt(payment_id):
             c.phone,
             c.email,
             c.id_number,
+            c.gender,          
             b.bike_code,
             b.brand,
-            b.model
+            b.model,
+            (r.total_cost - (COALESCE((SELECT SUM(amount) FROM rental_payments WHERE daily_rental_id = r.id), 0) + COALESCE(r.deposit_paid, 0))) AS remaining_payment
         FROM rental_payments p
         JOIN daily_rentals r ON r.id = p.daily_rental_id
         JOIN customers c ON c.id = r.customer_id
         JOIN bicycles b ON b.id = r.bicycle_id
         WHERE p.id = ?
     """, (payment_id,)).fetchone()
-    
+
     conn.close()
     
+
     if not payment:
         flash("Payment not found.", "danger")
         return redirect(url_for("payment_history"))
     
-    # =============================================
-    # ✅ Use shared helper to convert UTC → Namibia time
-    # =============================================
     payment_date_str = to_namibia_time(payment.get("payment_date"))
     start_time_str = to_namibia_time(payment.get("start_time"))
     end_time_str = to_namibia_time(payment.get("end_time"))
     
-    # Create PDF
     buf = BytesIO()
     pdf = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
-    
     x = 25 * mm
     y = height - 25 * mm
     
-    # =============================================
     # HEADER
-    # =============================================
     pdf.setFont("Helvetica-Bold", 24)
     pdf.setFillColor(colors.HexColor("#0d1f46"))
     pdf.drawString(x, y, "RAB RENT A BIKE")
-    
     y -= 8 * mm
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(colors.HexColor("#667085"))
     pdf.drawString(x, y, "Daily Rental Receipt")
-    
     y -= 5 * mm
     pdf.setFont("Helvetica", 8)
     pdf.drawString(x, y, f"Receipt #{payment['id']:06d}")
     pdf.drawString(x + 120 * mm, y, f"Date: {payment_date_str}")
-    
     y -= 8 * mm
     pdf.line(x, y, width - x, y)
     y -= 10 * mm
     
-    # =============================================
     # CUSTOMER DETAILS
-    # =============================================
     pdf.setFont("Helvetica-Bold", 12)
     pdf.setFillColor(colors.HexColor("#0d1f46"))
     pdf.drawString(x, y, "Customer Details")
     y -= 7 * mm
-    
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(colors.HexColor("#111111"))
     pdf.drawString(x + 5 * mm, y, f"Name: {payment['full_name']}")
+    y -= 6 * mm
+    pdf.drawString(x + 5 * mm, y, f"Gender: {payment['gender'] or 'Not provided'}") 
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Phone: {payment['phone']}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Email: {payment['email'] or 'Not provided'}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"ID: {payment['id_number'] or 'Not provided'}")
+    y -= 6 * mm
     
-    y -= 8 * mm
-    
-    # =============================================
     # RENTAL DETAILS
-    # =============================================
     pdf.setFont("Helvetica-Bold", 12)
     pdf.setFillColor(colors.HexColor("#0d1f46"))
     pdf.drawString(x, y, "Rental Details")
     y -= 7 * mm
-    
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(colors.HexColor("#111111"))
     pdf.drawString(x + 5 * mm, y, f"Bicycle: {payment['bike_code']} - {payment['brand'] or ''} {payment['model'] or ''}")
@@ -11170,75 +12730,60 @@ def generate_receipt(payment_id):
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"End: {end_time_str if payment['end_time'] else 'Active'}")
     y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"Duration: {payment['total_hours']:.1f} hours")
+    pdf.drawString(x + 5 * mm, y, f"Duration: {int(payment['total_hours'] or 0)} minutes")
+    y -= 10 * mm
     
-    y -= 8 * mm
-    
-    # =============================================
-    # PAYMENT DETAILS (now with deposit breakdown)
-    # =============================================
+    # PAYMENT BREAKDOWN
     pdf.setFont("Helvetica-Bold", 12)
     pdf.setFillColor(colors.HexColor("#0d1f46"))
-    pdf.drawString(x, y, "Payment Details")
+    pdf.drawString(x, y, "Payment Breakdown")
     y -= 7 * mm
-    
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(colors.HexColor("#111111"))
     
-    # ✅ Deposit breakdown
+    # Show clearly what makes up the cost
     pdf.drawString(x + 5 * mm, y, f"Total Rental Cost: N$ {payment['total_cost']:.2f}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Deposit Applied: N$ {payment['deposit_paid']:.2f}")
     y -= 6 * mm
-    
-    # Show refund or extra payment if applicable
-    net_at_counter = round(payment['total_cost'] - payment['deposit_paid'], 2)
-    if net_at_counter > 0:
-        pdf.drawString(x + 5 * mm, y, f"Amount Due at Counter: N$ {net_at_counter:.2f}")
-        y -= 6 * mm
-    elif net_at_counter < 0:
-        pdf.drawString(x + 5 * mm, y, f"Refund to Customer: N$ {abs(net_at_counter):.2f}")
-        y -= 6 * mm
-    
-    pdf.drawString(x + 5 * mm, y, f"Amount Settled: N$ {payment['amount']:.2f}")
+    pdf.drawString(x + 5 * mm, y, f"Cash Handed Over: N$ {payment['amount']:.2f}")
     y -= 6 * mm
     pdf.drawString(x + 5 * mm, y, f"Payment Method: {payment['payment_method'] or 'Cash'}")
-    y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"Payment Date: {payment_date_str}")
-    y -= 6 * mm
-    pdf.drawString(x + 5 * mm, y, f"Status: {payment['status']}")
-    
     y -= 10 * mm
     
-    # =============================================
-    # SUMMARY BOX
-    # =============================================
+    # BALANCE STATUS
+    if payment['remaining_payment'] > 0:
+        pdf.setFillColor(colors.HexColor("#dc3545")) # Red
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(x + 5 * mm, y, f"REMAINING BALANCE DUE: N$ {payment['remaining_payment']:.2f}")
+        pdf.setFillColor(colors.HexColor("#111111"))
+    else:
+        pdf.setFillColor(colors.HexColor("#16834b")) # Green
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(x + 5 * mm, y, "Balance: Fully Paid")
+        pdf.setFillColor(colors.HexColor("#111111"))
+    
+    y -= 15 * mm
+    
+    # SUMMARY BOX (Show cash handed over)
     box_height = 25 * mm
     box_y = y - box_height
-    
     pdf.setFillColor(colors.HexColor("#ffe500"))
     pdf.rect(x, box_y, 150 * mm, box_height, fill=1, stroke=0)
-    
     pdf.setFillColor(colors.HexColor("#0d1f46"))
     pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL SETTLED")
+    pdf.drawString(x + 10 * mm, y - 10 * mm, "TOTAL CASH RECEIVED")
     pdf.setFont("Helvetica-Bold", 24)
     pdf.drawString(x + 90 * mm, y - 10 * mm, f"N$ {payment['amount']:.2f}")
-    
     y -= box_height + 15 * mm
     
-    # =============================================
-    # TERMS & CONDITIONS
-    # =============================================
+    # FOOTER
     pdf.setFont("Helvetica", 8)
     pdf.setFillColor(colors.HexColor("#667085"))
     pdf.drawString(x, y, "Thank you for choosing RAB Rent A Bike!")
     y -= 5 * mm
-    pdf.drawString(x, y, "This is a system-generated receipt. For any queries, please contact us.")
+    pdf.drawString(x, y, "This is a system-generated receipt. Please keep it for your records.")
     
-    # =============================================
-    # FOOTER
-    # =============================================
     pdf.setFont("Helvetica", 8)
     pdf.setFillColor(colors.HexColor("#999999"))
     pdf.drawString(x, 15 * mm, "RAB Rent A Bike - Daily Rental System")
@@ -11246,10 +12791,8 @@ def generate_receipt(payment_id):
     
     pdf.save()
     buf.seek(0)
-    
     filename = f"receipt_{payment['id']:06d}_{payment['bike_code']}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
-
 
 
 
@@ -11417,21 +12960,22 @@ def export_maintenance_csv():
 @customer_required
 def customer_portal():
     """Customer self-service portal."""
-    from datetime import datetime  # ✅ Add this import
+    from datetime import datetime
     
     conn = db()
     c = conn.cursor()
     
-    # Get customer data
+    # 1. Get customer data FIRST
     customer = execute_query(c, """
         SELECT * FROM customers WHERE user_id = ?
     """, (session["user_id"],)).fetchone()
     
     if not customer:
+        conn.close()
         flash("Customer profile not found. Please contact staff.", "warning")
         return redirect(url_for("profile"))
     
-    # Get rental history
+    # 2. Get rental history
     rentals = execute_query(c, """
         SELECT r.*, b.bike_code, b.brand, b.model
         FROM daily_rentals r
@@ -11441,7 +12985,7 @@ def customer_portal():
         LIMIT 10
     """, (customer["id"],)).fetchall()
 
-    # ✅ Privacy request status
+    # 3. Privacy request status
     privacy_request = execute_query(c, """
         SELECT * FROM privacy_requests
         WHERE customer_id = ?
@@ -11449,14 +12993,12 @@ def customer_portal():
         LIMIT 1
     """, (customer["id"],)).fetchone()
 
-    # Convert UTC → Namibia time for display
     if privacy_request:
         for k in ("requested_at", "reviewed_at", "completed_at"):
             if privacy_request.get(k):
                 privacy_request[k] = to_namibia_time(privacy_request[k])
  
-    
-    # ✅ FIX: Format datetime for each rental
+    # 4. Format dates for rentals
     for rental in rentals:
         if rental.get("start_time"):
             if isinstance(rental["start_time"], datetime):
@@ -11465,11 +13007,21 @@ def customer_portal():
             if isinstance(rental["end_time"], datetime):
                 rental["end_time"] = rental["end_time"].strftime("%Y-%m-%d %H:%M")
     
-    # Get loyalty points
+    # 5. Get loyalty points
     points = execute_query(c, """
         SELECT * FROM loyalty_points WHERE customer_id = ?
     """, (customer["id"],)).fetchone()
+    
+    # 6. Get unpaid damages
     damage_balance = get_customer_unpaid_damages(c, customer["id"])
+
+    # 7. Check for unsigned warnings
+    unsigned_warnings = get_single_value(c, """
+        SELECT COUNT(*) FROM warnings 
+        WHERE customer_id = ? AND status = 'Unsigned'
+    """, (customer["id"],))
+    
+    # 8. Close connection ONLY after everything is fetched
     conn.close()
     
     return render_template(
@@ -11479,7 +13031,8 @@ def customer_portal():
         rentals=rentals,
         points=points,
         damage_balance=damage_balance,
-        privacy_request=privacy_request
+        privacy_request=privacy_request,
+        unsigned_warnings=unsigned_warnings
     )
 
 
@@ -11595,63 +13148,49 @@ def end_rental(rental_id):
         start_time_utc = rental["start_time"]
     else:
         start_time_utc = datetime.fromisoformat(rental["start_time"])
-    # Ensure it's offset-naive so arithmetic works
+    
     if start_time_utc.tzinfo is not None:
         start_time_utc = start_time_utc.astimezone(timezone.utc).replace(tzinfo=None)
 
-    # ✅ Current UTC time (offset-naive for consistency with stored data)
     utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    # ✅ Current local time (Namibia — UTC+2) for display and late-fee
     namibia_tz = pytz.timezone('Africa/Windhoek')
     local_now = datetime.now(namibia_tz)
 
     if request.method == "POST":
         end_time_utc = utc_now
-        total_hours = (end_time_utc - start_time_utc).total_seconds() / 3600
-        total_hours = round(total_hours, 2)
-
+        
+        # ✅ CALCULATE MINUTES INSTEAD OF HOURS
+        total_minutes = int((end_time_utc - start_time_utc).total_seconds() / 60)
+        if total_minutes < 1:
+            total_minutes = 1
+            
         hourly_rate = rental["hourly_rate"]
-        daily_cap = rental["daily_cap"]
+        rate_per_minute = hourly_rate / 60.0
         deposit_paid = float(rental["deposit_paid"] or 0)
 
-
-        # --- NEW TIME-OF-DAY PRICING LOGIC ---
-        # 1. Calculate base cost for all hours
-        base_cost = total_hours * hourly_rate
+        # 1. Calculate base cost
+        base_cost = total_minutes * rate_per_minute
         
-        # 2. Calculate how many hours occurred at night (18:00 to 06:00)
+        # 2. Calculate night hours (using the loop)
         night_hours = 0
         current_check = start_time_utc
-        
-        # We loop through the rental hour by hour to find night hours
-        # (Note: Namibian time is UTC+2, so 18:00 local is 16:00 UTC, 06:00 local is 04:00 UTC)
         while current_check < end_time_utc:
-            # Convert current UTC hour to local Namibian hour
             local_hour = (current_check.hour + 2) % 24
-            
             if local_hour >= 18 or local_hour < 6:
                 night_hours += 1
-                
             current_check += timedelta(hours=1)
             
         # 3. Calculate penalty (N$10 for every night hour)
         late_fee = night_hours * 10
         total_cost = base_cost + late_fee
 
-
-
-        # Late fee (after 6pm local time)
-        late_fee = 0
-        if local_now.hour >= 18:
-            late_fee = 10 * (local_now.hour - 18)
-        total_cost += late_fee
-
-        # ✅ Change calculation (Option A)
+        # ✅ ROUND TO NEAREST WHOLE NUMBER
+        total_cost = float(round(total_cost))
+        
         damage_amount_val = float(request.form.get("damage_amount", 0) or 0)
-        change_due = round(deposit_paid - total_cost - damage_amount_val, 2)
+        change_due = float(round(deposit_paid - total_cost - damage_amount_val))
 
-        # Condition values
+        # ✅ Define condition variables BEFORE the UPDATE query
         condition_before = request.form.get("condition_before", "Good")
         condition_after = request.form.get("condition_after", "Good")
 
@@ -11660,13 +13199,14 @@ def end_rental(rental_id):
         if end_station_id:
             end_station_id = int(end_station_id)
 
+        # ✅ SINGLE UPDATE QUERY
         execute_query(c, """
             UPDATE daily_rentals
             SET end_time = ?, total_hours = ?, total_cost = ?, late_fee = ?,
                 condition_before = ?, condition_after = ?, status = 'Completed',
                 ended_by_user_id = ?, end_station_id = ?
             WHERE id = ?
-        """, (end_time_utc.isoformat(), total_hours, total_cost, late_fee,
+        """, (end_time_utc.isoformat(), total_minutes, total_cost, late_fee,
               condition_before, condition_after,
               session["user_id"], end_station_id,
               rental_id))
@@ -11687,7 +13227,7 @@ def end_rental(rental_id):
                 WHERE rental_id = ? AND item_id = ?
             """, (session["user_id"], cond, rental_id, item_id))
 
-        # ✅ Q6/Q12 — Create a damage claim if the returner reported one
+        # ✅ Create a damage claim if the returner reported one
         damage_description = (request.form.get("damage_description") or "").strip()
         if damage_amount_val > 0 or damage_description:
             execute_query(c, """
@@ -11728,18 +13268,16 @@ def end_rental(rental_id):
             action="rental_end",
             entity_type="daily_rental",
             entity_id=rental_id,
-            details=f"Ended rental #{rental_id} — {total_hours:.1f}h, N${total_cost:.2f}, "
+            details=f"Ended rental #{rental_id} — {total_minutes} mins, N${total_cost:.2f}, "
                     f"deposit=N${deposit_paid:.2f}, station_id={end_station_id}"
         )
 
         conn.commit()
         conn.close()
 
-        flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_hours:.1f} hours", "success")
+        flash(f"Rental completed! Total: N$ {total_cost:.2f} for {total_minutes} minutes", "success")
 
-        # ✅ Route based on the change
         if change_due == 0:
-            # Deposit exactly covers the cost → mark Paid and go home
             conn = db()
             c = conn.cursor()
             execute_query(c, "UPDATE daily_rentals SET payment_status = 'Paid' WHERE id = ?", (rental_id,))
@@ -11753,17 +13291,15 @@ def end_rental(rental_id):
     # =============================================
     # GET branch — preview calculation
     # =============================================
-    preview_hours = round((utc_now - start_time_utc).total_seconds() / 3600, 2)
+    preview_minutes = int((utc_now - start_time_utc).total_seconds() / 60)
+    if preview_minutes < 1: preview_minutes = 1
 
     hourly_rate = rental["hourly_rate"]
-    daily_cap = rental["daily_cap"]
+    rate_per_minute = hourly_rate / 60.0
     deposit_paid = float(rental["deposit_paid"] or 0)
 
-    # Cumulative Preview Calculation
-    # Cumulative Preview Calculation
-    preview_raw = preview_hours * hourly_rate
+    preview_raw = preview_minutes * rate_per_minute
     
-    # Calculate preview night hours
     preview_night_hours = 0
     p_check = start_time_utc
     while p_check < utc_now:
@@ -11773,9 +13309,8 @@ def end_rental(rental_id):
         p_check += timedelta(hours=1)
         
     preview_late = preview_night_hours * 10
-    preview_capped = preview_raw # We are no longer capping at a daily maximum
-    preview_total = preview_capped + preview_late
-    preview_change = round(deposit_paid - preview_total, 2)
+    preview_total = round(preview_raw + preview_late)
+    preview_change = round(deposit_paid - preview_total)
 
     # Format dates for display (convert UTC to local +2)
     start_time_local = start_time_utc + timedelta(hours=2)
@@ -11783,21 +13318,21 @@ def end_rental(rental_id):
     end_time_local = local_now
     end_time_str = end_time_local.strftime("%Y-%m-%d %H:%M")
 
-    # Stations for the return dropdown
     stations = execute_query(c, """
         SELECT id, name, location FROM branches
         WHERE is_active = 1
         ORDER BY name
     """).fetchall()
 
-    # Default return station = the one it started at
-    default_return_station_id = rental.get("start_station_id")
+    # ✅ Default return station is the EXPECTED drop-off station
+    default_return_station_id = rental.get("expected_end_station_id")
+    if not default_return_station_id:
+        default_return_station_id = rental.get("start_station_id")
     if not default_return_station_id:
         default_return_station_id = session.get("station_id")
     if not default_return_station_id and stations:
         default_return_station_id = stations[0]["id"]
 
-    # Items on this rental
     rental_items = execute_query(c, """
         SELECT ri.*, i.name AS item_name
         FROM rental_items ri
@@ -11815,11 +13350,9 @@ def end_rental(rental_id):
         start_time_str=start_time_str,
         end_time_str=end_time_str,
         rental_items=rental_items,
-        preview_hours=preview_hours,
+        preview_minutes=preview_minutes,
         hourly_rate=hourly_rate,
-        daily_cap=daily_cap,
         preview_raw=preview_raw,
-        preview_capped=preview_capped,
         preview_late=preview_late,
         preview_total=preview_total,
         deposit_paid=deposit_paid,
@@ -11828,7 +13361,30 @@ def end_rental(rental_id):
         default_return_station_id=default_return_station_id,
     )
 
-
+@app.route("/users/<int:user_id>/reset-2fa", methods=["POST"])
+@login_required
+@admin_required
+def reset_user_2fa(user_id):
+    """Admin action: Disable 2FA for a user so they can set it up again."""
+    conn = db()
+    c = conn.cursor()
+    
+    execute_query(c, "DELETE FROM user_2fa WHERE user_id = ?", (user_id,))
+    execute_query(c, "DELETE FROM user_2fa_backup_codes WHERE user_id = ?", (user_id,))
+    execute_query(c, "UPDATE users SET twofa_enabled = 0 WHERE id = ?", (user_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    log_audit(
+        action="2fa_admin_reset",
+        entity_type="user",
+        entity_id=user_id,
+        details=f"Admin reset 2FA for user #{user_id}"
+    )
+    
+    flash("User's 2FA has been reset. They must set it up again on their next login.", "success")
+    return redirect(url_for("users"))
 
 
 @app.route("/rentals/<int:rental_id>/cancel", methods=["POST"])

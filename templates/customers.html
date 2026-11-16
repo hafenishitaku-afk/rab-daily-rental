@@ -2,6 +2,7 @@
 
 {% block content %}
 
+
 <h1>Customers</h1>
 <p class="sub">Register customers and complete verification before renting.</p>
 
@@ -15,12 +16,18 @@
                 <input type="text" name="full_name" required>
             </label>
             <label>
-                Phone *
-                <input type="text" name="phone" required>
+                Phone * (10 digits)
+                <input type="text" name="phone" 
+                        pattern="[0-9]{10}" 
+                        title="Please enter exactly 10 digits (e.g. 0811234567)" 
+                        placeholder="0811234567"
+                        required>
             </label>
             <label>
                 ID / Passport Number
-                <input type="text" name="id_number">
+                <input type="text" name="id_number" 
+                        pattern="([0-9]{11})|([A-Za-z0-9]{8})" 
+                        title="Please enter an 11-digit ID number OR an 8-character Passport number">
             </label>
             <label>
                 Email
@@ -30,6 +37,18 @@
                 Address
                 <input type="text" name="address">
             </label>
+
+            <label>
+                Gender
+                <select name="gender">
+                    <option value="">Select...</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                </select>
+            </label>
+
+
             <label>
                 ID / Passport Copy
                 <input type="file" name="id_photo" accept="image/*,.pdf">
@@ -119,6 +138,7 @@
         <table>
             <tr>
                 <th>Name</th>
+                <th>Gender</th>
                 <th>Phone</th>
                 <th>ID</th>
                 <th>Email</th>
@@ -129,6 +149,7 @@
             {% for c in customers %}
             <tr>
                 <td><b>{{ c.full_name }}</b></td>
+                <td>{{ c.gender or '—' }}</td>
                 <td>{{ c.phone }}</td>
                 <td>{{ c.id_number or '—' }}</td>
                 <td>{{ c.email or '—' }}</td>
@@ -142,10 +163,8 @@
                 </td>
                 <td>
                     <div style="display:flex;gap:5px;flex-wrap:wrap;">
-                        {% if session.role == 'admin' or session.role == 'manager' %}
+                        {% if session.role in ['admin', 'manager', 'staff'] %}
                         <a class="btn small" href="{{ url_for('edit_customer', customer_id=c.id) }}">✏️ Edit</a>
-                        {% endif %}
-                        {% if session.role == 'admin' or session.role == 'manager' %}
                         <a class="btn small" href="{{ url_for('verify_customer_page', customer_id=c.id) }}">✅ Verify</a>
                         {% endif %}
 
@@ -160,16 +179,19 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn small" style="background:#dc3545;color:#fff;">🗑️ Delete</button>
                         </form>
-
-
+                        
                         {% endif %}
+
+                        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                            <!-- ✅ ADD THIS VIEW BUTTON -->
+                        <a class="btn small" href="{{ url_for('view_customer', customer_id=c.id) }}" style="background:#17a2b8;color:#fff;">👁️ View</a>                  
+
                     </div>
                 </td>
             </tr>
-
             {% else %}
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     {% if search %}
                         No customers match "<b>{{ search }}</b>".
                     {% else %}
@@ -178,10 +200,11 @@
                 </td>
             </tr>
             {% endfor %}
-
         </table>
     </div>
 </div>
+
+
 
 
 

@@ -2,8 +2,29 @@
 
 {% block content %}
 
+{% if unsigned_warnings and unsigned_warnings > 0 %}
+<div class="card" style="background:#fdeceb; border-left: 5px solid #dc3545; margin-bottom: 20px;">
+    <h3 style="color:#dc3545; margin:0;">⚠️ Action Required</h3>
+    <p style="color:#667085; margin-top:5px;">
+        You have <b>{{ unsigned_warnings }}</b> unsigned warning(s). You must review and sign them immediately.
+    </p>
+    <a href="{{ url_for('my_warnings') }}" class="btn small" style="background:#dc3545;color:#fff; margin-top:10px;">View & Sign Warnings</a>
+</div>
+{% endif %}
+
+<!-- ✅ BAN ALERT -->
+{% if customer.banned_until %}
+    <div class="card" style="background:#fdeceb; border-left: 5px solid #dc3545; margin-bottom: 20px;">
+        <h3 style="color:#dc3545; margin:0;">🚫 Account Banned</h3>
+        <p style="color:#667085; margin-top:5px;">
+            Your account is banned from renting until <b>{{ customer.banned_until }}</b> due to multiple serious warnings.
+        </p>
+    </div>
+{% endif %}
+
+
 <h1>👤 My Account</h1>
-<p class="sub">Hello 👋 once again! Welcome back 🤝, {{ customer.full_name }}❗</p>
+<p class="sub">Enjoy your RAB Account, {{ customer.full_name }}🤝</p>
 
 <!-- Profile Overview -->
 <div class="card">
@@ -16,6 +37,13 @@
             <div class="label">Phone</div>
             <div class="value" style="font-size:20px;">{{ customer.phone }}</div>
         </div>
+
+        <div class="metric">
+            <div class="label">Gender</div>
+            <div class="value" style="font-size:20px;">{{ customer.gender or 'Not set' }}</div>
+        </div>
+
+
         <div class="metric">
             <div class="label">Email</div>
             <div class="value" style="font-size:20px;">{{ customer.email or 'Not set' }}</div>

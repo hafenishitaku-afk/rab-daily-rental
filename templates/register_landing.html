@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            /* ✅ Background Image Setup - Zoomed In */
+            background-image: url("{{ url_for('static', filename='register_bg.png') }}");
+            background-size: 93%; /* Zooms the image in by 20% */
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            margin: 0;
+            font-family: system-ui, sans-serif;
+        }
+
+        /* ✅ Layout: Center the card perfectly */
+        .landing-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Center horizontally */
+            justify-content: center; /* Center vertically */
+            min-height: 100vh;
+            /* Keep a subtle dark gradient so the white card pops */
+            background: transparent;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* ✅ The Card: Glassmorphism style */
+        .landing-card {
+            background: transparent;
+            padding: 30px 40px;
+            border-radius: 16px;
+            box-shadow: transparent;
+            text-align: center;
+            max-width: 550px;
+            width: 100%;
+        
+            border: 0px solid #f0ec0b;
+        }
+
+        .landing-card h1 {
+            color: #0d1f46;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-size: 1.8rem;
+        }
+
+        .landing-card p.sub {
+            color: #667085;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .step-box {
+            text-align: left;
+            background: #f8f9fa;
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border-left: 4px solid #ffe500;
+        }
+        .step-box h4 { margin: 0 0 3px 0; color: #0d1f46; font-size: 14px; }
+        .step-box p { margin: 0; color: #667085; font-size: 12px; }
+
+        .btn-main {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: bold;
+            margin-top: 12px;
+            text-decoration: none;
+            box-sizing: border-box;
+            border-radius: 8px;
+            transition: transform 0.2s;
+        }
+
+        .btn-main:hover {
+            transform: scale(1.02);
+        }
+
+        /* Responsive for mobile screens */
+        @media (max-width: 768px) {
+            .landing-container {
+                padding: 20px;
+                background: rgba(13, 31, 70, 0.85); /* Darker on mobile for readability */
+            }
+            body {
+                background-size: cover; /* Revert zoom on mobile to save space */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="landing-container">
+        <div class="landing-card">
+            
+            <img src="{{ url_for('static', filename='Mylogo.png') }}" 
+                 alt="RAB Rent A Bike" 
+                 style="height:100px; width:auto; margin-bottom:5px;"> 
+            
+            <h1>Join RAB Today!</h1>                
+            <p class="sub">
+                Get access to affordable, reliable bicycles for your daily commute or gig work.
+            </p>
+
+            <div class="step-box">
+                <h4>1. Fill in your details</h4>
+                <p>Provide your name, phone number, and upload a photo of your ID.</p>
+            </div>
+            <div class="step-box">
+                <h4>2. Submit Application</h4>
+                <p>Send your application for review by our RAB staff.</p>
+            </div>
+            <div class="step-box">
+                <h4>3. Get Verified</h4>
+                <p>Once approved, you will receive your login details to start renting.</p>
+            </div>
+
+            <a href="{{ url_for('public_register') }}" class="btn-main" style="background:#ffe500; color:#111;">
+                🚀 Start Registration Now
+            </a>
+
+            <a href="{{ url_for('how_to_register') }}" class="btn-main" style="background:#0d1f46; color:#fff;">
+                ❓ How to Register (What you need)
+            </a>
+
+            <a href="{{ url_for('check_status') }}" class="btn-main" style="background:#17a2b8; color:#fff;">
+                🔍 Check Application Status
+            </a>
+        </div>
+    </div>
+</body>
+</html>

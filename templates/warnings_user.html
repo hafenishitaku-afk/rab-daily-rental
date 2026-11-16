@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>⚠️ My Warnings</h1>
+<p class="sub">You must acknowledge warnings issued to you.</p>
+
+{% if warnings %}
+    {% for w in warnings %}
+    <div class="card" style="border-left: 5px solid {% if w.status == 'Signed' %}#16834b{% else %}#dc3545{% endif %};">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+                <h3 style="margin:0; color: {% if w.status == 'Signed' %}#16834b{% else %}#dc3545{% endif %};">
+                    {% if w.status == 'Signed' %}✅ Acknowledged{% else %}🚨 Action Required{% endif %}
+                </h3>
+                <small style="color:#667085;">Issued on: {{ w.created_at|local_time }}</small>
+            </div>
+            {% if w.status == 'Signed' %}
+            <span class="badge green">Signed on {{ w.signed_at|local_time }}</span>
+            {% endif %}
+        </div>
+        
+        <p style="margin-top:15px; font-size:16px;"><b>Reason:</b> {{ w.reason }}</p>
+
+        {% if w.status == 'Unsigned' %}
+        <form method="post" action="{{ url_for('sign_warning', warning_id=w.id) }}" style="margin-top:15px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn yellow" type="submit" onclick="return confirm('By signing, you acknowledge this warning. Proceed?');">
+                ✍️ Sign & Acknowledge
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+<div class="card" style="text-align:center; padding:40px;">
+    <h3 style="color:#16834b;">🎉 You have no warnings!</h3>
+    <p style="color:#667085;">Keep up the good work.</p>
+</div>
+{% endif %}
+{% endblock %}

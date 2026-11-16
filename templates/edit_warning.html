@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 600px; margin: 0 auto;">
+    <h1>✏️ Edit Warning</h1>
+    <p class="sub">Editing warning for <b>{{ warning.user_name }}</b></p>
+
+    <div class="card">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+                Reason for Warning
+                <textarea name="reason" rows="5" required>{{ warning.reason }}</textarea>
+            </label>
+            
+            <div style="margin-top:20px; display:flex; gap:10px;">
+                <button class="btn yellow" type="submit">💾 Save Changes</button>
+                <a href="{{ url_for('warnings') }}" class="btn">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>📋 Audit Log</h1>
+<p class="sub">
+    Also see: 
+    <a href="{{ url_for('privacy_requests_dashboard') }}" style="color:#0d1f46;">🔒 Privacy Requests</a>
+</p>
+<p class="sub">All significant actions across the system.</p>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filter</h2>
+    <form method="get" action="{{ url_for('audit_log_page') }}" 
+          style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+        <label style="flex:1;min-width:150px;">
+            Date from
+            <input type="date" name="date_from" value="{{ date_from or '' }}">
+        </label>
+        <label style="flex:1;min-width:150px;">
+            Date to
+            <input type="date" name="date_to" value="{{ date_to or '' }}">
+        </label>
+        <label style="flex:1;min-width:160px;">
+            User
+            <input type="text" name="user_filter" value="{{ user_filter or '' }}" placeholder="username or role">
+        </label>
+        <label style="flex:1;min-width:180px;">
+            Action
+            <select name="action_filter">
+                <option value="">All actions</option>
+                {% for a in action_list %}
+                <option value="{{ a }}" {% if action_filter == a %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label style="flex:1;min-width:160px;">
+            Entity
+            <select name="entity_filter">
+                <option value="">All entities</option>
+                {% for e in entity_list %}
+                <option value="{{ e }}" {% if entity_filter == e %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn yellow">🔍 Filter</button>
+            <a href="{{ url_for('audit_log_page') }}" class="btn">Clear</a>
+        </div>
+
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e4e7ec;display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="btn small" 
+                href="{{ url_for('audit_log_export_csv', date_from=date_from, date_to=date_to, user_filter=user_filter, action_filter=action_filter, entity_filter=entity_filter) }}">
+                📥 Export CSV (current filter)
+            </a>
+            <a class="btn small" href="{{ url_for('audit_log_export_csv') }}">
+                📥 Export CSV (all time)
+            </a>
+            <a class="btn small" 
+                href="{{ url_for('audit_log_export_pdf', date_from=date_from, date_to=date_to, user_filter=user_filter, action_filter=action_filter, entity_filter=entity_filter) }}">
+                📄 Export PDF (current filter)
+            </a>
+            <a class="btn small" href="{{ url_for('audit_log_export_pdf') }}">
+                📄 Export PDF (all time)
+            </a>
+        </div>        
+
+    </form>
+    
+</div>
+
+
+<!-- Retention card -->
+<div class="card" style="background:#f8f9fa;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div>
+            <b>🗑️ Retention Policy</b>
+            <p style="color:#667085;font-size:12px;margin:4px 0 0 0;">
+                Login history: 90 days · Audit log: 180 days · Document views: 90 days
+            </p>
+        </div>
+        <form method="post" action="{{ url_for('admin_run_cleanup') }}"
+              onsubmit="return confirm('Purge all logs older than the retention window? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn small" style="background:#dc3545;color:#fff;">🧹 Run Cleanup Now</button>
+        </form>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="card">
+    <h2>Entries</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date / Time</th>
+                <th>User</th>
+                <th>Role</th>
+                <th>Action</th>
+                <th>Entity</th>
+                <th>Details</th>
+                <th>IP</th>
+            </tr>
+            {% if entries %}
+                {% for e in entries %}
+                <tr>
+                    <td>{{ e.created_at_display }}</td>
+                    <td><b>{{ e.username or '—' }}</b></td>
+                    <td>
+                        <span class="badge 
+                            {% if e.user_role == 'admin' %}green
+                            {% elif e.user_role == 'manager' %}blue
+                            {% else %}orange{% endif %}">
+                            {{ e.user_role or '—' }}
+                        </span>
+                    </td>
+                    <td><code style="font-size:12px;">{{ e.action }}</code></td>
+                    <td>
+                        {% if e.entity_type %}
+                            {{ e.entity_type }}{% if e.entity_id %}#{{ e.entity_id }}{% endif %}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>{{ e.details or '—' }}</td>
+                    <td><code>{{ e.ip_display }}</code></td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7" style="text-align:center;color:#667085;padding:20px;">
+                        No audit entries match your filters.
+                    </td>
+                </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div style="margin-top:15px;display:flex;gap:8px;justify-content:center;align-items:center;">
+        {% if page > 1 %}
+            <a href="{{ url_for('audit_log_page', page=page-1, date_from=date_from, date_to=date_to, user_filter=user_filter, action_filter=action_filter, entity_filter=entity_filter) }}" class="btn small">← Prev</a>
+        {% endif %}
+        <span style="color:#667085;">Page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a href="{{ url_for('audit_log_page', page=page+1, date_from=date_from, date_to=date_to, user_filter=user_filter, action_filter=action_filter, entity_filter=entity_filter) }}" class="btn small">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
+    <a href="{{ url_for('audit_log_page') }}" class="btn yellow">⟳ Refresh</a>
+</div>
+
+{% endblock %}

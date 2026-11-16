@@ -70,6 +70,9 @@
             <tr>
                 <th>Customer</th>
                 <th>Bike</th>
+                <th>Pickup Station</th>
+                <th>Deposit</th>
+                <th>Expected Drop-off</th>
                 <th>Start Time</th>
                 <th>Duration</th>
                 <th>Action</th>
@@ -79,14 +82,23 @@
                 <tr>
                     <td><b>{{ rental.full_name }}</b></td>
                     <td>{{ rental.bike_code }}</td>
-                    <!-- ✅ FIXED: Use rental.start_time -->
+                    <td>
+                        {% if rental.pickup_station %}
+                            <span class="badge blue">{{ rental.pickup_station }}</span>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
+                    <td><b>N$ {{ "%.2f"|format(rental.deposit_paid or 0) }}</b></td>
+                    <td>
+                        {% if rental.dropoff_station %}
+                            <span class="badge orange">{{ rental.dropoff_station }}</span>
+                        {% else %}
+                            <span style="color:#667085;">—</span>
+                        {% endif %}
+                    </td>
                     <td>{{ rental.start_time }}</td>
                     <td>{{ rental.duration }}</td>
-                    <!-- <td>
-                        <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
-                        <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">📄 Agreement</a>
-                    </td> -->
-
                     <td>
                         <a class="btn small" href="{{ url_for('end_rental', rental_id=rental.id) }}">End Rental</a>
                         <a class="btn small" href="{{ url_for('rental_agreement_pdf', rental_id=rental.id) }}">📄 Agreement</a>
@@ -97,13 +109,11 @@
                         </button>
                         {% endif %}
                     </td>
-
-
                 </tr>
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="5">No active rentals.</td>
+                    <td colspan="7">No active rentals.</td>
                 </tr>
             {% endif %}
         </table>
@@ -116,6 +126,7 @@
         <a class="btn yellow" href="{{ url_for('start_rental') }}">+ Start Rental</a>
         <a class="btn" href="{{ url_for('customers') }}">+ Customer</a>
         <a class="btn" href="{{ url_for('bicycles') }}">+ Bicycle</a>
+        <a class="btn" href="{{ url_for('suggestions') }}">💡 Suggestion Box</a>
     </div>
 </div>
 
@@ -193,6 +204,28 @@ document.getElementById('cancelModal').addEventListener('click', function(e) {
 });
 </script>
 
-
+<div class="card">
+    <h2>📍 Station Performance (All Time)</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Station</th>
+                <th>Starts 🟢</th>
+                <th>Ends 🔴</th>
+                <th>Net Flow</th>
+            </tr>
+            {% for s in station_performance %}
+            <tr>
+                <td><b>{{ s.station_name }}</b></td>
+                <td>{{ s.starts or 0 }}</td>
+                <td>{{ s.ends or 0 }}</td>
+                <td style="color: {% if s.starts > s.ends %}#dc3545{% elif s.ends > s.starts %}#16834b{% else %}#667085{% endif %};">
+                    {{ (s.starts or 0) - (s.ends or 0) }}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
 
 {% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🏆 Award System</h1>
+<p class="sub">Recognize outstanding performance and loyalty.</p>
+
+<div class="card">
+    <h2>Issue an Award</h2>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="formgrid">
+            <label>
+                Award Target
+                <select name="target_type" required>
+                    <option value="">Select target...</option>
+                    <option value="staff">Staff / Manager</option>
+                    <option value="customer">Customer</option>
+                </select>
+            </label>
+
+            <label>
+                Select Person
+                <select name="target_id" required>
+                    <option value="">Select a person...</option>
+                    {% for u in users %}
+                    <option value="{{ u.id }}">👤 {{ u.full_name or u.username }} ({{ u.role }})</option>
+                    {% endfor %}
+                    {% for c in customers %}
+                    <option value="{{ c.id }}">🚲 {{ c.full_name }} (Customer)</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label style="grid-column: span 2;">
+                Award Title
+                <input type="text" name="award_title" required placeholder="e.g. Employee of the Month, Top Customer, Perfect Attendance">
+            </label>
+
+            <label style="grid-column: span 2;">
+                Reason for Award
+                <textarea name="reason" rows="3" required placeholder="Explain why they deserve this award..."></textarea>
+            </label>
+        </div>
+        <button class="btn yellow" type="submit" style="margin-top:15px;">🏆 Issue Award</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Issued Awards</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Recipient</th>
+                <th>Award Title</th>
+                <th>Issued By</th>
+                <th>Certificate</th>
+            </tr>
+            {% for a in awards %}
+            <tr>
+                <td>{{ a.issued_at|local_time }}</td>
+                <td><b>{{ a.recipient_name }}</b> <br><small>({{ a.recipient_role }})</small></td>
+                <td><b style="color:#a66300;">{{ a.award_title }}</b></td>
+                <td>{{ a.issuer_name }}</td>
+                <td style="white-space: nowrap;">
+                    <!-- Download Button -->
+                    <a class="btn small yellow" href="{{ url_for('award_certificate_pdf', award_id=a.id) }}" target="_blank">📄 PDF</a>
+                    
+                    <!-- Delete Button -->
+                    <form method="post" action="{{ url_for('delete_award', award_id=a.id) }}" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this award?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn small" style="background:#dc3545;color:#fff;">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5">No awards issued yet.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endblock %}

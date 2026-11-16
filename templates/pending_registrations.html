@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>📝 Registrations</h1>
+<p class="sub">Review pending applications and view history.</p>
+
+{% if pending %}
+    {% for p in pending %}
+    <div class="card" style="margin-bottom: 20px; border-left: 5px solid 
+        {% if p.status == 'Pending' %}#ffd700
+        {% elif p.status == 'Approved' %}#16834b
+        {% else %}#dc3545{% endif %};">
+        
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:20px;">
+            
+            <!-- Left Side: Customer Details -->
+            <div style="flex: 1; min-width: 300px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <h2 style="margin: 0; color: #0d1f46;">{{ p.full_name }}</h2>
+                    <span class="badge 
+                        {% if p.status == 'Pending' %}orange
+                        {% elif p.status == 'Approved' %}green
+                        {% else %}red{% endif %}">
+                        {{ p.status }}
+                    </span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; color: #333;">
+                    <div><b>📞 Phone:</b> {{ p.phone }}</div>
+                    <div><b>🪪 ID / Passport:</b> {{ p.id_number or 'N/A' }}</div>
+                    <div><b>⚧ Gender:</b> {{ p.gender or 'N/A' }}</div>
+                    <div><b>📧 Email:</b> {{ p.email or 'N/A' }}</div>
+                    <div style="grid-column: span 2;"><b>🏠 Address:</b> {{ p.address or 'N/A' }}</div>
+                </div>
+
+                <!-- Documents -->
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    {% if p.id_photo_path %}
+                    <a href="{{ url_for('static', filename=p.id_photo_path) }}" target="_blank" class="btn small" style="background:#0d1f46; color:#fff;">🪪 View ID</a>
+                    {% endif %}
+                    {% if p.customer_photo_path %}
+                    <a href="{{ url_for('static', filename=p.customer_photo_path) }}" target="_blank" class="btn small" style="background:#0d1f46; color:#fff;">📸 View Photo</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Right Side: Actions (Only show if Pending) -->
+            {% if p.status == 'Pending' %}
+            <div style="display: flex; flex-direction: column; gap: 10px; min-width: 200px; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e4e7ec;">
+                
+                <form method="post" action="{{ url_for('approve_registration', reg_id=p.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn" style="width: 100%; background:#16834b; color:#fff; font-weight: bold;" onclick="return confirm('Approve this customer?');">
+                        ✅ Approve Application
+                    </button>
+                </form>
+
+                <div style="border-top: 1px solid #ddd; margin: 5px 0;"></div>
+
+                <form method="post" action="{{ url_for('reject_registration', reg_id=p.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label style="font-size: 12px; color: #667085; margin-bottom: 4px; display: block;">Rejection Reason *</label>
+                    <input type="text" name="reason" placeholder="Why reject?" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; margin-bottom: 8px; box-sizing: border-box;">
+                    <button class="btn" style="width: 100%; background:#dc3545; color:#fff; font-weight: bold;" onclick="return confirm('Reject this customer?');">
+                        ❌ Reject Application
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Reviewed By Info -->
+        {% if p.reviewer_name %}
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; font-size: 13px; color: #667085;">
+            <b>Reviewed by:</b> {{ p.reviewer_name }} on {{ p.reviewed_at|local_time }}
+            {% if p.rejection_reason %}
+            <br><b>Rejection Reason:</b> <span style="color:#dc3545;">{{ p.rejection_reason }}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+ 
+        
+        <!-- ✅ DELETE BUTTON (Admin Only) -->
+        {% if session.role == 'admin' %}
+        <div style="margin-top: 15px; text-align: right;">
+            <form method="post" action="{{ url_for('delete_registration', reg_id=p.id) }}" onsubmit="return confirm('Are you sure you want to permanently delete this registration record?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn small" style="background:#667085;color:#fff;">🗑️ Delete Record</button>
+            </form>
+        </div>
+        {% endif %}
+
+    </div>
+    {% endfor %}
+{% else %}
+<div class="card" style="text-align:center; padding:40px;">
+    <div style="font-size: 50px; margin-bottom: 10px;">📭</div>
+    <h3 style="color:#667085;">No registrations found.</h3>
+</div>
+{% endif %}
+{% endblock %}

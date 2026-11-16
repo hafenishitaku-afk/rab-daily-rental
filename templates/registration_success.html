@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="text-align:center; padding:50px; max-width:600px; margin: 0 auto;">
+    <div style="font-size:60px; margin-bottom:20px;">✅</div>
+    <h2>Registration Submitted!</h2>
+    <p style="color:#667085; font-size:16px; text-align:left; line-height:1.6;">
+        Thank you for registering with RAB. Your registration will be reviewed and verified by the RAB staff. 
+        <br><br>
+        They will update you that your application is successful. Keep checking the updates here by logging in using your cellphone number. Your account login details will be sent here also. 
+        <br><br>
+        <b>If your application succeeds, you will need to bring your physical ID or Passport on the day of your very first rental. After that, you will only need to know your ID or Passport number for verification.</b>
+    </p>
+    
+    <div style="margin-top:30px; padding-top:20px; border-top:1px solid #eee;">
+        <p style="color:#0d1f46; font-weight:bold;">Check your application status:</p>
+        <a href="{{ url_for('check_status') }}" class="btn yellow" style="display:inline-block; padding:12px 24px; margin-top:10px;">
+            🔍 Check Status
+        </a>
+    </div>
+</div>
+{% endblock %}

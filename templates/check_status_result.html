@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width: 600px; margin: 0 auto; text-align: center; padding: 40px;">
+    <div style="font-size: 60px; margin-bottom: 20px;">🎉</div>
+    <h1 style="color:#16834b;">Application Approved!</h1>
+    
+    <p style="font-size: 16px; color: #333;">Your account is registered successfully. Here are your login details:</p>
+    
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: left;">
+        <p><b>Username:</b> <code style="font-size: 18px; color: #0d1f46;">{{ reg.generated_username }}</code></p>
+        <p><b>Password:</b> <code style="font-size: 18px; color: #0d1f46;">{{ reg.generated_password }}</code></p>
+    </div>
+    
+    <div style="background: #fff8e1; border-left: 4px solid #ffd700; padding: 15px; text-align: left; font-size: 14px; margin-bottom: 20px;">
+        <b>Important Next Steps:</b><br>
+        1. Please log in and change your password to something you will remember.<br>
+        2. Once you are inside your account, you can explore the <b>"My Account"</b> settings to find more options and secure your profile.
+    </div>
+    
+    <a href="{{ url_for('home') }}" class="btn yellow" style="display: inline-block; margin-top: 10px; padding: 12px 24px;">
+        🚀 Go to Login
+    </a>
+</div>
+{% endblock %}

@@ -138,7 +138,11 @@
         {% else %}
             <a href="{{ url_for('dashboard') }}" class="btn">← Back to Dashboard</a>
         {% endif %}
-    {% else %}
+    {% endif %}
+</div>
+
+<div class="actions" style="margin-top:20px;">
+    {% if session.get('role') in ['admin', 'manager', 'staff'] %}
         <a href="{{ url_for('login', portal='staff') }}" class="btn">← Back to Login</a>
         <a href="{{ url_for('customer_login') }}" class="btn">Customer Login</a>
     {% endif %}

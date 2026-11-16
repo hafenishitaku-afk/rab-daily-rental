@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>⚠️ Warning System</h1>
+<p class="sub">Issue warnings to Staff, Managers, or Customers.</p>
+
+<div class="card">
+    <h2>Issue a Warning</h2>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        
+        <div class="formgrid">
+            <label>
+                Warning Target
+                <select name="target_type" required>
+                    <option value="">Select target...</option>
+                    <option value="staff">Staff / Manager</option>
+                    <option value="customer">Customer</option>
+                </select>
+            </label>
+
+            <label>
+                Select Person
+                <select name="target_id" required>
+                    <option value="">Select a person...</option>
+                    <!-- We pass both users and customers from the backend -->
+                    {% for u in users %}
+                    <option value="{{ u.id }}">👤 {{ u.full_name or u.username }} ({{ u.role }})</option>
+                    {% endfor %}
+                    {% for c in customers %}
+                    <option value="{{ c.id }}">🚲 {{ c.full_name }} (Customer)</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>
+                Warning Level
+                <select name="level" required>
+                    <option value="">Select level...</option>
+                    <option value="Minor">🟡 Minor</option>
+                    <option value="Moderate">🟠 Moderate</option>
+                    <option value="Serious">🔴 Serious</option>
+                    <option value="Final">⚫ Final (Immediate Action)</option>
+                </select>
+            </label>
+
+            <label style="grid-column: span 3;">
+                Reason for Warning
+                <textarea name="reason" rows="3" required placeholder="Explain why this warning is being issued..."></textarea>
+            </label>
+        </div>
+        
+        <button class="btn yellow" type="submit" style="margin-top:15px;">⚠️ Issue Warning</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>All Warnings</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Person</th>
+                <th>Level</th>
+                <th>Reason</th>
+                <th>Issued By</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            {% for w in warnings %}
+            <tr>
+                <td>{{ w.created_at|local_time }}</td>
+                <td>
+                    {% if w.user_name %}
+                        <b>{{ w.user_name }}</b> ({{ w.user_role }})
+                    {% elif w.customer_name %}
+                        <b>{{ w.customer_name }}</b> (Customer)
+                    {% else %}
+                        <span style="color:#667085;">Unknown</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge {% if w.level == 'Serious' or w.level == 'Final' %}red{% elif w.level == 'Moderate' %}orange{% else %}blue{% endif %}">
+                        {{ w.level }}
+                    </span>
+                </td>
+                <td>{{ w.reason }}</td>
+                <td>{{ w.issued_by_name }}</td>
+                <td>
+                    <span class="badge {% if w.status == 'Signed' %}green{% else %}red{% endif %}">
+                        {{ w.status }}
+                    </span>
+                </td>
+                <td>
+                    <a class="btn small" href="{{ url_for('edit_warning', warning_id=w.id) }}" style="background:#ffe500;color:#111;">✏️ Edit</a>
+                    
+                    <form method="post" action="{{ url_for('delete_warning', warning_id=w.id) }}" style="display:inline;" onsubmit="return confirm('Delete this warning?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn small" style="background:#dc3545;color:#fff;">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7">No warnings issued yet.</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+{% endblock %}

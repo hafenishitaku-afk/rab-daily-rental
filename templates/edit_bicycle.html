@@ -9,10 +9,13 @@
     <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Bike Code *
                 <input type="text" name="bike_code" value="{{ bicycle.bike_code }}" required>
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Bike Type
                 <select name="bike_type">
@@ -21,31 +24,43 @@
                     <option value="Mountain" {% if bicycle.bike_type == 'Mountain' %}selected{% endif %}>Mountain</option>
                 </select>
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Brand
                 <input type="text" name="brand" value="{{ bicycle.brand or '' }}">
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Model
                 <input type="text" name="model" value="{{ bicycle.model or '' }}">
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Hourly Rate (N$)
                 <input type="number" step="0.01" name="hourly_rate" value="{{ bicycle.hourly_rate }}">
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Daily Cap (N$)
                 <input type="number" step="0.01" name="daily_cap" value="{{ bicycle.daily_cap }}">
             </label>
+            {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Deposit (N$)
                 <input type="number" step="0.01" name="deposit_amount" value="{{ bicycle.deposit_amount }}">
             </label>
+             {% endif %}
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <label>
                 Notes
                 <input type="text" name="notes" value="{{ bicycle.notes or '' }}">
             </label>
-
+            {% endif %}
             <label style="grid-column: span 2;">
                 Permanent Condition Notes
                 <textarea name="condition_notes" rows="3" 

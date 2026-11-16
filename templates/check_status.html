@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 600px; margin: 0 auto; text-align: center; padding-top: 40px;">
+    <h1>🔍 Check Application Status</h1>
+    <p class="sub">Enter the phone number you used to register.</p>
+
+    <!-- ✅ REJECTION ALERT (Permanent) -->
+    {% if reg and reg.status == 'Rejected' %}
+    <div class="card" style="background:#fdeceb; border-left: 5px solid #dc3545; text-align: left; margin-bottom: 20px;">
+        <h3 style="color:#dc3545; margin:0; font-size: 20px;">❌ Application Rejected</h3>
+        <p style="color:#333; margin-top:10px; font-size: 16px;">
+            Unfortunately, your application was rejected. 
+        </p>
+        <div style="background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #f5c6cb; margin-top: 10px;">
+            <b>Reason:</b> <span style="color:#dc3545; font-size: 16px;">{{ reg.rejection_reason or 'No reason provided' }}</span>
+        </div>
+        <p style="color:#667085; margin-top:10px; font-size: 14px;">
+            Please visit our office for more information.
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- ✅ PENDING ALERT -->
+    {% if reg and reg.status == 'Pending' %}
+    <div class="card" style="background:#fff8e1; border-left: 5px solid #ffd700; text-align: left; margin-bottom: 20px;">
+        <h3 style="color:#a66300; margin:0;">⏳ Application Under Review</h3>
+        <p style="color:#333; margin-top:10px;">
+            Your application is still being reviewed by RAB staff. Please check back later.
+        </p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label style="text-align: left;">
+                Phone Number
+                <input type="text" name="phone" placeholder="e.g. 0811234567" required style="font-size: 18px; text-align: center;" value="{{ reg.phone if reg else '' }}">
+            </label>
+            <button class="btn yellow" type="submit" style="width: 100%; margin-top: 20px; font-size: 16px;">
+                🔍 Check My Status
+            </button>
+        </form>
+
+ <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #eee;">
+            <p style="color: #667085; font-size: 14px; margin-bottom: 10px;">Don't have an account yet?</p>
+            <a href="{{ url_for('public_register') }}" class="btn" style="display: block; width: 100%; padding: 12px; background: #16834b; color: #fff; text-decoration: none; font-weight: bold; border-radius: 8px; box-sizing: border-box;">
+                📝 Register Now
+            </a>
+        </div>
+    </div>
+    
+    <a href="{{ url_for('register_landing') }}" style="display:inline-block; margin-top:20px; color:#667085; text-decoration:none;">🔙Back</a>
+    </div>
+</div>
+{% endblock %}

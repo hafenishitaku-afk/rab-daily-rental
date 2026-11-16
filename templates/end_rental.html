@@ -42,17 +42,13 @@
     <div class="grid">
         <div class="metric" style="background:white;">
             <div class="label">Hours Used</div>
-            <div class="value" style="font-size:24px;">{{ "%.1f"|format(preview_hours) }}</div>
+            <div class="value" style="font-size:24px;">{{ preview_minutes }} mins</div>
         </div>
         <div class="metric" style="background:white;">
             <div class="label">Raw Cost</div>
             <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_raw) }}</div>
         </div>
-        <div class="metric" style="background:white;">
-            <!-- <div class="label">Daily Cap Applied</div> -->
-            <div class="label">Base Hours Cost</div>
-            <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_capped) }}</div>
-        </div>
+
         <div class="metric" style="background:white;">
             <div class="label">Late Fee</div>
             <div class="value" style="font-size:24px;">N$ {{ "%.2f"|format(preview_late) }}</div>

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>💡 Suggestion Box</h1>
+<p class="sub">We value your feedback. Submissions are anonymous.</p>
+
+<div class="card">
+    <h2>Submit a Suggestion</h2>
+    <form method="post" enctype="multipart/form-data" id="suggestionForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        
+        <label>
+            Type your suggestion (optional)
+            <textarea name="content" rows="4" placeholder="Tell us what we can improve..."></textarea>
+        </label>
+
+        <div style="margin-top:15px; padding:15px; background:#f8f9fa; border-radius:8px; border:1px solid #ddd;">
+            <b>🎙️ Or record a voice note:</b>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" id="recordBtn" class="btn small" style="background:#dc3545;color:#fff;">⏺️ Start Recording</button>
+                <button type="button" id="stopBtn" class="btn small" style="display:none;">⏹️ Stop</button>
+                <span id="status" style="align-self:center; font-size:14px; color:#667085;">Ready to record</span>
+            </div>
+            <audio id="preview" controls style="display:none; margin-top:10px; width:100%;"></audio>
+            <input type="file" name="audio_data" id="audioFile" style="display:none;">
+        </div>
+
+        <div style="margin-top:20px;">
+            <button class="btn yellow" type="submit">📨 Send Suggestion</button>
+        </div>
+    </form>
+</div>
+
+<!-- Admin/Manager View -->
+{% if session.role in ['admin', 'manager'] %}
+<div class="card">
+    <h2>📥 All Suggestions (Admin/Manager Only)</h2>
+    {% if suggestions %}
+        {% for s in suggestions %}
+        <div style="border-bottom:1px solid #e4e7ec; padding:15px 0;">
+            <div style="display:flex; justify-content:space-between;">
+                <span><b>{{ s.user_name }}</b> ({{ s.user_role }})</span>
+                <small style="color:#667085;">{{ s.created_at|local_time }}</small>
+            </div>
+            {% if s.content_type == 'text' %}
+                <p style="margin-top:10px;">{{ s.content }}</p>
+            {% else %}
+                <audio controls style="margin-top:10px; width:100%;">
+                    <source src="{{ url_for('static', filename=s.file_path) }}" type="audio/webm">
+                </audio>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color:#667085;">No suggestions yet.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+let mediaRecorder;
+let audioChunks = [];
+
+const recordBtn = document.getElementById('recordBtn');
+const stopBtn = document.getElementById('stopBtn');
+const status = document.getElementById('status');
+const preview = document.getElementById('preview');
+const audioFile = document.getElementById('audioFile');
+
+recordBtn.onclick = async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.start();
+        
+        recordBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        status.innerText = "Recording...";
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = event => {
+            audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            preview.src = audioUrl;
+            preview.style.display = 'block';
+            
+            // Create a File object and assign it to the hidden input
+            const file = new File([audioBlob], "suggestion.webm", { type: 'audio/webm' });
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            audioFile.files = dataTransfer.files;
+
+            status.innerText = "Recording saved!";
+            stopBtn.style.display = 'none';
+            recordBtn.style.display = 'inline-block';
+            recordBtn.innerText = "⏺️ Record Again";
+        };
+    } catch (err) {
+        alert("Microphone access denied. Please allow microphone access to record.");
+    }
+};
+
+stopBtn.onclick = () => {
+    mediaRecorder.stop();
+};
+</script>
+{% endblock %}

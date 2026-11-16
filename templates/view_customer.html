@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ✅ BAN ALERT -->
+{% if customer.banned_until %}
+    <div class="card" style="background:#fdeceb; border-left: 5px solid #dc3545; margin-bottom: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+            <div>
+                <h3 style="color:#dc3545; margin:0;">🚫 Account Banned</h3>
+                <p style="color:#667085; margin-top:5px;">
+                    This customer is banned from renting until <b>{{ customer.banned_until }}</b>.
+                </p>
+            </div>
+            
+            {% if session.role == 'admin' %}
+            <form method="post" action="{{ url_for('unban_customer', customer_id=customer.id) }}" onsubmit="return confirm('Are you sure you want to lift the ban for this customer?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn small" style="background:#16834b;color:#fff;">🔓 Lift Ban</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+{% endif %}
+
+<div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+    <div>
+        <h1>{{ customer.full_name }}</h1>
+        <p class="sub">{{ customer.phone }} · {{ customer.email or 'No email' }}</p>
+    </div>
+    <div style="display:flex; gap:10px;">
+        <a href="{{ url_for('edit_customer', customer_id=customer.id) }}" class="btn yellow">✏️ Edit Customer</a>
+        <a href="{{ url_for('customers') }}" class="btn">← Back to List</a>
+    </div>
+</div>
+
+<!-- Profile Details -->
+<div class="card">
+    <h2>👤 Personal Details</h2>
+    <div class="grid">
+        <div class="metric">
+            <div class="label">ID / Passport</div>
+            <div class="value" style="font-size:18px;">{{ customer.id_number or '—' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Gender</div>
+            <div class="value" style="font-size:18px;">{{ customer.gender or '—' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Address</div>
+            <div class="value" style="font-size:18px;">{{ customer.address or '—' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Verification Status</div>
+            <div class="value" style="font-size:18px;">
+                <span class="badge {% if customer.verification_status == 'Verified' %}green{% else %}orange{% endif %}">
+                    {{ customer.verification_status or 'Pending' }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Warnings -->
+<div class="card">
+    <h2>⚠️ Warnings</h2>
+    {% if warnings %}
+        <div class="scroll">
+            <table>
+                <tr>
+                    <th>Date</th>
+                    <th>Level</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                </tr>
+                {% for w in warnings %}
+                <tr>
+                    <td>{{ w.created_at }}</td>
+                    <td>
+                        <span class="badge {% if w.level == 'Serious' or w.level == 'Final' %}red{% elif w.level == 'Moderate' %}orange{% else %}blue{% endif %}">
+                            {{ w.level }}
+                        </span>
+                    </td>
+                    <td>{{ w.reason }}</td>
+                    <td>
+                        <span class="badge {% if w.status == 'Signed' %}green{% else %}red{% endif %}">
+                            {{ w.status }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    {% else %}
+        <p style="color:#16834b;">✅ No warnings on record. Customer is in good standing.</p>
+    {% endif %}
+</div>
+
+<!-- Rental History -->
+<div class="card">
+    <h2>🚲 Rental History</h2>
+    <div class="scroll">
+        <table>
+            <tr>
+                <th>Bicycle</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Mins</th>
+                <th>Cost</th>
+                <th>Status</th>
+            </tr>
+            {% for r in rentals %}
+            <tr>
+                <td><b>{{ r.bike_code }}</b> <br><small>{{ r.brand or '' }} {{ r.model or '' }}</small></td>
+                <td>{{ r.start_time }}</td>
+                <td>{{ r.end_time or '—' }}</td>
+                <td>{{ r.total_hours|int }}</td>
+                <td><b>N$ {{ "%.2f"|format(r.total_cost or 0) }}</b></td>
+                <td>
+                    <span class="badge {% if r.status == 'Active' %}blue{% elif r.status == 'Cancelled' %}red{% else %}green{% endif %}">
+                        {{ r.status }}
+                    </span>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No rentals yet.</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+{% endblock %}

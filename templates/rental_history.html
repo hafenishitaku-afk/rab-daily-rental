@@ -11,10 +11,12 @@
         <div class="label">Total Rentals</div>
         <div class="value">{{ total_rentals }}</div>
     </div>
+    {% if session.role == 'admin' or session.role == 'manager' %}
     <div class="metric">
         <div class="label">Total Revenue</div>
         <div class="value">N$ {{ "%.2f"|format(total_revenue) }}</div>
     </div>
+    {% endif %}
     <div class="metric">
         <div class="label">Paid</div>
         <div class="value" style="color:#16834b;">{{ paid_count }}</div>
@@ -72,8 +74,11 @@
                 <th>Bicycle</th>
                 <th>Start</th>
                 <th>End</th>
-                <th>Hours</th>
+                <th>Minutes</th>
+                {% if session.role == 'admin' or session.role == 'manager' %}
                 <th>Cost</th>
+                {% endif %}
+                <th>Remaining</th>
                 <th>Status</th>
                 <th>Payment</th>
                 <th>Action</th>
@@ -92,15 +97,23 @@
                         <br>
                         <small>{{ rental.brand or '' }} {{ rental.model or '' }}</small>
                     </td>
-                    <td>{{ start_time_str }}</td>
+                    <td>{{ rental.start_time_str if rental.start_time else '-' }}</td>
                     <td>{{ rental.end_time if rental.end_time else '—' }}</td>
-                    <td>{{ "%.1f"|format(rental.total_hours or 0) }}</td>
+                    <td>{{ rental.total_hours|int }}</td>
+                    {% if session.role == 'admin' or session.role == 'manager' %}
                     <td><b>N$ {{ "%.2f"|format(rental.total_cost or 0) }}</b></td>
-                    <td>
-                        <!-- <span class="badge {% if rental.rental_status == 'Active' %}blue{% else %}orange{% endif %}">
-                            {{ rental.rental_status }}
-                        </span> -->
+                    {% endif %}
 
+                    <td>
+                        {% if rental.remaining_payment > 0 %}
+                            <b style="color:#dc3545;">N$ {{ "%.2f"|format(rental.remaining_payment) }}</b>
+                        {% else %}
+                            <span style="color:#16834b;">Paid</span>
+                        {% endif %}
+                    </td>
+
+
+                    <td> 
                         <span class="badge
                             {% if rental.rental_status == 'Active' %}blue
                             {% elif rental.rental_status == 'Cancelled' %}red
@@ -139,7 +152,7 @@
                 {% endfor %}
             {% else %}
             <tr>
-                <td colspan="10">
+                <td colspan="11">
                     {% if search or status_filter or date_from or date_to %}
                         No rentals match your filters.
                     {% else %}

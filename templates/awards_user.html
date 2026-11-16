@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🏆 My Awards</h1>
+<p class="sub">Your achievements and recognitions.</p>
+
+{% if awards %}
+    <div class="grid">
+        {% for a in awards %}
+        <div class="card" style="border-top: 5px solid #ffd700; text-align: center;">
+            <div style="font-size: 50px; margin-bottom: 10px;">🏆</div>
+            <h3 style="color: #0d1f46; margin: 0;">{{ a.award_title }}</h3>
+            <p style="color: #667085; font-size: 13px;">Issued on: {{ a.issued_at|local_time }}</p>
+            <p style="margin: 15px 0; font-style: italic;">"{{ a.reason }}"</p>
+            <a href="{{ url_for('award_certificate_pdf', award_id=a.id) }}" class="btn yellow" style="display:inline-block;" target="_blank">
+                📄 View Certificate
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+<div class="card" style="text-align:center; padding:40px;">
+    <h3 style="color:#667085;">You haven't received any awards yet.</h3>
+    <p>Keep up the great work!</p>
+</div>
+{% endif %}
+{% endblock %}

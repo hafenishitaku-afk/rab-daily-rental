@@ -10,6 +10,16 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="formgrid">
             
+            <!-- <label>
+                Customer
+                <select name="customer_id" required>
+                    <option value="">Select Customer</option>
+                    {% for c in customers %}
+                        <option value="{{ c.id }}">{{ c.full_name }} – {{ c.phone }}</option>
+                    {% endfor %}
+                </select>
+            </label> -->
+            
             <label>
                 Customer
                 <select name="customer_id" required>
@@ -18,20 +28,11 @@
                         <option value="{{ c.id }}">{{ c.full_name }} – {{ c.phone }}</option>
                     {% endfor %}
                 </select>
+                <!-- ✅ ADD THIS -->
+                <small style="color:#dc3545; display:block; margin-top:4px; font-weight:bold;">
+                    🪪 For their FIRST rental, you must physically check their ID or Passport. After that, their ID number is enough.
+                </small>
             </label>
-            
-            <!-- <label>
-                Bicycle
-                <select name="bicycle_id" required>
-                    <option value="">Select Bicycle</option>
-                    {% for b in bicycles %}
-                        <option value="{{ b.id }}">
-                            {{ b.bike_code }} – {{ b.brand or '' }} {{ b.model or '' }}
-                            (N${{ "%.2f"|format(b.hourly_rate) }}/hr)
-                        </option>
-                    {% endfor %}
-                </select>
-            </label> -->
 
             <label>
                 Bicycle
@@ -66,6 +67,19 @@
                 </select>
             </label>            
 
+
+            <label>
+                Expected Drop-off Station
+                <select name="expected_end_station_id" required>
+                    <option value="">Where will they drop it?</option>
+                    {% for s in stations %}
+                    <option value="{{ s.id }}">{{ s.name }}{% if s.location %} — {{ s.location }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <small style="color:#667085;display:block;margin-top:4px;">
+                    📍 This helps staff know which station is expecting this bike back.
+                </small>
+            </label>
 
             <label>
                 Start Time

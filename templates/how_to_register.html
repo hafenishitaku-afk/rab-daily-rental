@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <h1>📝 How to Register</h1>
+    <p class="sub">Everything you need to prepare before starting your registration.</p>
+
+    <div class="card">
+        <h2>Requirements Checklist</h2>
+        <p>Please have the following ready before you fill in the registration form:</p>
+        <ul style="line-height: 2; font-size: 16px; color: #333;">
+            <li>✅ <b>Full Name</b> (as it appears on your ID)</li>
+            <li>✅ <b>ID / Passport Number</b></li>
+            <li>✅ <b>Address</b></li>
+            <li>✅ <b>Customer Photo</b> (A clear selfie or photo of your face)</li>
+            <li>✅ <b>Phone Number</b></li>
+            <li>✅ <b>Email Address</b> (Optional, but recommended)</li>
+            <li>✅ <b>ID / Passport Copy</b> (A photo of the <b>front side</b> where your picture is. You do not need the back side.)</li>
+        </ul>
+    </div>
+
+    <div class="card" style="background:#f8f9fa;">
+        <h3>📌 What Happens Next?</h3>
+        <ol style="line-height: 1.8; color: #667085;">
+            <li>Fill in the form and upload your pictures.</li>
+            <li>Read and tick the Terms & Conditions box.</li>
+            <li>Sign the digital signature pad.</li>
+            <li>Click <b>Submit</b>.</li>
+            <li>You will get a message telling you how to check your application status using your cellphone number.</li>
+            <li>Once approved, your login details will be sent to you.</li>
+            
+            <li><b>If your application succeeds, you must bring your physical ID or Passport with you on the day of your FIRST rental.</b></li>
+            <li><b>After your first rental is complete, you will only need to provide your ID or Passport number for future rentals.</b></li>
+
+        </ol>
+    </div>
+
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="{{ url_for('public_register') }}" class="btn yellow" style="font-size: 18px; padding: 15px 40px; text-decoration: none;">
+            📝 Start Registration Now
+        </a>
+    </div>
+</div>
+{% endblock %}

@@ -11,10 +11,12 @@
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;">
 
         <div style="flex:1;min-width:220px;">
+            {% if session.role == 'admin' or session.role == 'manager' %}
             <span style="color:#667085;">💰 Total Rental Cost (Gross Revenue)</span>
             <div style="font-size:32px;font-weight:800;color:#0d1f46;">
                 N$ {{ "%.2f"|format(total_rental_cost) }}
             </div>
+
             <div style="font-size:12px;color:#667085;">All rentals ever completed</div>
         </div>
 
@@ -25,7 +27,7 @@
             </div>
             <div style="font-size:12px;color:#667085;">Payments minus refunds</div>
         </div>
-
+        {% endif %}
         <div style="flex:1;min-width:180px;">
             <span style="color:#667085;">Total Transactions</span>
             <div style="font-size:32px;font-weight:800;color:#0d1f46;">
@@ -36,51 +38,72 @@
     </div>
 </div>
 
-
 <div class="card">
     <div class="scroll">
         <table>
-
             <tr>
                 <th>Date</th>
                 <th>Customer</th>
                 <th>Bicycle</th>
                 <th>Method</th>
-                <th>Total Settled</th>
-                <th>Total Rental Cost</th>
+                <th>Rental Cost</th>
+                <th>Deposit Applied</th>
+                <th>Cash Handed Over</th>
+                <th>Total Paid</th>
+                <th>Remaining</th>
                 <th>Status</th>
-                <th>Receipt</th>
+                <th>Action</th>
             </tr>
 
-
             {% for p in payments %}
-
             <tr>
                 <td>{{ p.payment_date }}</td>
                 <td><b>{{ p.full_name }}</b></td>
                 <td>{{ p.bike_code }}</td>
                 <td>{{ p.payment_method or 'Cash' }}</td>
+                
+                <!-- Rental Cost -->
+                <td><b>N$ {{ "%.2f"|format(p.rental_cost or 0) }}</b></td>
+                
+                <!-- Deposit -->
+                <td>N$ {{ "%.2f"|format(p.deposit_paid or 0) }}</td>
+                
+                <!-- Cash Handed Over -->
                 <td>
                     <b style="color:{% if p.amount < 0 %}#dc3545{% else %}#16834b{% endif %};">
                         N$ {{ "%.2f"|format(p.amount) }}
                     </b>
                 </td>
-                <td><b>N$ {{ "%.2f"|format(p.rental_cost or 0) }}</b></td>
+                
+                <!-- Total Paid (Cash + Deposit) -->
+                <!-- Total Paid (All Cash + Deposit) -->
+                <td><b>N$ {{ "%.2f"|format(p.rental_cost - p.remaining_payment) }}</b></td>
+                
+                <!-- Remaining Payment -->
+                <td>
+                    {% if p.remaining_payment > 0 %}
+                        <b style="color:#dc3545;">N$ {{ "%.2f"|format(p.remaining_payment) }}</b>
+                    {% else %}
+                        <span style="color:#16834b;">Paid</span>
+                    {% endif %}
+                </td>
+
                 <td>
                     <span class="badge {% if p.status == 'Refunded' %}orange{% else %}green{% endif %}">
                         {{ p.status }}
                     </span>
                 </td>
                 <td>
-                    <a class="btn small" href="{{ url_for('generate_receipt', payment_id=p.id) }}" target="_blank">
-                        📄 Receipt
-                    </a>
+                    <a class="btn small" href="{{ url_for('generate_receipt', payment_id=p.id) }}" target="_blank">📄 Receipt</a>
+                    
+                    {% if p.remaining_payment > 0 %}
+                    <a class="btn small yellow" href="{{ url_for('record_payment', rental_id=p.rental_id) }}">💰 Add Payment</a>
+                    {% endif %}
                 </td>
             </tr>
-
             {% else %}
             <tr>
-                <td colspan="8">No payments recorded yet.</td>
+                <td colspan="11">No payments recorded yet.</td>
             </tr>
             {% endfor %}
         </table>
