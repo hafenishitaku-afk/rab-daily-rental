@@ -42,3 +42,7 @@ check_2fa.py
 reset_2fa.py
 private_uploads/
 private_uploads/
+
+
+rab_backup.sql
+replacements.txt

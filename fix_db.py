@@ -5,8 +5,14 @@ from dotenv import load_dotenv
 # Load local .env file (if you have it)
 load_dotenv()
 
-# 👇 PASTE YOUR EXTERNAL DATABASE URL HERE (the one ending in /rental_db)
-DATABASE_URL = "postgresql://rabmaindb_ha8c_user:H4nm92XGJicAo787aplg5fhH9lUsQz87@dpg-dbne3m0u01pc73cgn5rg-a.virginia-postgres.render.com/rental_db"
+
+import os
+from dotenv import load_dotenv
+load_dotenv()
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+#DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def fix_db():
     print("Connecting to Render Database...")

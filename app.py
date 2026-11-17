@@ -3843,7 +3843,86 @@ def worker_edit(worker_id):
         viewer_role=viewer_role,
     )
 
+@app.route("/reports/station-payouts")
+@login_required
+@admin_required
+def station_payouts():
+    """Calculate weekly payouts for stations based on Starts and Ends."""
+    from datetime import datetime, timedelta
+    
+    conn = db()
+    c = conn.cursor()
 
+    # Get date range (default to current week if not specified)
+    date_from = request.args.get("date_from", (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'))
+    date_to = request.args.get("date_to", datetime.now().strftime('%Y-%m-%d'))
+
+    # 1. Get all completed rentals in the date range
+    rentals = execute_query(c, """
+        SELECT 
+            id, 
+            total_cost, 
+            start_station_id, 
+            end_station_id,
+            start_time
+        FROM daily_rentals
+        WHERE status = 'Completed'
+          AND date(end_time) >= ?
+          AND date(end_time) <= ?
+    """, (date_from, date_to)).fetchall()
+
+    # 2. Calculate totals
+    total_revenue = sum(float(r["total_cost"] or 0) for r in rentals)
+    rab_cut_percent = 0.40
+    worker_pool_percent = 0.60
+    
+    rab_earnings = total_revenue * rab_cut_percent
+    worker_pool = total_revenue * worker_pool_percent
+
+    # 3. Calculate per-station earnings
+    station_earnings = {}
+    
+    # Get all stations to initialize them at 0
+    stations = execute_query(c, "SELECT id, name FROM branches").fetchall()
+    for s in stations:
+        station_earnings[s["id"]] = {
+            "name": s["name"],
+            "starts": 0,
+            "ends": 0,
+            "earned": 0.0
+        }
+
+    for r in rentals:
+        cost = float(r["total_cost"] or 0)
+        
+        # The worker pool share for this specific rental
+        rental_worker_pool = cost * worker_pool_percent
+        half_share = rental_worker_pool / 2
+
+        # Credit the Start Station
+        if r["start_station_id"] and r["start_station_id"] in station_earnings:
+            station_earnings[r["start_station_id"]]["starts"] += 1
+            station_earnings[r["start_station_id"]]["earned"] += half_share
+
+        # Credit the End Station
+        if r["end_station_id"] and r["end_station_id"] in station_earnings:
+            station_earnings[r["end_station_id"]]["ends"] += 1
+            
+            # If it's the same station, they get the full share (handled by adding half twice)
+            station_earnings[r["end_station_id"]]["earned"] += half_share
+
+    conn.close()
+
+    return render_template(
+        "station_payouts.html",
+        title="Station Payouts",
+        station_earnings=station_earnings,
+        total_revenue=total_revenue,
+        rab_earnings=rab_earnings,
+        worker_pool=worker_pool,
+        date_from=date_from,
+        date_to=date_to
+    )
 
 @app.route("/awards", methods=["GET", "POST"])
 @login_required
